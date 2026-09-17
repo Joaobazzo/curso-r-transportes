@@ -1,0 +1,85 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "Análise de Dados com R Aplicada ao Planejamento de Transportes"
+  subtitle: "Ministério dos Transportes — Subsecretaria de Fomento e Planejamento"
+  author: "João Pedro Bazzo Vieira"
+  date: today
+  date-format: "DD/MM/YYYY"
+  language: pt
+  search: true
+  repo-url: https://github.com/Joaobazzo/curso-r-transportes
+  repo-actions: [issue, source]
+  repo-branch: main
+  sidebar:
+    style: docked
+    collapse-level: 1
+    tools:
+      - icon: github
+        href: https://github.com/Joaobazzo/curso-r-transportes
+  page-footer:
+    left: "Curso de R aplicado ao planejamento de transportes"
+    right: "Feito com [Quarto](https://quarto.org)"
+  chapters:
+    - index.qmd
+    - part: "Módulo 1 — Fundamentos de R e manipulação de dados"
+      chapters:
+        - m1-00-visao-geral.qmd
+        - m1-01-ambiente.qmd
+        - m1-02-linguagem.qmd
+        - m1-03-datas-strings.qmd
+        - m1-04-manipulacao.qmd
+        - m1-05-limpeza.qmd
+        - m1-06-joins.qmd
+        - m1-07-ggplot2.qmd
+        - m1-08-estudo-de-caso.qmd
+        - m1-09-exercicios.qmd
+    - part: "Módulo 2 — Objetos espaciais: vetores e rasters"
+      chapters:
+        - m2-00-visao-geral.qmd
+    - part: "Módulo 3 — Integração de bases, roteamento e matrizes OD"
+      chapters:
+        - m3-00-visao-geral.qmd
+    - part: "Módulo 4 — Geoestatística, sensoriamento remoto e acessibilidade"
+      chapters:
+        - m4-00-visao-geral.qmd
+    - part: "Módulo 5 — Mapas temáticos, relatórios reproduzíveis e projeto final"
+      chapters:
+        - m5-00-visao-geral.qmd
+  appendices:
+    - a-dados.qmd
+    - a-slides.qmd
+    - a-recursos.qmd
+
+format:
+  html:
+    theme:
+      light: [cosmo, styles.scss]
+    css: styles.css
+    toc: true
+    toc-title: "Nesta página"
+    toc-depth: 3
+    number-sections: true
+    code-copy: true
+    code-overflow: wrap
+    code-link: true
+    fig-align: center
+    fig-width: 8
+    fig-height: 5
+    fig-dpi: 150
+    df-print: paged
+    link-external-newwindow: true
+    lang: pt-BR
+
+execute:
+  freeze: auto
+  warning: false
+  message: false
+
+knitr:
+  opts_chunk:
+    comment: "#>"
+    collapse: true
+    dev: "png"

@@ -1,0 +1,34 @@
+# Módulo 4 — visão geral {#sec-m4}
+
+::: {.callout-note appearance="simple"}
+Capítulo em preparação. O conteúdo será publicado aqui na semana do módulo.
+:::
+
+::: {.modulo-meta}
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
+**Datas (Opção A):** aulas em 19/10 e 21/10; material assíncrono liberado em 22/10
+**Pacotes:** `r5r`, `flownet`, `accessibility`, `aopdata`, `terra`, `gstat`, `spdep`
+:::
+
+## Geoestatística, sensoriamento remoto e acessibilidade
+
+### Aula síncrona
+
+- Introdução ao pacote `flownet` para redes de fluxo.
+- Geoestatística aplicada: interpolação (IDW, krigagem) e autocorrelação espacial
+  (I de Moran, LISA).
+- Roteamento OD com `r5r`: matrizes de tempo de viagem multimodais.
+- Análise de redes e **isócronas** com `r5r`.
+
+### Conteúdo assíncrono
+
+- Introdução ao pacote `accessibility`: medidas cumulativas, gravitacionais e de tempo
+  mínimo.
+- Dados do Projeto Acesso a Oportunidades com `aopdata`.
+
+### Estudo de caso
+
+Cruzamento de **declividade (raster)** com **traçados propostos (vetor)**: extrair o perfil
+altimétrico de um modelo digital de elevação ao longo de alternativas de traçado, calcular
+declividade média e máxima por trecho, e comparar as alternativas em uma tabela e um gráfico
+de perfil.

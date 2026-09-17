@@ -1,0 +1,36 @@
+# Módulo 3 — visão geral {#sec-m3}
+
+::: {.callout-note appearance="simple"}
+Capítulo em preparação. O conteúdo será publicado aqui na semana do módulo.
+:::
+
+::: {.modulo-meta}
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
+**Datas (Opção A):** aulas em 13/10 e 14/10; material assíncrono liberado em 15/10
+**Pacotes:** `r5r`, `dodgr`, `duckdb`, `osmdata`, `osmextract`, `geocodebr`, `censobr`, `Matrix`
+:::
+
+## Integração de bases, roteamento e matrizes OD
+
+### Aula síncrona
+
+- Introdução ao roteamento com `r5r` e `dodgr`: rede, *snapping*, parâmetros de viagem.
+- Processamento com SQL via `duckdb` dentro do R.
+- Extração de dados do OpenStreetMap com `osmdata` e `osmextract`.
+- Geocodificação de endereços brasileiros com `geocodebr`.
+- Extração de dados censitários com `censobr` e `geobr`.
+- Matrizes esparsas com `Matrix`: por que não usar `matrix` densa em problemas com muitas
+  zonas.
+
+### Conteúdo assíncrono
+
+- Construção de mapas origem–destino.
+- Conversão de matrizes OD em fluxos espaciais (linhas de desejo) com `sf` e `ggplot2`.
+- Limpeza de dados de fluxo.
+
+### Estudos de caso
+
+1. Cálculo de indicadores de **TKU** a partir de matrizes OD e criação de grades espaciais —
+   continuação direta de @sec-m1-estudo-de-caso, agora com a geometria dos portos.
+2. Ler e processar uma base de roteamento com `duckdb` e comparar o tempo de processamento
+   com `data.table`, `dplyr` e R base.

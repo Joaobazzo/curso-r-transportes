@@ -1,0 +1,281 @@
+# Exercícios {#sec-m1-exercicios}
+
+Faça os exercícios **antes** de abrir as soluções. Todos usam a base de cabotagem preparada
+abaixo; alguns pedem que você volte ao arquivo bruto de propósito.
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(scales)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  mutate(across(where(is.character), str_squish)) |>
+  filter(tku > 0) |>
+  mutate(uf_origem  = str_to_upper(uf_origem),
+         uf_destino = str_to_upper(uf_destino),
+         tku_bi     = tku / 1e9)
+
+nrow(cabotagem)
+```
+
+## 1. Tipos e inspeção
+
+Descubra, sem olhar a resposta: quantas colunas de texto e quantas numéricas a base tem?
+Qual é a mercadoria (`sh2`) com o maior número de registros?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+table(sapply(cabotagem, class))
+
+cabotagem |> count(sh2, sort = TRUE) |> slice_head(n = 3)
+```
+:::
+
+## 2. Filtros combinados
+
+Quantas ligações têm destino na Região Nordeste **e** perfil "Carga Conteinerizada"? Qual o
+TKU total dessas ligações?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+nordeste <- c("AL","BA","CE","MA","PB","PE","PI","RN","SE")
+
+cabotagem |>
+  filter(uf_destino %in% nordeste, perfil == "Carga Conteinerizada") |>
+  summarise(ligacoes = n(), tku_bi = round(sum(tku_bi), 2))
+```
+:::
+
+## 3. Textos
+
+Crie uma coluna `capitulo_sh` com apenas o código do capítulo do SH (os caracteres antes do
+hífen em `sh2`) e conte quantos capítulos distintos existem. Em seguida, liste os cinco
+capítulos com maior TKU, com a descrição legível.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+cabotagem |>
+  mutate(
+    capitulo_sh = str_extract(sh2, "^[^-]+"),
+    descricao   = str_remove(sh2, "^[^-]+-") |> str_squish()
+  ) |>
+  summarise(tku_bi = sum(tku_bi), .by = c(capitulo_sh, descricao)) |>
+  arrange(desc(tku_bi)) |>
+  slice_head(n = 5) |>
+  mutate(descricao = str_trunc(descricao, 45), tku_bi = round(tku_bi, 1))
+```
+:::
+
+## 4. Datas
+
+O material assíncrono de cada módulo é liberado no dia seguinte ao segundo encontro. Dado o
+vetor de datas dos segundos encontros da Opção A, calcule a data de liberação de cada módulo
+e o dia da semana correspondente. Quantos dias há entre a primeira e a última liberação?
+
+```{r}
+segundos_encontros <- as.Date(c("2026-09-30", "2026-10-07", "2026-10-14",
+                                "2026-10-21", "2026-11-04"))
+```
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+library(lubridate)
+
+liberacao <- segundos_encontros + days(1)
+
+data.frame(
+  modulo = 1:5,
+  encontro = format(segundos_encontros, "%d/%m/%Y"),
+  liberacao = format(liberacao, "%d/%m/%Y"),
+  dia_semana = wday(liberacao, label = TRUE, abbr = TRUE)
+)
+
+as.numeric(max(liberacao) - min(liberacao))
+```
+:::
+
+## 5. Agrupamento e participação
+
+Para cada perfil de carga, qual é a UF de destino mais importante e que percentual do TKU do
+perfil ela representa?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+cabotagem |>
+  summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  mutate(part = tku_bi / sum(tku_bi), .by = perfil) |>
+  slice_max(tku_bi, n = 1, by = perfil) |>
+  transmute(perfil, uf_destino,
+            tku_bi = round(tku_bi, 1),
+            part = percent(part, accuracy = 0.1)) |>
+  arrange(desc(tku_bi))
+```
+:::
+
+## 6. *Long* → *wide*
+
+Monte uma tabela com uma linha por UF de destino e uma coluna por perfil de carga, contendo o
+TKU em bilhões, com uma coluna final de total, ordenada pelo total. Zeros onde não há fluxo.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+cabotagem |>
+  summarise(tku_bi = sum(tku_bi), .by = c(uf_destino, perfil)) |>
+  pivot_wider(names_from = perfil, values_from = tku_bi, values_fill = 0) |>
+  mutate(total = rowSums(across(where(is.numeric)))) |>
+  arrange(desc(total)) |>
+  mutate(across(where(is.numeric), \(x) round(x, 1))) |>
+  knitr::kable()
+```
+:::
+
+## 7. Um `join` com diagnóstico
+
+A tabela abaixo tem a população estimada de alguns municípios portuários. Cruze com o TKU
+atraído por município de destino e responda: quais municípios da base de cabotagem **não**
+estão na tabela de população? Qual é o TKU por habitante dos que casaram?
+
+```{r}
+populacao <- tibble(
+  municipio = c("Santos", "Paranaguá", "Itajaí", "São Luís", "Manaus",
+                "Rio de Janeiro", "Salvador", "Suape", "Angra dos Reis"),
+  pop = c(418375, 156174, 223112, 1037775, 2063547, 6211223, 2417678, NA, 182000)
+)
+```
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+por_municipio <- cabotagem |>
+  summarise(tku_bi = sum(tku_bi), .by = c(cidade_destino, uf_destino)) |>
+  arrange(desc(tku_bi))
+
+# diagnóstico: o que não casa (top 10 por TKU)
+por_municipio |>
+  anti_join(populacao, by = c("cidade_destino" = "municipio")) |>
+  slice_head(n = 10)
+
+# o cruzamento, com o cuidado de não perder linhas
+resultado <- por_municipio |>
+  left_join(populacao, by = c("cidade_destino" = "municipio"),
+            relationship = "many-to-one") |>
+  filter(!is.na(pop)) |>
+  mutate(tku_por_hab = tku_bi * 1e9 / pop) |>
+  arrange(desc(tku_por_hab))
+
+resultado |>
+  transmute(cidade_destino, uf_destino,
+            tku_bi = round(tku_bi, 1),
+            pop,
+            `t·km por habitante` = comma(round(tku_por_hab)))
+```
+
+Note que a maior parte dos municípios de destino **não** está na tabela de população: em um
+trabalho real, essa tabela viria do `censobr`/`sidrar` com o código IBGE como chave, e não de
+uma lista digitada — que é exatamente o assunto dos módulos 2 e 3.
+:::
+
+## 8. Gráfico completo
+
+Reproduza um gráfico de barras horizontais com as 12 maiores instalações portuárias de
+destino em TKU, com rótulos de valor, eixo formatado em padrão brasileiro, título, subtítulo
+e fonte.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+#| label: fig-ex-instalacoes
+#| fig-cap: "Doze maiores instalações de destino em TKU de cabotagem"
+#| fig-height: 5.5
+cabotagem |>
+  summarise(tku_bi = sum(tku_bi), .by = c(instalacao_destino, uf_destino)) |>
+  slice_max(tku_bi, n = 12) |>
+  mutate(rotulo = str_c(str_trunc(instalacao_destino, 28), " (", uf_destino, ")")) |>
+  ggplot(aes(x = tku_bi, y = reorder(rotulo, tku_bi))) +
+  geom_col(fill = "#1a5b8a") +
+  geom_text(aes(label = number(tku_bi, accuracy = 0.1, decimal.mark = ",")),
+            hjust = -0.15, size = 3) +
+  scale_x_continuous(
+    labels = label_number(decimal.mark = ",", big.mark = "."),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(
+    title = "Cabotagem: instalações de destino por TKU",
+    subtitle = "Bilhões de toneladas-quilómetro úteis, 2025",
+    x = "TKU (bi t·km)", y = NULL,
+    caption = "Fonte: ANTAQ, Estatístico Aquaviário (TB6.1)."
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+```
+:::
+
+## 9. Desafio: uma função reutilizável
+
+Escreva uma função `resumir_por(dados, coluna)` que receba a base e o **nome de uma coluna**
+e devolva o TKU total, o número de ligações e a participação percentual por categoria dessa
+coluna, ordenados. Teste com `perfil`, `uf_destino` e `sh2`.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+resumir_por <- function(dados, coluna) {
+  dados |>
+    summarise(
+      ligacoes = n(),
+      tku_bi   = sum(tku_bi),
+      .by = {{ coluna }}
+    ) |>
+    mutate(part = tku_bi / sum(tku_bi)) |>
+    arrange(desc(tku_bi)) |>
+    mutate(tku_bi = round(tku_bi, 2),
+           part   = percent(part, accuracy = 0.1))
+}
+
+resumir_por(cabotagem, perfil)
+resumir_por(cabotagem, uf_destino) |> slice_head(n = 5)
+```
+
+O `{{ coluna }}` (chamado *embrace*) é o mecanismo do `dplyr` para escrever funções que
+recebem nomes de colunas sem aspas. É o que permite transformar uma análise em ferramenta
+reutilizável — e será usado no módulo 5 para gerar um relatório por município a partir de um
+único modelo.
+:::
+
+## 10. Para entregar
+
+Escolha **uma** das perguntas abaixo, responda com um script comentado de até 40 linhas e
+traga o resultado (tabela ou gráfico) para o encontro seguinte:
+
+1. Quais UFs são simultaneamente grandes emissoras e grandes atratoras de TKU? O que isso
+   sugere sobre o papel dos seus portos?
+2. A distribuição do TKU por ligação é diferente entre perfis de carga? Mostre com um gráfico
+   e uma medida de concentração.
+3. Considerando apenas as ligações offshore, quais terminais em terra recebem o petróleo das
+   plataformas, e como esse TKU se distribui entre UFs?

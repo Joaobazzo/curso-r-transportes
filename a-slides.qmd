@@ -1,0 +1,38 @@
+# Slides e gravações {.unnumbered}
+
+## Slides
+
+Os slides de cada encontro são publicados aqui na véspera da aula e ficam disponíveis durante
+todo o curso.
+
+| Módulo | Encontro | Slides |
+|:--|:--|:--|
+| 1 | Aula 1 — Fundamentos de R | *a publicar* |
+| 1 | Aula 2 — Manipulação e limpeza | *a publicar* |
+| 2 | Aula 1 — Vetores com `sf` | — |
+| 2 | Aula 2 — Rasters com `terra` | — |
+| 3 | Aula 1 — Roteamento e OSM | — |
+| 3 | Aula 2 — Matrizes OD | — |
+| 4 | Aula 1 — Geoestatística e `r5r` | — |
+| 4 | Aula 2 — Acessibilidade | — |
+| 5 | Aula 1 — Mapas temáticos | — |
+| 5 | Aula 2 — Relatórios e projeto final | — |
+
+Os arquivos ficam na pasta `slides/` do
+[repositório](https://github.com/Joaobazzo/curso-r-transportes/tree/main/slides).
+
+## Gravações
+
+Os encontros síncronos são gravados e o material assíncrono de cada módulo é liberado às 14h
+do dia seguinte ao segundo encontro. Os *links* das gravações são disponibilizados pela
+Subsecretaria de Fomento e Planejamento aos participantes inscritos.
+
+## Como pedir ajuda
+
+1. **Issues do repositório** —
+   <https://github.com/Joaobazzo/curso-r-transportes/issues>. Preferível: a resposta fica
+   registrada e ajuda os demais participantes. Ao abrir, inclua o código que você rodou, a
+   mensagem de erro completa e a saída de `sessionInfo()`.
+2. **E-mail** — para questões específicas do seu trabalho que envolvam dados não públicos.
+3. **Nos encontros** — os primeiros 15 minutos de cada aula são reservados a dúvidas do
+   material anterior.

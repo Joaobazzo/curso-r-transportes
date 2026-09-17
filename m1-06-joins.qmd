@@ -1,0 +1,306 @@
+# Juntar bases: `join` e `merge` {#sec-m1-joins}
+
+Quase nenhuma análise usa uma única tabela. O trabalho real é cruzar: fluxos de carga com
+população, rodovias com PIB municipal, instalações portuárias com códigos do IBGE. Este
+capítulo é sobre fazer esse cruzamento e, principalmente, sobre **descobrir o que não casou**.
+
+```{r}
+library(dplyr)
+library(stringr)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+stopifnot(ncol(cabotagem) == length(colunas))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  mutate(across(where(is.character), str_squish)) |>
+  filter(tku > 0) |>
+  mutate(uf_origem  = str_to_upper(uf_origem),
+         uf_destino = str_to_upper(uf_destino),
+         tku_bi     = tku / 1e9)
+
+nrow(cabotagem)
+```
+
+## Os tipos de junção
+
+Usaremos duas tabelas pequenas para ver o comportamento de cada `join` sem ruído.
+
+```{r}
+fluxos <- tibble(
+  uf_destino = c("PR", "SP", "BA", "AM"),
+  tku_bi     = c(4.8, 12.3, 3.1, 0.4)
+)
+
+pib <- tibble(
+  uf   = c("PR", "SP", "BA", "CE"),
+  pib_bi = c(613, 2720, 400, 220)
+)
+```
+
+### `left_join()` — preserva a tabela da esquerda
+
+É o que você usará em 90% dos casos: mantém todas as linhas da base principal e traz as
+colunas da auxiliar.
+
+```{r}
+fluxos |> left_join(pib, by = c("uf_destino" = "uf"))
+```
+
+`AM` ficou com `NA` porque não existe na tabela de PIB. **Isso é informação**, não erro — e
+precisa ser investigado, nunca ignorado.
+
+### `inner_join()` — apenas o que existe nas duas
+
+```{r}
+fluxos |> inner_join(pib, by = c("uf_destino" = "uf"))
+```
+
+Cuidado: `inner_join` **descarta linhas silenciosamente**. Sempre compare `nrow()` antes e
+depois.
+
+### `full_join()` — a união
+
+```{r}
+fluxos |> full_join(pib, by = c("uf_destino" = "uf"))
+```
+
+### `anti_join()` e `semi_join()` — as ferramentas de diagnóstico
+
+```{r}
+# o que está nos fluxos e NÃO tem PIB
+fluxos |> anti_join(pib, by = c("uf_destino" = "uf"))
+
+# o que está no PIB e não aparece nos fluxos
+pib |> anti_join(fluxos, by = c("uf" = "uf_destino"))
+
+# filtra os fluxos mantendo só os que têm par no PIB (sem trazer colunas)
+fluxos |> semi_join(pib, by = c("uf_destino" = "uf"))
+```
+
+::: {.callout-tip}
+## A rotina que evita erro em cruzamento
+
+Sempre, nesta ordem:
+
+1. `anti_join()` nas duas direções, para ver o que não casa.
+2. `left_join()`.
+3. Conferir `nrow()` antes e depois — se cresceu, a chave da direita está duplicada.
+4. Contar `NA` nas colunas trazidas.
+:::
+
+### A tabela-resumo
+
+| Função | Linhas mantidas | Uso típico |
+|:--|:--|:--|
+| `left_join()` | todas da esquerda | acrescentar atributos à base principal |
+| `inner_join()` | só as que casam | quando a análise exige as duas informações |
+| `full_join()` | todas das duas | consolidar bases complementares |
+| `anti_join()` | esquerda sem par | **diagnóstico** de chaves que não casam |
+| `semi_join()` | esquerda com par | filtrar por uma lista de códigos |
+
+O equivalente em R base é `merge()`, com os argumentos `all.x`, `all.y`:
+
+```{r}
+merge(fluxos, pib, by.x = "uf_destino", by.y = "uf", all.x = TRUE)
+```
+
+## O problema da duplicação de linhas
+
+Se a chave da tabela da direita tem valores repetidos, o `join` **multiplica** as linhas.
+É a causa mais comum de totais inflados em relatórios.
+
+```{r}
+pib_dup <- bind_rows(pib, tibble(uf = "PR", pib_bi = 999))
+
+nrow(fluxos)
+fluxos |> left_join(pib_dup, by = c("uf_destino" = "uf")) |> nrow()
+```
+
+O `dplyr` moderno avisa disso se você declarar a relação esperada:
+
+```{r}
+#| error: true
+fluxos |>
+  left_join(pib_dup, by = c("uf_destino" = "uf"), relationship = "one-to-one")
+```
+
+Declarar `relationship = "one-to-one"` (ou `"many-to-one"`) transforma um erro silencioso em
+erro explícito. Vale usar sempre em rotinas de produção.
+
+## Ajuste de dados para mesclar
+
+Na prática, o problema nunca é o `join` — é a chave. Quatro correções resolvem quase tudo.
+
+### 1. Tipo diferente
+
+```{r}
+a <- tibble(cod = c("4118204", "3548500"), valor = c(10, 20))
+b <- tibble(cod = c(4118204, 3548500), pop = c(156174, 418375))
+
+class(a$cod); class(b$cod)
+```
+
+```{r}
+#| error: true
+left_join(a, b, by = "cod")
+```
+
+```{r}
+left_join(a, mutate(b, cod = as.character(cod)), by = "cod")
+```
+
+### 2. Zero à esquerda perdido
+
+Códigos de UF, município e setor censitário lidos como número perdem o zero inicial.
+
+```{r}
+codigos <- c(1100015, 110001)
+str_pad(codigos, width = 7, pad = "0")
+```
+
+### 3. Caixa, acento e espaço
+
+```{r}
+chave <- function(x) {
+  x |>
+    str_squish() |>
+    str_to_lower() |>
+    stringi::stri_trans_general("Latin-ASCII")
+}
+
+x <- tibble(municipio = c("São Gonçalo do Amarante", "Paranaguá"))
+y <- tibble(municipio = c("SAO GONCALO DO AMARANTE", "PARANAGUA"), pop = c(104669, 156174))
+
+left_join(
+  mutate(x, k = chave(municipio)),
+  mutate(y, k = chave(municipio)) |> select(-municipio),
+  by = "k"
+)
+```
+
+### 4. Chave composta
+
+Nome de município só é único **dentro** da UF. Por isso a chave correta é `município + UF` —
+ou, melhor ainda, o código IBGE.
+
+```{r}
+bonitos <- tibble(
+  municipio = c("Bonito", "Bonito", "Bonito"),
+  uf        = c("MS", "PA", "PE")
+)
+
+area <- tibble(
+  municipio = c("Bonito", "Bonito", "Bonito"),
+  uf        = c("MS", "PA", "PE"),
+  area_km2  = c(4934, 1789, 395)
+)
+
+left_join(bonitos, area, by = c("municipio", "uf"))
+```
+
+::: {.callout-important}
+## Use sempre o código IBGE quando existir
+
+O código de 7 dígitos (`4118204` = Paranaguá/PR) é a chave oficial e não sofre dos problemas
+acima. No módulo 2, `geobr::read_municipality()` traz esse código junto com a geometria, e no
+módulo 3 `censobr` e `sidrar` o usam como identificador. Guarde-o em toda tabela intermediária
+que você criar.
+:::
+
+## Aplicação: enriquecer a base de cabotagem
+
+Vamos acrescentar a **região** de origem e de destino aos fluxos, usando uma tabela auxiliar
+de UFs. Antes do `left_join`, o diagnóstico.
+
+```{r}
+regioes <- tibble(
+  uf = c("AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA",
+         "PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"),
+  regiao = c("Norte","Nordeste","Norte","Norte","Nordeste","Nordeste","Centro-Oeste",
+             "Sudeste","Centro-Oeste","Nordeste","Centro-Oeste","Centro-Oeste","Sudeste",
+             "Norte","Nordeste","Sul","Nordeste","Nordeste","Sudeste","Nordeste","Sul",
+             "Norte","Norte","Sul","Sudeste","Nordeste","Norte")
+)
+
+# 1. o que não casa, nas duas direções
+cabotagem |>
+  anti_join(regioes, by = c("uf_origem" = "uf")) |>
+  count(uf_origem, wt = tku_bi, name = "tku_bi")
+
+cabotagem |>
+  anti_join(regioes, by = c("uf_destino" = "uf")) |>
+  nrow()
+```
+
+O diagnóstico encontrou o que já sabíamos de @sec-m1-limpeza: a origem pode ser
+**ZEE/Plataforma Continental** ou **Indeterminado**, que não são unidades da federação — e
+respondem por uma parcela enorme do TKU. Um `inner_join` aqui apagaria quase 40% do dado sem
+avisar. A solução é estender a tabela auxiliar para abrigar essas categorias explicitamente:
+
+```{r}
+regioes <- bind_rows(
+  regioes,
+  tibble(uf = c("ZEE/PLAT. CONTINENTAL", "INDETERMINADO"),
+         regiao = c("Offshore (ZEE)", "Indeterminado"))
+)
+```
+
+```{r}
+n_antes <- nrow(cabotagem)
+
+cabotagem_reg <- cabotagem |>
+  left_join(regioes, by = c("uf_origem" = "uf"), relationship = "many-to-one") |>
+  rename(regiao_origem = regiao) |>
+  left_join(regioes, by = c("uf_destino" = "uf"), relationship = "many-to-one") |>
+  rename(regiao_destino = regiao)
+
+# 3. as linhas não se multiplicaram
+c(antes = n_antes, depois = nrow(cabotagem_reg))
+
+# 4. não restou nenhum NA nas colunas trazidas
+c(origem = sum(is.na(cabotagem_reg$regiao_origem)),
+  destino = sum(is.na(cabotagem_reg$regiao_destino)))
+```
+
+Cruzamento validado. Agora a matriz de fluxos entre regiões, em bilhões de t·km:
+
+```{r}
+cabotagem_reg |>
+  summarise(tku_bi = sum(tku_bi), .by = c(regiao_origem, regiao_destino)) |>
+  tidyr::pivot_wider(names_from = regiao_destino, values_from = tku_bi, values_fill = 0) |>
+  mutate(across(where(is.numeric), \(x) round(x, 1))) |>
+  arrange(regiao_origem) |>
+  knitr::kable()
+```
+
+A leitura dessa tabela responde a uma pergunta de planejamento em poucas linhas: os maiores
+fluxos são o **offshore para o Sudeste** (cerca de 70 bi t·km), seguido de **Norte para
+Nordeste** e do **offshore para o Nordeste** — ou seja, petróleo das plataformas para os
+terminais do Sudeste e do Nordeste, e a carga conteinerizada saindo de Manaus.
+
+### Empilhar em vez de cruzar
+
+Quando as tabelas têm a mesma estrutura — por exemplo, um arquivo por ano — a operação é
+`bind_rows()`, não `join`:
+
+```{r}
+#| eval: false
+anos <- 2020:2025
+arquivos <- sprintf("dados/cabotagem_%d.xlsx", anos)
+
+serie <- lapply(arquivos, read_excel) |>
+  bind_rows(.id = "i") |>
+  mutate(ano = anos[as.integer(i)]) |>
+  select(-i)
+```
+
+`bind_rows()` alinha as colunas pelo nome e preenche com `NA` as que faltarem em algum
+arquivo — comportamento desejável, mas que esconde mudança de nome de coluna entre anos.
+Confira com `setdiff(names(a), names(b))` antes de empilhar.

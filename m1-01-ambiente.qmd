@@ -1,0 +1,143 @@
+# Ambiente de trabalho {#sec-m1-ambiente}
+
+## O que instalar
+
+São três componentes, nesta ordem:
+
+1. **R** — a linguagem em si: <https://cran.r-project.org/>. Instale a versão mais recente
+   (4.4 ou superior).
+2. **RStudio Desktop** — o ambiente de desenvolvimento: <https://posit.co/downloads/>.
+3. **Rtools** (apenas Windows) — ferramentas de compilação, necessárias para instalar
+   pacotes que precisam ser compilados do código-fonte, como `sf` e `terra`:
+   <https://cran.r-project.org/bin/windows/Rtools/>. Escolha a versão compatível com a sua
+   versão do R.
+
+::: {.callout-important}
+## Instalação em máquina institucional
+
+Em computadores do Ministério, o R e o RStudio normalmente exigem instalação pela equipe de
+TI. Vale pedir, no mesmo chamado: (i) R e RStudio, (ii) Rtools, (iii) permissão de escrita em
+uma pasta de biblioteca de pacotes do usuário e (iv) liberação de acesso a `cran.r-project.org`,
+`github.com` e aos domínios de dados (`servicodados.ibge.gov.br`, `apiservice.mdic.gov.br`,
+`web3.antaq.gov.br`). Sem o item (iv), a instalação de pacotes e o *download* de dados falham.
+:::
+
+Confira a instalação no console do RStudio:
+
+```{r}
+R.version.string
+```
+
+## Trabalhe sempre dentro de um projeto
+
+Um **projeto do RStudio** é uma pasta com um arquivo `.Rproj`. Ele define o *diretório de
+trabalho*, o que torna os caminhos relativos estáveis. Em `File > New Project > New Directory`.
+
+Estrutura recomendada:
+
+```
+meu-projeto/
+├── meu-projeto.Rproj
+├── dados/            # dados de entrada (nunca editados à mão)
+│   └── brutos/
+├── R/                # scripts
+│   ├── 01-leitura.R
+│   ├── 02-limpeza.R
+│   └── 03-analise.R
+├── resultados/       # tabelas e gráficos gerados
+└── relatorios/       # .qmd / .Rmd
+```
+
+Três regras que evitam a maior parte dos problemas de reprodutibilidade:
+
+1. **Nunca** use `setwd("C:/Users/...")`. Use o projeto e caminhos relativos.
+2. **Nunca** edite o dado bruto. A limpeza é feita em código, para que seja auditável e
+   possa ser refeita quando o dado for atualizado.
+3. Desligue a restauração automática do `.RData` em
+   `Tools > Global Options > General`, desmarcando *Restore .RData into workspace at startup*
+   e escolhendo *Never* em *Save workspace*. Assim a sua sessão sempre começa limpa e você
+   descobre cedo se o script depende de algo que não está escrito nele.
+
+Para montar caminhos entre sistemas operacionais, use `file.path()`:
+
+```{r}
+file.path("dados", "cabotagem_tku_2025.csv")
+```
+
+## Pacotes
+
+```{r}
+#| eval: false
+install.packages("dplyr")      # instala (uma vez)
+library(dplyr)                 # carrega (em cada sessão)
+dplyr::filter                  # usa sem carregar
+packageVersion("dplyr")        # versão instalada
+update.packages(ask = FALSE)   # atualiza tudo
+```
+
+Pacotes do CRAN se instalam com `install.packages()`. Versões de desenvolvimento no GitHub —
+caso comum em pacotes de transportes, como `flownet` — se instalam com:
+
+```{r}
+#| eval: false
+install.packages("remotes")
+remotes::install_github("SebKrantz/flownet")
+```
+
+::: {.callout-tip}
+## Registre as versões
+
+Ao final de um script ou relatório, `sessionInfo()` (ou `sessioninfo::session_info()`)
+imprime a versão do R e de todos os pacotes carregados. Colar essa saída no anexo de um
+relatório técnico é o que permite reproduzir o resultado meses depois.
+:::
+
+## Onde procurar ajuda
+
+```{r}
+#| eval: false
+?mean                      # documentação da função
+help(package = "dplyr")    # documentação do pacote
+vignette(package = "sf")   # tutoriais longos do pacote
+example(mean)              # exemplos executáveis
+```
+
+A documentação de um pacote costuma ter também um *site*, mais legível, com artigos de uso:
+`sf`, `dplyr`, `r5r` e `geobr` são bons exemplos.
+
+## IA no fluxo de trabalho
+
+Assistentes de IA aceleram muito o trabalho em R, sobretudo em três situações:
+
+- **Traduzir intenção em código**: "agrupe por UF de destino e some o TKU" vira código
+  `dplyr` em segundos.
+- **Interpretar mensagens de erro**: colar a mensagem e as linhas em volta costuma dar o
+  diagnóstico imediatamente.
+- **Converter rotinas**: transformar um procedimento feito no ArcGIS/QGIS, ou uma planilha
+  com fórmulas, em um script equivalente.
+
+Formas de usar dentro do RStudio ou do VS Code:
+
+| Ferramenta | Como entra no fluxo |
+|:--|:--|
+| GitHub Copilot | Autocompletar dentro do RStudio (`Tools > Global Options > Copilot`) |
+| Claude, ChatGPT, Gemini (navegador) | Colar código/erro e pedir explicação ou revisão |
+| Pacote `ellmer` | Chamar modelos de dentro do R, dentro de um script |
+| `chattr`, `gander` | Interface de *chat* acoplada ao RStudio |
+
+::: {.callout-warning}
+## Cuidados no uso institucional
+
+1. **Não cole dados sensíveis ou não públicos** em serviços externos. Prefira descrever o
+   formato ("uma tabela com colunas UF, município, TKU") a colar o conteúdo.
+2. **Verifique o que foi gerado.** É comum a IA inventar argumentos ou funções que não
+   existem, ou usar pacotes desatualizados. Rode o código e confira o resultado em um
+   subconjunto pequeno, onde você sabe qual deveria ser a resposta.
+3. **Peça a explicação, não só o código.** O objetivo do curso é que você consiga ler,
+   corrigir e defender tecnicamente o que o script faz.
+:::
+
+Um prompt útil para o nosso contexto tem quatro partes: o que você tem, o que quer, com qual
+ferramenta e qual a restrição. Por exemplo: *"Tenho um data.frame com colunas UF de origem, UF
+de destino e TKU. Quero as 10 maiores ligações interestaduais em TKU, usando dplyr, com os
+nomes das colunas preservados."*

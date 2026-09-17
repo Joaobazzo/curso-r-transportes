@@ -1,0 +1,27 @@
+/*-- scss:defaults --*/
+$font-family-sans-serif: "Helvetica Neue", "Segoe UI", Arial, sans-serif !default;
+$primary: #1a5b8a !default;
+$link-color: #1a5b8a !default;
+$code-block-bg: #f7f9fb !default;
+$code-color: #0f4c75 !default;
+
+/*-- scss:rules --*/
+.sidebar-title { font-weight: 600; }
+
+div.callout-note { border-left-color: #1a5b8a; }
+
+pre.sourceCode {
+  border: 1px solid #e3e8ee;
+  border-radius: 4px;
+}
+
+table { font-size: 0.9em; }
+
+.modulo-meta {
+  background: #f2f6fa;
+  border: 1px solid #dbe5ee;
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  margin-bottom: 1.2rem;
+  font-size: 0.92em;
+}

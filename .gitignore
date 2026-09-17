@@ -1,0 +1,20 @@
+# Quarto
+/_site/
+/.quarto/
+*_files/
+*_cache/
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj.user
+
+# resultados gerados
+/resultados/
+/dados/brutos/
+
+# sistema
+.DS_Store
+Thumbs.db

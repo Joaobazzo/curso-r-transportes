@@ -1,0 +1,49 @@
+# Módulo 5 — visão geral {#sec-m5}
+
+::: {.callout-note appearance="simple"}
+Capítulo em preparação. O conteúdo será publicado aqui na semana do módulo.
+:::
+
+::: {.modulo-meta}
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
+**Datas (Opção A):** aulas em 03/11 e 04/11; material assíncrono liberado em 05/11
+**Pacotes:** Quarto/`rmarkdown`, `ggplot2`, `sf`, `mapgl`, `gtfstools`, `r5r`, `accessibility`
+:::
+
+## Mapas temáticos avançados, relatórios reproduzíveis e projeto final
+
+### Aula síncrona
+
+- Mapas temáticos de qualidade de publicação: coropléticos, classes (Jenks e alternativas,
+  ver @sec-m1-ggplot2), rosa dos ventos, escala, inserções.
+- Automação de relatórios em Quarto/R Markdown: parâmetros, iteração por município,
+  exportação para PDF, Word e HTML.
+
+### Conteúdo assíncrono
+
+Desenvolvimento do **projeto final**: um relatório técnico reproduzível com dados reais. Duas
+opções.
+
+#### Opção 1 — Perfil de município portuário
+
+A partir de dados do SIDRA, do Censo e do transporte de cabotagem (ANTAQ), produzir um
+relatório automatizado para um município de destino presente na base de cabotagem, contendo:
+
+1. tabela com a descrição básica do município a partir do `geobr`;
+2. gráfico de projeção populacional com `ggplot2`;
+3. mapa de população por setor/zona censitária;
+4. mapa de fluxos origem–destino.
+
+#### Opção 2 — Acessibilidade a oportunidades de saúde
+
+1. Baixar estabelecimentos de saúde (`aopdata`), GTFS, rede do OpenStreetMap
+   (`osmextract`) e dados populacionais (`geobr`, `sidrar`).
+2. Editar o GTFS removendo linhas alimentadoras (`gtfstools`).
+3. Rodar `r5r` e `accessibility` com o GTFS original e o modificado.
+4. Comparar tempo mínimo até a estação mais próxima e indicadores cumulativos de
+   acessibilidade nos dois cenários.
+
+### Entrega
+
+O relatório é entregue como projeto Quarto no repositório do participante, com dados,
+scripts e o documento renderizado — o mesmo padrão usado neste site.

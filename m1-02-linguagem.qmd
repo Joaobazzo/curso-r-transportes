@@ -1,0 +1,328 @@
+# Estrutura da linguagem {#sec-m1-linguagem}
+
+Este capítulo cobre o mínimo de linguagem necessário para o resto do curso. A ideia não é
+esgotar o R, e sim reconhecer os objetos com que trabalhamos e saber inspecioná-los.
+
+## Objetos e atribuição
+
+```{r}
+tku <- 1250.75          # atribuição
+uf  <- "PR"
+tku
+class(tku)
+class(uf)
+```
+
+Tudo em R é um objeto, e todo objeto tem uma **classe**. Quando algo dá errado, a primeira
+pergunta é sempre `class()` — na maior parte dos casos o problema é que um número está
+guardado como texto.
+
+## Vetores
+
+O vetor é a estrutura básica: uma sequência de valores **do mesmo tipo**.
+
+```{r}
+ufs  <- c("AM", "PR", "SP", "BA")
+tkus <- c(4213386.6, 8332538649.4, 1600854068.7, 1560549752.2)
+
+length(ufs)
+tkus[2]                 # indexação começa em 1
+tkus[c(1, 3)]
+tkus[tkus > 2e9]        # indexação lógica: o filtro do R base
+ufs[tkus > 2e9]
+```
+
+Os tipos que aparecem no dia a dia:
+
+```{r}
+c(
+  numerico  = class(1.5),
+  inteiro   = class(1L),
+  texto     = class("PR"),
+  logico    = class(TRUE),
+  data      = class(as.Date("2026-09-28")),
+  fator     = class(factor("Conteinerizada"))
+)
+```
+
+**Coerção silenciosa** é a principal fonte de erro em dados reais: se um único valor for
+texto, o vetor inteiro vira texto.
+
+```{r}
+#| error: true
+x <- c(1, 2, "3")
+class(x)
+x * 2                   # erro: o vetor virou texto
+as.numeric(x) * 2       # solução explícita
+```
+
+E o valor faltante, `NA`, se propaga:
+
+```{r}
+y <- c(10, NA, 30)
+mean(y)
+mean(y, na.rm = TRUE)
+is.na(y)
+sum(is.na(y))
+```
+
+::: {.callout-note}
+`NA` é "não sei o valor"; `NULL` é "não existe"; `NaN` é resultado inválido de conta
+(`0/0`); e `Inf` é infinito (`1/0`). `is.na()` é a verificação que você usará quase sempre.
+:::
+
+## Fatores
+
+Fator é um texto com um conjunto fixo e **ordenado** de categorias. Importa porque a ordem
+dos níveis define a ordem das barras em um gráfico e das colunas em uma tabela.
+
+```{r}
+perfil <- factor(
+  c("Granel Sólido", "Conteinerizada", "Granel Líquido", "Conteinerizada"),
+  levels = c("Conteinerizada", "Granel Sólido", "Granel Líquido")
+)
+levels(perfil)
+table(perfil)
+as.integer(perfil)      # o código interno de cada nível
+```
+
+## Matrizes
+
+Matriz é um vetor com duas dimensões — a estrutura natural de uma **matriz origem–destino**.
+
+```{r}
+od <- matrix(
+  c(  0, 120, 340,
+     95,   0, 210,
+    310, 180,   0),
+  nrow = 3, byrow = TRUE,
+  dimnames = list(origem = c("AM", "PR", "SP"),
+                  destino = c("AM", "PR", "SP"))
+)
+od
+dim(od)
+od["AM", "SP"]          # fluxo AM -> SP
+rowSums(od)             # total emitido por origem
+colSums(od)             # total atraído por destino
+t(od)                   # transposta
+```
+
+No módulo 3 trocaremos `matrix` por matrizes **esparsas** (`Matrix::sparseMatrix`), que
+guardam apenas os pares com fluxo — essencial quando há milhares de zonas.
+
+## Listas
+
+Lista guarda elementos de tipos diferentes, incluindo outras listas. É o que retorna a maior
+parte dos modelos e das funções de roteamento.
+
+```{r}
+cenario <- list(
+  nome     = "Cabotagem 2025",
+  ano      = 2025L,
+  ufs      = c("AM", "PR", "SP"),
+  matriz   = od
+)
+names(cenario)
+cenario$ufs
+cenario[["matriz"]]["PR", "SP"]
+str(cenario, max.level = 1)
+```
+
+## `data.frame`
+
+É a tabela: uma lista de colunas de mesmo comprimento. Praticamente todo o curso gira em
+torno dela.
+
+```{r}
+fluxos <- data.frame(
+  origem  = c("AM", "AM", "PR", "SP"),
+  destino = c("PR", "SP", "SP", "BA"),
+  tku     = c(4213386.6, 8332538649.4, 1560549752.2, 1600854068.7),
+  stringsAsFactors = FALSE
+)
+fluxos
+dim(fluxos)
+names(fluxos)
+str(fluxos)
+```
+
+Inspeção rápida de qualquer tabela — os quatro comandos que você roda **sempre** ao abrir um
+dado novo:
+
+```{r}
+head(fluxos, 2)
+summary(fluxos)
+nrow(fluxos); ncol(fluxos)
+sapply(fluxos, class)
+```
+
+Acesso a colunas e linhas em R base:
+
+```{r}
+fluxos$tku
+fluxos[["tku"]]
+fluxos[1, ]                       # primeira linha
+fluxos[, c("origem", "tku")]      # duas colunas
+fluxos[fluxos$tku > 2e9, ]        # filtro
+```
+
+## Operadores e comparações
+
+```{r}
+2 + 3; 10 / 4; 2^10; 7 %% 3; 7 %/% 3
+3 == 3; 3 != 4; 3 < 4
+TRUE & FALSE; TRUE | FALSE; !TRUE
+"PR" %in% c("PR", "SC", "RS")     # pertence a
+```
+
+`%in%` é o operador mais útil do R base para trabalho com dados: seleciona tudo o que está em
+uma lista de códigos.
+
+```{r}
+sul <- c("PR", "SC", "RS")
+fluxos[fluxos$destino %in% sul, ]
+```
+
+## Condicionais
+
+```{r}
+classificar <- function(tku) {
+  if (is.na(tku)) {
+    "sem informação"
+  } else if (tku >= 1e9) {
+    "alto"
+  } else if (tku >= 1e6) {
+    "médio"
+  } else {
+    "baixo"
+  }
+}
+classificar(8332538649)
+classificar(1250)
+```
+
+`if` funciona com **um** valor. Para vetores, use `ifelse()` ou `dplyr::case_when()`:
+
+```{r}
+ifelse(fluxos$tku >= 1e9, "alto", "não alto")
+
+dplyr::case_when(
+  fluxos$tku >= 1e9 ~ "alto",
+  fluxos$tku >= 1e6 ~ "médio",
+  .default = "baixo"
+)
+```
+
+## Funções
+
+Escrever funções é o que evita copiar e colar o mesmo trecho cinco vezes — e é onde os erros
+se concentram quando não se faz isso.
+
+```{r}
+#' Converte TKU para bilhões de TKU
+#' @param tku vetor numérico em t x km
+#' @param digitos casas decimais
+tku_bi <- function(tku, digitos = 2) {
+  if (!is.numeric(tku)) stop("`tku` precisa ser numérico.")
+  round(tku / 1e9, digitos)
+}
+
+tku_bi(fluxos$tku)
+tku_bi(fluxos$tku, digitos = 3)
+```
+
+Elementos a observar: argumentos com **valor padrão** (`digitos = 2`), **validação** de
+entrada (`stop()`) e o fato de a função retornar o valor da última expressão.
+
+## Iteração
+
+### `for`
+
+```{r}
+for (uf in c("AM", "PR", "SP")) {
+  total <- sum(fluxos$tku[fluxos$origem == uf])
+  cat(uf, ":", tku_bi(total), "bi TKU\n")
+}
+```
+
+### A família `apply`
+
+```{r}
+sapply(fluxos[, "tku", drop = FALSE], mean)      # retorna vetor
+lapply(c(1e6, 1e9), function(x) sum(fluxos$tku > x))  # retorna lista
+vapply(fluxos[, "tku", drop = FALSE], mean, numeric(1))  # com tipo garantido
+```
+
+Um padrão muito comum na prática: **ler vários arquivos e empilhar**.
+
+```{r}
+#| eval: false
+arquivos <- list.files("dados/brutos", pattern = "\\.csv$", full.names = TRUE)
+
+lista <- lapply(arquivos, readr::read_csv, show_col_types = FALSE)
+base  <- dplyr::bind_rows(lista, .id = "arquivo")
+```
+
+::: {.callout-tip}
+## Vetorize antes de iterar
+
+No R, operações vetorizadas são mais rápidas e mais legíveis do que laços. Em vez de
+percorrer linhas para somar duas colunas, escreva `df$a + df$b`. Reserve o `for` para tarefas
+que dependem de um passo anterior (rodar um modelo por cenário, salvar arquivos, chamar uma
+API).
+:::
+
+## O *pipe* `|>`
+
+O *pipe* passa o resultado da esquerda como primeiro argumento da função à direita. Ele
+transforma código aninhado em uma sequência de passos legível de cima para baixo.
+
+```{r}
+# sem pipe
+round(mean(fluxos$tku, na.rm = TRUE) / 1e9, 2)
+
+# com pipe
+fluxos$tku |>
+  mean(na.rm = TRUE) |>
+  tku_bi()
+```
+
+Você encontrará também o *pipe* do `magrittr`, `%>%`, em materiais mais antigos. Para o que
+faremos, os dois são equivalentes; usaremos o nativo, `|>`, que não exige pacote.
+
+## Scripts e algoritmos
+
+Um script é a receita: os passos, na ordem, com comentários que dizem **por que** cada um
+existe. A estrutura que recomendamos para qualquer análise do Ministério:
+
+```{r}
+#| eval: false
+# ------------------------------------------------------------------
+# 01-leitura.R
+# Objetivo: ler a base de cabotagem da ANTAQ e padronizar colunas
+# Autor: <nome>            Última atualização: 2026-09-28
+# Entrada: dados/cabotagem_tku_2025.xlsx
+# Saída:   dados/cabotagem_limpa.rds
+# ------------------------------------------------------------------
+
+# 1. pacotes ----
+library(dplyr)
+library(readxl)
+
+# 2. leitura ----
+bruto <- read_excel("dados/cabotagem_tku_2025.xlsx")
+
+# 3. padronização ----
+base <- bruto |>
+  janitor::clean_names()
+
+# 4. checagens ----
+stopifnot(nrow(base) > 0, !any(is.na(base$tku_t_x_km)))  # nome gerado por clean_names()
+
+# 5. gravação ----
+saveRDS(base, "dados/cabotagem_limpa.rds")
+```
+
+`stopifnot()` no meio do script é uma prática que vale o esforço: se uma premissa deixar de
+valer quando a base for atualizada, o script para no lugar do erro em vez de produzir um
+número errado silenciosamente.

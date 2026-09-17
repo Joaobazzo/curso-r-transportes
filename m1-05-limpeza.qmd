@@ -1,0 +1,419 @@
+# Limpeza de dados {#sec-m1-limpeza}
+
+Em análises com dados administrativos, a limpeza consome mais tempo que a análise. A diferença
+entre fazer isso em planilha e fazer em R é que aqui a limpeza fica **escrita**: quando a base
+for atualizada no ano seguinte, é só rodar de novo — e qualquer pessoa pode auditar o que foi
+feito.
+
+A base da ANTAQ que usamos é um bom caso porque tem, em 732 linhas, quase todos os problemas
+que você vai encontrar em bases reais.
+
+```{r}
+library(dplyr)
+library(stringr)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+bruto <- read_excel("dados/cabotagem_tku_2025.xlsx")
+stopifnot(ncol(bruto) == length(colunas))
+names(bruto) <- colunas
+```
+
+## Diagnóstico inicial
+
+Antes de corrigir qualquer coisa, olhe a base. Um roteiro de cinco comandos:
+
+```{r}
+dim(bruto)
+sapply(bruto, class)
+```
+
+```{r}
+colSums(is.na(bruto))            # faltantes declarados
+```
+
+```{r}
+bruto |>
+  summarise(across(where(is.character), n_distinct)) |>
+  t()
+```
+
+```{r}
+summary(bruto$tku)
+```
+
+Nenhum `NA` e nenhum valor negativo. Mas repare em duas coisas estranhas: o **mínimo do TKU é
+zero** e há apenas 2 valores distintos na coluna `pais_origem`, que deveria conter somente
+"Brasil" em uma base de cabotagem.
+
+```{r}
+count(bruto, pais_origem, pais_destino)
+```
+
+`janitor` tem resumos prontos muito úteis para essa etapa:
+
+```{r}
+#| eval: false
+janitor::tabyl(bruto, uf_destino)     # frequência com percentual
+skimr::skim(bruto)                    # resumo completo, coluna por coluna
+```
+
+## Faltantes disfarçados
+
+O `-` é o caso mais comum de faltante **não declarado**: não é `NA`, é texto. Como a coluna é
+de texto, o R não tem como saber que aquilo significa "sem informação".
+
+```{r}
+bruto |>
+  filter(pais_origem == "-") |>
+  count(tku_zero = tku == 0)
+```
+
+São **120 linhas** em que todos os campos de identificação são `-` e o TKU é zero: são
+combinações de perfil de carga e grupo de mercadoria **sem fluxo** no período, publicadas
+pelo sistema como linhas vazias. Não são erro do dado nem informação útil para a análise:
+são o "zero" da tabela.
+
+```{r}
+bruto |> filter(pais_origem == "-") |> select(perfil, sh2, uf_origem, tku) |> head(3)
+```
+
+A forma correta de tratar: converter os `-` em `NA` explicitamente, para que qualquer conta
+posterior falhe de forma visível em vez de silenciosa.
+
+```{r}
+base <- bruto |>
+  mutate(across(where(is.character), \(x) na_if(str_squish(x), "-")))
+
+colSums(is.na(base))
+```
+
+Agora os faltantes estão declarados. `readxl` e `readr` aceitam essa instrução já na leitura,
+o que é ainda melhor:
+
+```{r}
+#| eval: false
+read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-", "n/d", "..."))
+```
+
+Um cuidado relacionado: em planilhas, o número às vezes vem como texto com vírgula decimal.
+Nesse caso a coluna inteira é lida como texto.
+
+```{r}
+valores <- c("1250,75", "n/d", "-", "890,10")
+
+tku_corrigido <- valores |>
+  na_if("n/d") |>
+  na_if("-") |>
+  str_replace(",", ".") |>
+  as.numeric()
+
+tku_corrigido
+sum(is.na(tku_corrigido))
+```
+
+Confira **sempre** quantos `NA` a conversão criou. Se apareceram muitos, o formato do número
+não era o que você supôs — e `as.numeric()` os transformou em faltantes sem avisar.
+
+## Zeros verdadeiros
+
+Separando os `-`, sobram 12 linhas com TKU zero e identificação completa:
+
+```{r}
+base |>
+  filter(tku == 0, !is.na(uf_destino)) |>
+  select(perfil, uf_origem, cidade_origem, uf_destino, cidade_destino, tku)
+```
+
+Aqui houve navegação registrada, mas o TKU arredondado ficou em zero (distâncias e tonelagens
+muito pequenas). A decisão é analítica, não técnica: para somas de TKU, incluir ou excluir não
+muda nada; para **contar ligações ativas**, incluir ou excluir muda o resultado. O importante
+é registrar a escolha:
+
+```{r}
+base <- base |> filter(tku > 0)
+nrow(base)
+```
+
+## *Encoding*
+
+O problema aparece assim: `São Gonçalo` lido como `SÃ£o GonÃ§alo` (arquivo UTF-8 lido como
+Latin-1) ou `S?o Gon?alo` (o inverso). É frequente em extrações de sistemas legados.
+
+```{r}
+readr::guess_encoding("dados/cabotagem_tku_2025.csv", n_max = 1000)
+```
+
+```{r}
+#| eval: false
+# leitura informando o encoding correto
+readr::read_csv2("arquivo.csv", locale = readr::locale(encoding = "latin1"))
+read.csv2("arquivo.csv", fileEncoding = "latin1")
+
+# conversão de um vetor já lido
+x <- iconv(x, from = "latin1", to = "UTF-8")
+```
+
+Verificação rápida de que não há lixo de codificação nos nomes de municípios:
+
+```{r}
+base |>
+  filter(str_detect(cidade_destino, "Ã|Â|�")) |>
+  distinct(cidade_destino) |>
+  nrow()
+```
+
+::: {.callout-tip}
+No Windows, salve os scripts em UTF-8 (`File > Save with Encoding > UTF-8`) e verifique
+`Sys.getlocale("LC_CTYPE")`. Em versões recentes do R (4.2+) o suporte a UTF-8 no Windows
+melhorou muito, mas arquivos antigos continuam vindo em Latin-1.
+:::
+
+## Padronização de texto
+
+Antes de contar categorias, padronize — senão `"Paranaguá"`, `"PARANAGUÁ"` e `" Paranagua "`
+contam como três portos diferentes.
+
+```{r}
+base <- base |>
+  mutate(
+    across(where(is.character), str_squish),
+    uf_origem  = str_to_upper(uf_origem),
+    uf_destino = str_to_upper(uf_destino),
+    chave_destino = cidade_destino |>
+      str_to_lower() |>
+      stringi::stri_trans_general("Latin-ASCII") |>
+      str_squish()
+  )
+
+base |> distinct(cidade_destino, chave_destino) |> head(4)
+```
+
+A coluna `chave_destino` não serve para leitura — serve para **cruzar** com outras bases, no
+próximo capítulo.
+
+## Duplicados
+
+Há dois tipos: linha inteira repetida (erro de extração) e **chave** repetida quando ela
+deveria ser única (erro conceitual). O segundo é o perigoso.
+
+```{r}
+sum(duplicated(base))        # linhas idênticas
+```
+
+Nenhuma. Mas qual é a chave que deveria ser única? Teste a hipótese mais natural — um par de
+instalações para cada mercadoria:
+
+```{r}
+base |>
+  count(instalacao_origem, instalacao_destino, sh2) |>
+  filter(n > 1) |>
+  nrow()
+```
+
+Existem repetições. Antes de "remover duplicados", investigue **um caso concreto**:
+
+```{r}
+caso <- base |>
+  count(instalacao_origem, instalacao_destino, sh2) |>
+  filter(n > 1) |>
+  slice(1)
+
+base |>
+  semi_join(caso, by = c("instalacao_origem", "instalacao_destino", "sh2")) |>
+  select(perfil, instalacao_origem, instalacao_destino, sh2, tku)
+```
+
+O que diferencia as linhas é o **perfil da carga**: a mesma mercadoria, entre as mesmas
+instalações, movimentada em parte como carga geral e em parte como granel. Ou seja, a
+granularidade real da base é *perfil × mercadoria × instalação de origem × instalação de
+destino*:
+
+```{r}
+base |>
+  count(perfil, sh2, instalacao_origem, instalacao_destino) |>
+  filter(n > 1) |>
+  nrow()
+```
+
+Zero: a chave está identificada. Isso importa porque é ela que autoriza somar TKU em qualquer
+agregação mais ampla sem contar nada duas vezes.
+
+```{r}
+#| eval: false
+# como remover duplicados quando eles são erro de fato
+base |> distinct()                                          # linhas idênticas
+base |> distinct(uf_origem, uf_destino, .keep_all = TRUE)   # 1ª linha de cada chave
+base |> slice_max(tku, n = 1, by = c(uf_origem, uf_destino), with_ties = FALSE)
+base |> summarise(tku = sum(tku), .by = c(uf_origem, uf_destino))  # agregar
+```
+
+::: {.callout-important}
+Nunca remova duplicados por reflexo. Pergunte primeiro: **qual é a unidade de observação desta
+tabela?** Se a resposta for "uma linha por perfil, mercadoria e par de instalações", então
+agregar é correto e remover é perda de informação.
+:::
+
+## *Outliers*
+
+```{r}
+q <- quantile(base$tku, c(0.25, 0.5, 0.75, 0.95, 0.99))
+round(q / 1e6, 1)      # em milhões de t·km
+
+limite_sup <- q[["75%"]] + 3 * IQR(base$tku)
+
+base |>
+  filter(tku > limite_sup) |>
+  arrange(desc(tku)) |>
+  transmute(cidade_origem, uf_origem, cidade_destino, tku_bi = round(tku / 1e9, 1)) |>
+  head(5)
+```
+
+Em fluxos de transporte a distribuição é fortemente assimétrica: poucos pares concentram a
+maior parte do TKU.
+
+```{r}
+base |>
+  arrange(desc(tku)) |>
+  mutate(part = tku / sum(tku), part_acum = cumsum(part)) |>
+  transmute(cidade_origem, cidade_destino,
+            part = scales::percent(part, accuracy = 0.1),
+            part_acum = scales::percent(part_acum, accuracy = 0.1)) |>
+  head(10)
+```
+
+::: {.callout-warning}
+*Outlier* em dados de fluxo raramente é erro — é concentração. As maiores ligações serem uma
+ordem de grandeza acima da mediana é característica do sistema, não defeito do dado. Trate
+como erro apenas o que é **impossível** (ver abaixo); para o resto, use escala logarítmica no
+gráfico em vez de excluir a observação.
+:::
+
+## Valores irreais, incorretos e categorias especiais
+
+Esta é a etapa que exige conhecimento do domínio. Traduza as regras do negócio em verificações
+explícitas:
+
+```{r}
+ufs_validas <- c("AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA",
+                 "PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO")
+
+base |>
+  summarise(
+    tku_negativo    = sum(tku < 0),
+    ano_fora        = sum(!ano %in% 2000:2026),
+    uf_origem_fora  = sum(!uf_origem %in% ufs_validas),
+    uf_destino_fora = sum(!uf_destino %in% ufs_validas),
+    pais_nao_brasil = sum(pais_origem != "Brasil" | pais_destino != "Brasil")
+  ) |>
+  t()
+```
+
+A checagem de UF acusou linhas. Antes de concluir que há erro, veja **quais** são os valores:
+
+```{r}
+base |>
+  filter(!uf_origem %in% ufs_validas) |>
+  count(uf_origem, wt = tku / 1e9, name = "tku_bi") |>
+  arrange(desc(tku_bi))
+```
+
+Duas categorias que não são erro nem UF:
+
+- **ZEE/Plat. Continental** — origem no mar, nas plataformas da Zona Econômica Exclusiva.
+  São **37 ligações** que respondem por cerca de **109 bilhões de t·km**, quase 40% do TKU
+  total: é o petróleo saindo das plataformas para os terminais do continente. Excluir essas
+  linhas como "UF inválida" destruiria a maior componente da base.
+- **Indeterminado** — origem não identificada no registro.
+
+O tratamento correto é criar uma coluna que **explicite** essas categorias, em vez de
+apagá-las:
+
+```{r}
+cabotagem <- base |>
+  mutate(
+    origem_offshore = uf_origem == "ZEE/PLAT. CONTINENTAL",
+    origem_indefinida = uf_origem == "INDETERMINADO",
+    tipo_ligacao = case_when(
+      origem_offshore   ~ "offshore",
+      origem_indefinida ~ "indeterminada",
+      uf_origem == uf_destino ~ "intraestadual",
+      .default = "interestadual"
+    ),
+    tku_bi = tku / 1e9
+  )
+
+cabotagem |>
+  summarise(ligacoes = n(), tku_bi = round(sum(tku_bi), 1), .by = tipo_ligacao) |>
+  arrange(desc(tku_bi))
+```
+
+Esse quadro é, por si só, um resultado que vale um parágrafo de relatório: 38% do TKU da
+cabotagem brasileira **não sai de um porto em terra**, e sim das plataformas marítimas.
+
+::: {.callout-note}
+## A lição do capítulo
+
+A limpeza não é "apagar o que não se encaixa". Nas duas vezes em que o dado pareceu errado —
+as repetições de chave e as UFs inválidas — a investigação revelou **estrutura**: uma
+dimensão a mais (perfil da carga) e uma categoria legítima (offshore). O que se apaga sem
+investigar é justamente o que costuma ser mais informativo.
+:::
+
+## O script de limpeza completo
+
+Juntando tudo, o que entregamos aos capítulos seguintes:
+
+```{r}
+#| eval: false
+# ---------------------------------------------------------------
+# 02-limpeza.R — cabotagem ANTAQ (TB6.1)
+# Entrada: dados/cabotagem_tku_2025.xlsx
+# Saída:   dados/cabotagem_limpa.rds
+# ---------------------------------------------------------------
+library(dplyr); library(stringr); library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+stopifnot(ncol(cabotagem) == length(colunas))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  mutate(across(where(is.character), str_squish)) |>
+  filter(tku > 0) |>
+  mutate(
+    uf_origem  = str_to_upper(uf_origem),
+    uf_destino = str_to_upper(uf_destino),
+    tku_bi = tku / 1e9,
+    tipo_ligacao = case_when(
+      uf_origem == "ZEE/PLAT. CONTINENTAL" ~ "offshore",
+      uf_origem == "INDETERMINADO"         ~ "indeterminada",
+      uf_origem == uf_destino              ~ "intraestadual",
+      .default = "interestadual"
+    )
+  )
+
+# barreiras: se a base mudar, o script para aqui
+stopifnot(
+  nrow(cabotagem) == 600,
+  all(cabotagem$tku > 0),
+  all(cabotagem$pais_destino == "Brasil"),
+  n_distinct(cabotagem[c("perfil", "sh2", "instalacao_origem",
+                         "instalacao_destino")]) == nrow(cabotagem)
+)
+
+saveRDS(cabotagem, "dados/cabotagem_limpa.rds")
+```
+
+O `stopifnot()` com o número de linhas esperado merece um comentário: ele **vai falhar** no
+ano que vem, quando a base for atualizada — e isso é o objetivo. A falha obriga a revisar o
+número e confirmar que a mudança era esperada, em vez de publicar um relatório com um total
+diferente sem que ninguém perceba.

@@ -1,0 +1,66 @@
+# Dados de exemplo {.unnumbered}
+
+Todos os dados usados no curso são **públicos**. Os arquivos pequenos ficam no próprio
+repositório, na pasta `dados/`; os grandes são baixados por script, para não inflar o
+repositório.
+
+## No repositório
+
+| Arquivo | Descrição | Fonte |
+|:--|:--|:--|
+| `dados/cabotagem_tku_2025.xlsx` | TKU da navegação de cabotagem, 2025, por par de instalações portuárias e grupo de mercadoria (732 registros, 12 colunas) | ANTAQ, Estatístico Aquaviário, tabela TB6.1 |
+| `dados/cabotagem_tku_2025.csv` | O mesmo conteúdo em CSV (UTF-8, separador `,`), para leitura sem `readxl` | idem |
+
+Links diretos:
+
+- [cabotagem_tku_2025.xlsx](https://github.com/Joaobazzo/curso-r-transportes/raw/main/dados/cabotagem_tku_2025.xlsx)
+- [cabotagem_tku_2025.csv](https://github.com/Joaobazzo/curso-r-transportes/raw/main/dados/cabotagem_tku_2025.csv)
+
+### Dicionário da base de cabotagem
+
+Após a padronização de nomes adotada no curso (@sec-m1-manipulacao):
+
+| Coluna | Tipo | Descrição |
+|:--|:--|:--|
+| `ano` | inteiro | Ano de referência (2025) |
+| `perfil` | texto | Perfil da carga: conteinerizada, granel sólido, granel líquido e gasoso, carga geral |
+| `sh2` | texto | Grupo de mercadoria, capítulo do Sistema Harmonizado (código e descrição) |
+| `pais_origem`, `pais_destino` | texto | País (sempre "Brasil" nos registros com fluxo) |
+| `uf_origem`, `uf_destino` | texto | UF; a origem pode ser `ZEE/Plat. Continental` (plataformas marítimas) ou `Indeterminado` |
+| `cidade_origem`, `cidade_destino` | texto | Município da instalação |
+| `instalacao_origem`, `instalacao_destino` | texto | Instalação portuária |
+| `tku` | numérico | Tonelada-quilômetro útil (t × km) |
+
+**Observações importantes** (detalhadas em @sec-m1-limpeza):
+
+- 132 dos 732 registros têm `tku = 0`; 120 deles não têm identificação (campos com `-`) e
+  correspondem a combinações sem fluxo no período.
+- A chave única é `perfil` + `sh2` + `instalacao_origem` + `instalacao_destino`.
+- As ligações com origem na ZEE/Plataforma Continental respondem por cerca de 38% do TKU
+  total e não devem ser descartadas como "UF inválida".
+
+## Baixados por script
+
+| Base | Pacote/rotina | Uso |
+|:--|:--|:--|
+| Comex Stat (exportação e importação municipal) | `download.file()` + `duckplyr` | @sec-m1-estudo-de-caso |
+| Malhas territoriais, rodovias federais, municípios | `geobr` | módulos 2 e 3 |
+| Censo Demográfico | `censobr` | módulos 2 e 3 |
+| Agregados do IBGE (SIDRA) | `sidrar` | módulos 2 e 5 |
+| OpenStreetMap | `osmdata`, `osmextract` | módulos 3 e 4 |
+| GTFS de transporte público | `gtfstools` | módulos 4 e 5 |
+| Acesso a Oportunidades | `aopdata` | módulos 4 e 5 |
+
+## Fontes oficiais
+
+- **ANTAQ — Estatístico Aquaviário**: <https://web3.antaq.gov.br/ea/sense/index.html>
+- **Comex Stat / MDIC**: <https://comexstat.mdic.gov.br/>
+- **IBGE — SIDRA**: <https://sidra.ibge.gov.br/>
+- **IBGE — malhas territoriais**: <https://www.ibge.gov.br/geociencias/downloads-geociencias.html>
+- **DNIT — bases georreferenciadas**: <https://www.gov.br/dnit/pt-br>
+- **OpenStreetMap**: <https://www.openstreetmap.org/>
+
+::: {.callout-note}
+Os dados da ANTAQ são redistribuídos aqui apenas para fins didáticos, na forma em que foram
+publicados. Para uso em documentos oficiais, baixe a versão corrente na fonte.
+:::

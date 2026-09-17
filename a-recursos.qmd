@@ -1,0 +1,65 @@
+# Recursos e referências {.unnumbered}
+
+## Documentação dos pacotes
+
+**Manipulação e visualização**
+
+- `dplyr` — <https://dplyr.tidyverse.org/>
+- `tidyr` — <https://tidyr.tidyverse.org/>
+- `duckplyr` — <https://duckplyr.tidyverse.org/>
+- `data.table` — <https://rdatatable.gitlab.io/data.table/>
+- `stringr` — <https://stringr.tidyverse.org/>
+- `lubridate` — <https://lubridate.tidyverse.org/>
+- `ggplot2` — <https://ggplot2.tidyverse.org/>
+- `patchwork` — <https://patchwork.data-imaginist.com/>
+
+**Espacial**
+
+- `sf` — <https://r-spatial.github.io/sf/>
+- `terra` — <https://rspatial.github.io/terra/>
+- `leaflet` — <https://rstudio.github.io/leaflet/>
+- `mapgl` — <https://walker-data.com/mapgl/>
+
+**Bases públicas brasileiras**
+
+- `geobr` — <https://ipeagit.github.io/geobr/>
+- `censobr` — <https://ipeagit.github.io/censobr/>
+- `sidrar` — <https://cran.r-project.org/package=sidrar>
+- `geocodebr` — <https://github.com/ipeaGIT/geocodebr>
+- `osmdata` — <https://docs.ropensci.org/osmdata/>
+- `osmextract` — <https://docs.ropensci.org/osmextract/>
+
+**Transportes e acessibilidade**
+
+- `r5r` — <https://ipeagit.github.io/r5r/>
+- `dodgr` — <https://urbananalyst.github.io/dodgr/>
+- `accessibility` — <https://ipeagit.github.io/accessibility/>
+- `aopdata` — <https://ipeagit.github.io/aopdata/>
+- `gtfstools` — <https://ipeagit.github.io/gtfstools/>
+- `gtfs2gps` — <https://github.com/ipeaGIT/gtfs2gps>
+- `stplanr` — <https://docs.ropensci.org/stplanr/>
+- `flownet` — <https://github.com/SebKrantz/flownet>
+
+## Livros e cursos abertos
+
+- **Introduction to urban accessibility with R** — <https://ipeagit.github.io/intro_access_book/>
+- **Geocomputation with R** — <https://r.geocompx.org/>
+- **R for Data Science (2ª ed.)** — <https://r4ds.hadley.nz/>
+- **Spatial Data Science with R and terra** — <https://rspatial.org/>
+- **Curso-R — material de estudo** — <https://curso-r.com/material/>
+- **Workshop de acessibilidade (ipeaGIT, Bogotá 2024)** —
+  <https://ipeagit.github.io/access_workshop_bogota_2024/>
+- **Hillshade effect** (relevo sombreado em R) —
+  <https://dominicroye.github.io/blog/hillshade-effect/>
+
+## Folhas de referência
+
+As *cheat sheets* oficiais, em PDF, cobrem `dplyr`, `ggplot2`, `stringr`, `lubridate`, `sf`
+e Quarto: <https://posit.co/resources/cheatsheets/>.
+
+## Ferramentas
+
+- **Quarto** — <https://quarto.org/>
+- **RStudio** — <https://posit.co/downloads/>
+- **DuckDB** — <https://duckdb.org/>
+- **Git e GitHub** — <https://happygitwithr.com/> (uso de Git a partir do R)

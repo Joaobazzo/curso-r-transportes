@@ -1,0 +1,81 @@
+# Visão geral do módulo {#sec-m1-visao-geral}
+
+::: {.modulo-meta}
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
+**Datas (Opção A):** aulas em 28/09 e 30/09; material assíncrono liberado em 01/10
+**Dados utilizados:** cabotagem ANTAQ (TKU 2025) e Comex Stat
+:::
+
+## O que você vai conseguir fazer no fim do módulo
+
+- Instalar e organizar um projeto de análise em R que outra pessoa consiga reexecutar.
+- Ler planilhas e arquivos de texto pesados, e exportar resultados em `.csv` e `.xlsx`.
+- Tratar textos (nomes de municípios, instalações portuárias, códigos de mercadoria) e datas.
+- Filtrar, agrupar, resumir e reformatar tabelas (*long* ↔ *wide*).
+- Diagnosticar problemas de qualidade: *encoding*, duplicados, faltantes, *outliers* e
+  valores impossíveis.
+- Cruzar bases diferentes com `join` e saber **por que** algumas linhas não casam.
+- Produzir gráficos de qualidade de publicação com `ggplot2`.
+
+## Roteiro
+
+### Aula síncrona (3h)
+
+| Bloco | Conteúdo | Capítulo |
+|:--|:--|:--|
+| 1 | Instalação (R, RStudio, Rtools), projetos, pacotes, IA no fluxo de trabalho | @sec-m1-ambiente |
+| 2 | Estrutura da linguagem: objetos, tipos, vetores, matrizes, `data.frame`, funções, iteração | @sec-m1-linguagem |
+| 3 | Datas com `lubridate` e textos com `stringr` | @sec-m1-datas-strings |
+| 4 | Manipulação com `dplyr`/`duckplyr`, filtros, *long-to-wide*, exportação | @sec-m1-manipulacao |
+| 5 | Limpeza de dados: *encoding*, duplicados, faltantes, *outliers*, valores irreais | @sec-m1-limpeza |
+
+### Conteúdo assíncrono (3h)
+
+| Bloco | Conteúdo | Capítulo |
+|:--|:--|:--|
+| 6 | `join`/`merge` e ajuste de chaves para mesclar bases | @sec-m1-joins |
+| 7 | Visualização com `ggplot2`: geometrias, escalas, temas, anotações, paletas, Jenks | @sec-m1-ggplot2 |
+| 8 | Estudo de caso guiado: TKU da cabotagem e exportações do Comex Stat | @sec-m1-estudo-de-caso |
+| 9 | Exercícios com soluções comentadas | @sec-m1-exercicios |
+
+## Pacotes do módulo
+
+Rode o bloco abaixo **uma única vez** antes da primeira aula. A instalação pode levar alguns
+minutos.
+
+```{r}
+#| eval: false
+pacotes <- c(
+  # leitura e escrita
+  "readr", "readxl", "writexl", "data.table", "duckplyr",
+  # manipulação
+  "dplyr", "tidyr", "stringr", "lubridate", "forcats", "janitor",
+  # visualização
+  "ggplot2", "scales", "patchwork", "classInt", "ggrepel",
+  # relatórios
+  "knitr", "rmarkdown"
+)
+
+faltando <- setdiff(pacotes, rownames(installed.packages()))
+if (length(faltando) > 0) install.packages(faltando)
+```
+
+Para conferir se tudo está no lugar:
+
+```{r}
+#| eval: false
+sapply(
+  c("dplyr", "tidyr", "stringr", "lubridate", "ggplot2", "readxl"),
+  requireNamespace, quietly = TRUE
+)
+```
+
+## Convenções usadas no material
+
+- Os blocos de código são executáveis. A saída aparece logo abaixo, precedida de `#>`.
+- Usamos o *pipe* nativo do R, `|>`, disponível a partir da versão 4.1.
+- Chamadas como `dplyr::filter()` explicitam o pacote de origem: é uma boa prática em
+  scripts que serão lidos por outras pessoas e evita conflitos de nomes.
+- Caminhos de arquivo são sempre **relativos à raiz do projeto** (`dados/arquivo.csv`),
+  nunca absolutos (`C:/Users/...`). Isso é o que permite que o script rode na máquina de
+  qualquer colega.

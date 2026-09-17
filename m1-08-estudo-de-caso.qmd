@@ -1,0 +1,424 @@
+# Estudo de caso: TKU da cabotagem {#sec-m1-estudo-de-caso}
+
+Este capítulo junta tudo o que foi visto no módulo em um fluxo único, do arquivo bruto ao
+resultado exportado. A pergunta é a de um pedido típico de área técnica:
+
+> *Quais ligações e quais estados concentram o transporte de cabotagem em TKU, como esse
+> transporte se divide por perfil de carga, e qual é a matriz origem–destino entre unidades
+> da federação?*
+
+Os dados são do **Estatístico Aquaviário da ANTAQ** (tabela TB6.1, TKU de 2025), em
+`dados/cabotagem_tku_2025.xlsx` — veja [Dados de exemplo](a-dados.qmd).
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(scales)
+library(readxl)
+
+theme_set(theme_minimal(base_size = 11) +
+            theme(panel.grid.minor = element_blank(),
+                  plot.title = element_text(face = "bold"),
+                  legend.position = "bottom"))
+```
+
+## Passo 1 — Ler e conhecer o dado
+
+```{r}
+bruto <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+stopifnot(ncol(bruto) == length(colunas))
+names(bruto) <- colunas
+
+dim(bruto)
+```
+
+```{r}
+bruto |> slice_head(n = 3) |> knitr::kable()
+```
+
+Três perguntas antes de qualquer conta.
+
+**1. Qual é a unidade de observação?** A hipótese é "um par de instalações por mercadoria";
+o teste mostra que falta uma dimensão — o perfil da carga:
+
+```{r}
+c(
+  linhas        = nrow(bruto),
+  inst_inst_sh2 = nrow(distinct(bruto, instalacao_origem, instalacao_destino, sh2)),
+  mais_perfil   = nrow(distinct(bruto, perfil, sh2,
+                                instalacao_origem, instalacao_destino))
+)
+```
+
+A chave é *perfil × mercadoria × instalação de origem × instalação de destino*, e é ela que
+autoriza somar TKU em agregações mais amplas.
+
+**2. O dado cobre o que se espera?**
+
+```{r}
+bruto |>
+  summarise(
+    ano_min = min(ano), ano_max = max(ano),
+    paises  = n_distinct(c(pais_origem, pais_destino), na.rm = TRUE),
+    ufs_destino = n_distinct(uf_destino, na.rm = TRUE),
+    sh2     = n_distinct(sh2)
+  )
+```
+
+**3. Há faltantes ou valores impossíveis?**
+
+```{r}
+c(
+  na_tku      = sum(is.na(bruto$tku)),
+  tku_zero    = sum(bruto$tku == 0),
+  tku_negativo = sum(bruto$tku < 0),
+  na_uf_origem = sum(is.na(bruto$uf_origem))
+)
+```
+
+Os 132 registros com TKU zero e as 120 linhas sem identificação são o assunto de
+@sec-m1-limpeza: são combinações de perfil e mercadoria **sem fluxo** no período.
+
+## Passo 2 — Limpar e padronizar
+
+```{r}
+cabotagem <- bruto |>
+  mutate(across(where(is.character), str_squish)) |>
+  filter(tku > 0) |>
+  mutate(
+    uf_origem  = str_to_upper(uf_origem),
+    uf_destino = str_to_upper(uf_destino),
+    tku_bi     = tku / 1e9,
+    tipo_ligacao = case_when(
+      uf_origem == "ZEE/PLAT. CONTINENTAL" ~ "offshore",
+      uf_origem == "INDETERMINADO"         ~ "indeterminada",
+      uf_origem == uf_destino              ~ "intraestadual",
+      .default = "interestadual"
+    ),
+    origem = if_else(tipo_ligacao == "offshore",
+                     "ZEE/Plataforma Continental",
+                     str_c(cidade_origem, " (", uf_origem, ")")),
+    destino = str_c(cidade_destino, " (", uf_destino, ")")
+  )
+
+stopifnot(nrow(cabotagem) == 600, all(cabotagem$tku > 0))
+glimpse(cabotagem)
+```
+
+## Passo 3 — O panorama geral
+
+```{r}
+panorama <- cabotagem |>
+  summarise(
+    ligacoes       = n(),
+    instalacoes    = n_distinct(c(instalacao_origem, instalacao_destino), na.rm = TRUE),
+    municipios     = n_distinct(c(cidade_origem, cidade_destino), na.rm = TRUE),
+    mercadorias    = n_distinct(sh2),
+    tku_total_bi   = round(sum(tku_bi), 1),
+    tku_mediano_mi = round(median(tku) / 1e6, 1)
+  )
+
+panorama |> t() |> knitr::kable(col.names = "valor")
+```
+
+```{r}
+por_tipo <- cabotagem |>
+  summarise(ligacoes = n(), tku_bi = sum(tku_bi), .by = tipo_ligacao) |>
+  mutate(part = tku_bi / sum(tku_bi)) |>
+  arrange(desc(tku_bi))
+
+por_tipo |>
+  transmute(
+    `Tipo de ligação` = tipo_ligacao,
+    Ligações = ligacoes,
+    `TKU (bi)` = round(tku_bi, 1),
+    `Part. (%)` = percent(part, accuracy = 0.1)
+  ) |>
+  knitr::kable(align = "lrrr")
+```
+
+O primeiro resultado relevante aparece já aqui: quase **40% do TKU da cabotagem não se origina
+em um porto em terra**, e sim nas plataformas da Zona Econômica Exclusiva. É petróleo saindo
+das plataformas para os terminais do continente — e, em qualquer análise de rede portuária,
+essas ligações precisam ser tratadas separadamente.
+
+## Passo 4 — Concentração: quais ligações importam
+
+```{r}
+top_ligacoes <- cabotagem |>
+  summarise(tku_bi = sum(tku_bi), .by = c(origem, destino)) |>
+  arrange(desc(tku_bi)) |>
+  mutate(
+    par = str_c(origem, " → ", destino),
+    part = tku_bi / sum(tku_bi),
+    part_acum = cumsum(part)
+  )
+
+top_ligacoes |>
+  slice_head(n = 10) |>
+  transmute(
+    par,
+    `TKU (bi)` = round(tku_bi, 2),
+    `Part. (%)` = percent(part, accuracy = 0.1),
+    `Acum. (%)` = percent(part_acum, accuracy = 0.1)
+  ) |>
+  knitr::kable(align = "lrrr")
+```
+
+```{r}
+#| label: fig-caso-top
+#| fig-cap: "Dez maiores ligações de cabotagem em TKU (2025)"
+#| fig-height: 5.5
+top_ligacoes |>
+  slice_head(n = 10) |>
+  ggplot(aes(x = tku_bi, y = reorder(par, tku_bi))) +
+  geom_col(fill = "#1a5b8a") +
+  geom_text(aes(label = number(tku_bi, accuracy = 0.1, decimal.mark = ",")),
+            hjust = -0.15, size = 3) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.18))) +
+  labs(x = "TKU (bi t·km)", y = NULL,
+       title = "Cabotagem: principais ligações",
+       caption = "Fonte: ANTAQ, Estatístico Aquaviário (TB6.1), 2025.")
+```
+
+Quantas ligações respondem por 80% do TKU?
+
+```{r}
+n80 <- sum(top_ligacoes$part_acum < 0.80) + 1
+
+c(ligacoes_ate_80pct = n80,
+  total_de_ligacoes  = nrow(top_ligacoes),
+  proporcao = round(n80 / nrow(top_ligacoes), 3))
+```
+
+```{r}
+#| label: fig-caso-concentracao
+#| fig-cap: "Concentração do TKU: participação acumulada por ligação ordenada"
+top_ligacoes |>
+  mutate(i = row_number() / n()) |>
+  ggplot(aes(x = i, y = part_acum)) +
+  geom_line(linewidth = 0.9, colour = "#1a5b8a") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_hline(yintercept = 0.8, linetype = "dotted", colour = "#e07b39") +
+  scale_x_continuous(labels = percent_format()) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(x = "Ligações OD (ordenadas por TKU)", y = "TKU acumulado")
+```
+
+Essa curva é o argumento técnico mais forte que se extrai da base: **cerca de 13% dos pares
+municipais concentram 80% do TKU**. A linha tracejada é a diagonal de igualdade — se todos os
+pares tivessem o mesmo TKU, a curva coincidiria com ela.
+
+## Passo 5 — Perfil de carga
+
+```{r}
+por_perfil <- cabotagem |>
+  summarise(tku_bi = sum(tku_bi), ligacoes = n(), .by = perfil) |>
+  mutate(part = tku_bi / sum(tku_bi)) |>
+  arrange(desc(tku_bi))
+
+por_perfil |>
+  transmute(
+    Perfil = perfil,
+    `TKU (bi)` = round(tku_bi, 1),
+    `Part. (%)` = percent(part, accuracy = 0.1),
+    `Ligações` = ligacoes
+  ) |>
+  knitr::kable(align = "lrrr")
+```
+
+```{r}
+#| label: fig-caso-perfil
+#| fig-cap: "TKU por perfil de carga, com as cinco principais UFs de destino"
+cabotagem |>
+  summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  mutate(uf_destino = forcats::fct_lump_n(uf_destino, n = 5, w = tku_bi,
+                                          other_level = "Outras")) |>
+  summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  ggplot(aes(x = tku_bi, y = reorder(perfil, tku_bi), fill = uf_destino)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Blues", direction = -1) +
+  labs(x = "TKU (bi t·km)", y = NULL, fill = "UF de destino")
+```
+
+A composição confirma a leitura do passo 3: o granel líquido e gasoso responde pela maior
+parte do TKU, com destino concentrado no Sudeste, enquanto a carga conteinerizada tem um
+perfil de destinos muito mais distribuído.
+
+## Passo 6 — A matriz origem–destino entre UFs
+
+```{r}
+od <- cabotagem |>
+  filter(tipo_ligacao %in% c("interestadual", "offshore")) |>
+  mutate(uf_origem = if_else(tipo_ligacao == "offshore", "ZEE", uf_origem)) |>
+  summarise(tku_bi = sum(tku_bi), .by = c(uf_origem, uf_destino))
+
+matriz <- od |>
+  pivot_wider(names_from = uf_destino, values_from = tku_bi, values_fill = 0) |>
+  arrange(uf_origem)
+
+matriz |>
+  mutate(across(where(is.numeric), \(x) round(x, 1))) |>
+  knitr::kable()
+```
+
+Totais emitidos e atraídos por UF — as margens da matriz:
+
+```{r}
+margens <- full_join(
+  od |> summarise(emitido = sum(tku_bi), .by = uf_origem) |> rename(uf = uf_origem),
+  od |> summarise(atraido = sum(tku_bi), .by = uf_destino) |> rename(uf = uf_destino),
+  by = "uf"
+) |>
+  mutate(across(c(emitido, atraido), \(x) replace_na(x, 0)),
+         saldo = atraido - emitido) |>
+  arrange(desc(saldo))
+
+margens |> mutate(across(where(is.numeric), \(x) round(x, 1))) |> knitr::kable()
+```
+
+```{r}
+#| label: fig-caso-matriz
+#| fig-cap: "Matriz OD interestadual e offshore de cabotagem em TKU (escala log)"
+od |>
+  ggplot(aes(x = uf_destino, y = reorder(uf_origem, tku_bi), fill = tku_bi)) +
+  geom_tile(colour = "white") +
+  scale_fill_viridis_c(option = "mako", direction = -1, transform = "log10",
+                       labels = label_number(accuracy = 0.01)) +
+  labs(x = "UF de destino", y = "Origem", fill = "TKU (bi)") +
+  theme(panel.grid = element_blank())
+```
+
+```{r}
+#| label: fig-caso-saldo
+#| fig-cap: "Saldo entre TKU atraído e emitido, por UF"
+margens |>
+  ggplot(aes(x = saldo, y = reorder(uf, saldo), fill = saldo > 0)) +
+  geom_col() +
+  scale_fill_manual(values = c(`TRUE` = "#1a5b8a", `FALSE` = "#e07b39"), guide = "none") +
+  geom_vline(xintercept = 0, colour = "grey30") +
+  labs(x = "Saldo (bi t·km)", y = NULL,
+       subtitle = "Positivo: a UF atrai mais TKU do que emite")
+```
+
+No módulo 3 esta mesma matriz será convertida em **fluxos espaciais**, desenhados sobre o mapa
+do Brasil como linhas de desejo entre os portos; no módulo 4, os totais por UF alimentarão uma
+análise de rede.
+
+## Passo 7 — Exportar os resultados
+
+```{r}
+#| eval: false
+dir.create("resultados", showWarnings = FALSE)
+
+writexl::write_xlsx(
+  list(
+    "Panorama"     = panorama,
+    "Por tipo"     = por_tipo,
+    "Top ligações" = top_ligacoes |> select(par, tku_bi, part, part_acum),
+    "Por perfil"   = por_perfil,
+    "Matriz OD"    = matriz,
+    "Margens"      = margens
+  ),
+  "resultados/cabotagem_tku_2025.xlsx"
+)
+
+readr::write_csv2(od, "resultados/matriz_od_longo.csv")
+saveRDS(cabotagem, "dados/cabotagem_limpa.rds")
+```
+
+O script inteiro deste capítulo tem menos de 80 linhas úteis e pode ser reexecutado sobre o
+arquivo do ano seguinte sem alteração — que é exatamente o ganho que justifica trocar a
+planilha pelo código.
+
+## O que este estudo de caso mostrou
+
+1. A base tem 732 registros, dos quais **600 com fluxo**; os outros 132 são zeros estruturais.
+2. A chave da tabela inclui o **perfil da carga** — descobri-lo evitou contagem dupla.
+3. **38% do TKU é offshore**, e essa categoria só apareceu porque a checagem de UF inválida
+   foi investigada em vez de descartada.
+4. O sistema é **muito concentrado**: ~13% dos pares respondem por 80% do TKU.
+5. Todos os resultados saíram de um script reexecutável, com checagens que falham alto se a
+   próxima versão da base mudar de estrutura.
+
+## Desafio: exportações do Comex Stat
+
+Para praticar sozinho, o mesmo fluxo aplicado a uma base **grande**. O Comex Stat publica os
+dados municipais de exportação e importação em CSV aberto:
+
+<https://www.gov.br/mdic/pt-br/assuntos/comercio-exterior/estatisticas/base-de-dados-bruta>
+
+```{r}
+#| eval: false
+# 1. download (arquivo de centenas de MB; faça uma vez e guarde)
+dir.create("dados/brutos", showWarnings = FALSE, recursive = TRUE)
+
+url_exp <- "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/EXP_2025_MUN.csv"
+destino <- "dados/brutos/EXP_2025_MUN.csv"
+if (!file.exists(destino)) download.file(url_exp, destino, mode = "wb")
+
+# tabelas auxiliares (municípios e NCM)
+download.file("https://balanca.economia.gov.br/balanca/bd/tabelas/UF_MUN.csv",
+              "dados/brutos/UF_MUN.csv", mode = "wb")
+```
+
+```{r}
+#| eval: false
+# 2. leitura preguiçosa com duckplyr: só o agregado vem para a memória
+library(duckplyr)
+
+exp_mun <- read_csv_duckdb(
+  "dados/brutos/EXP_2025_MUN.csv",
+  options = list(delim = ";", header = TRUE)
+)
+
+por_municipio <- exp_mun |>
+  summarise(
+    valor_fob = sum(VL_FOB, na.rm = TRUE),
+    peso_kg   = sum(KG_LIQUIDO, na.rm = TRUE),
+    .by = c(SH4, CO_MUN)
+  ) |>
+  collect()
+```
+
+```{r}
+#| eval: false
+# 3. comparação de desempenho: duckplyr x data.table x readr
+system.time({
+  a <- read_csv_duckdb("dados/brutos/EXP_2025_MUN.csv",
+                       options = list(delim = ";")) |>
+    summarise(v = sum(VL_FOB), .by = CO_MUN) |>
+    collect()
+})
+
+system.time({
+  b <- data.table::fread("dados/brutos/EXP_2025_MUN.csv")[, .(v = sum(VL_FOB)), by = CO_MUN]
+})
+
+system.time({
+  d <- readr::read_csv2("dados/brutos/EXP_2025_MUN.csv", show_col_types = FALSE) |>
+    summarise(v = sum(VL_FOB), .by = CO_MUN)
+})
+```
+
+O que você deve produzir:
+
+1. As 20 mercadorias (SH4) com maior valor FOB exportado em 2025.
+2. Os 20 municípios com maior valor exportado, com nome e UF (`join` com `UF_MUN.csv`).
+3. Um gráfico de barras com os 10 principais municípios, eixo formatado em bilhões de US$.
+4. Uma tabela cruzada de valor FOB por UF e por capítulo do SH.
+5. O tempo de processamento das três abordagens do item 3 acima, com uma frase explicando a
+   diferença.
+
+::: {.callout-tip}
+O `CO_MUN` do Comex Stat tem **6 dígitos** (código do município sem o dígito verificador),
+enquanto o IBGE e o `geobr` usam **7**. Esse é o tipo de detalhe que quebra um cruzamento e
+que discutiremos no módulo 2, quando esses municípios precisarem virar geometria no mapa.
+:::
