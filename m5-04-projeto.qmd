@@ -1,0 +1,135 @@
+# Projeto final {#sec-m5-projeto}
+
+O projeto final é um **relatório técnico reproduzível**, com dados reais, que reúne o que foi
+visto nos cinco módulos. Não é um exercício acadêmico: a ideia é que você termine o curso com
+um documento que possa, com pequenos ajustes, virar um produto da Subsecretaria.
+
+## O que entregar
+
+Um repositório (ou uma pasta) contendo:
+
+```
+projeto/
+├── projeto.qmd              # o relatório
+├── R/
+│   └── 01-preparar-dados.R  # processamento; roda antes, salva em dados/
+├── dados/                   # dado tratado (o bruto pode ficar fora, com script de download)
+├── resultados/              # figuras e tabelas exportadas
+└── README.md                # como reproduzir, em 5 linhas
+```
+
+E o relatório renderizado (HTML ou PDF), com **no mínimo**:
+
+1. uma pergunta clara, em uma frase;
+2. a origem dos dados, com fonte e data de extração;
+3. pelo menos um mapa e um gráfico, com fonte e método declarados;
+4. uma tabela de resultado;
+5. um parágrafo de interpretação e outro de limitações;
+6. a saída de `sessionInfo()` em anexo.
+
+Extensão sugerida: 4 a 8 páginas. Relatório curto e correto vale mais que relatório longo.
+
+## Opção 1 — Perfil logístico de um município portuário
+
+Combina SIDRA, Censo e a base de cabotagem da ANTAQ para caracterizar um município de destino.
+
+**Roteiro:**
+
+1. **Escolha** um município presente na base de cabotagem (@sec-m1-estudo-de-caso).
+2. **Tabela de caracterização** a partir do `geobr` e do `sidrar`: área, população, densidade,
+   PIB, posição na hierarquia urbana.
+3. **Projeção populacional** com dados do SIDRA, em gráfico `ggplot2` (@sec-m1-ggplot2).
+4. **Mapa de população por setor censitário** ou pela grade estatística (@sec-m2-estudo-de-caso).
+5. **Mapa de fluxos origem–destino** com o município como destino (@sec-m3-estudo-de-caso).
+6. **Indicadores**: TKU recebido, participação nacional, principais origens e perfis de carga.
+7. **Interpretação**: que papel esse município exerce na rede de cabotagem, e o que os dados
+   sugerem sobre gargalos ou oportunidades.
+
+**Esqueleto do documento:**
+
+```{r}
+#| eval: false
+# ---- 01-preparar-dados.R ----
+library(dplyr); library(sf); library(readxl)
+
+municipio <- "Paranaguá"; uf <- "PR"
+
+cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+# ... (nomes, limpeza — módulo 1)
+
+muni_sf  <- geobr::read_municipality(code_muni = uf, year = 2022) |>
+  filter(name_muni == municipio)
+setores  <- geobr::read_census_tract(code_tract = uf, year = 2010, simplified = FALSE)
+pop_proj <- sidrar::get_sidra(x = 4709, variable = 93, geo = "City",
+                              geo.filter = list("State" = 41))
+
+saveRDS(list(cabotagem = cabotagem, muni = muni_sf, setores = setores,
+             pop = pop_proj), "dados/projeto.rds")
+```
+
+## Opção 2 — Acessibilidade e cenário de transporte público
+
+Avalia o impacto de uma mudança na rede de transporte público sobre o acesso a oportunidades.
+
+**Roteiro:**
+
+1. **Escolha** a cidade (Fortaleza é a do material; qualquer cidade com GTFS aberto serve).
+2. **Monte a pasta do `r5r`**: `.pbf` do OSM e GTFS (@sec-m4).
+3. **Cenário atual**: matriz de tempos e indicador de acessibilidade cumulativa em 30 e 60
+   minutos (@sec-m4-r5r).
+4. **Cenário alternativo**: edite o GTFS com `gtfstools` — remova as linhas alimentadoras, ou
+   simule um corredor novo, ou reduza a frequência de um conjunto de linhas.
+5. **Recalcule** e compare: variação absoluta e percentual por hexágono.
+6. **Equidade**: quantas pessoas ganham e perdem acesso, por estrato de renda
+   (@sec-m4-acessibilidade).
+7. **Mapa da diferença**, com paleta divergente centrada em zero (@sec-m5-mapas).
+8. **Interpretação**: quem é afetado, em que magnitude, e o que isso implica para a decisão.
+
+## Opção 3 — Tema livre da sua área
+
+Se você tem em mãos um problema real do seu trabalho, ele é a melhor escolha. Precisa apenas
+atender aos requisitos da entrega e usar, no mínimo:
+
+- uma base pública brasileira acessada por código;
+- uma operação espacial (interseção, *buffer*, junção espacial, extração de raster ou
+  roteamento);
+- um mapa e um gráfico com padrão de publicação;
+- um documento Quarto que renderiza do zero.
+
+Exemplos que aparecem com frequência no dia a dia da Subsecretaria:
+
+| Tema | Ferramentas |
+|:--|:--|
+| População e equipamentos na faixa de influência de um trecho rodoviário | @sec-m2-estudo-de-caso |
+| Comparação de alternativas de traçado por relevo | @sec-m4-declividade |
+| Matriz OD e carregamento de um corredor logístico | @sec-m3-estudo-de-caso |
+| Concentração espacial de acidentes em rodovias federais | @sec-m4-autocorrelacao |
+| Séries do Comex Stat por município e modal | @sec-m1-estudo-de-caso |
+
+## Critérios de avaliação
+
+| Critério | Peso | O que se espera |
+|:--|:--:|:--|
+| Reprodutibilidade | 30% | outra pessoa roda do zero e obtém o mesmo resultado |
+| Correção técnica | 25% | CRS adequado, chaves corretas, agregações sem dupla contagem |
+| Clareza da comunicação | 20% | mapas e tabelas legíveis, com fonte e método declarados |
+| Interpretação | 15% | o texto diz o que o resultado significa, não o que o código faz |
+| Limitações | 10% | as fragilidades estão explicitadas, não escondidas |
+
+O item mais pesado é o mais simples de garantir: caminhos relativos, dados de origem acessíveis
+por código ou incluídos, nenhum passo manual não documentado, e o `sessionInfo()` no anexo.
+
+## Prazos e acompanhamento
+
+- **Durante o módulo 5**: escolha do tema e montagem do esqueleto.
+- **Dúvidas**: abrir *issue* no repositório do curso, com o código e a mensagem de erro
+  completa. Dúvidas registradas ajudam toda a turma.
+- **Entrega**: conforme combinado com a Subsecretaria ao final do curso.
+
+::: {.callout-tip}
+## Comece pelo fim
+
+Escreva primeiro o esqueleto do relatório — títulos das seções e uma frase dizendo o que cada
+uma vai mostrar. Depois preencha com código. É muito mais rápido que começar explorando dados
+sem saber onde quer chegar, e evita o projeto que vira uma coleção de gráficos sem conclusão.
+:::

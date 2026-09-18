@@ -1,0 +1,235 @@
+# Relatórios reproduzíveis com Quarto {#sec-m5-quarto}
+
+Um relatório reproduzível é um documento em que texto, código e resultados vivem no mesmo
+arquivo. Quando o dado muda, o documento inteiro se atualiza — tabelas, gráficos, mapas e os
+números citados no meio das frases.
+
+É a diferença entre "refazer o relatório do ano passado" (uma semana de trabalho, com risco de
+esquecer de atualizar um número) e "rodar de novo" (dez minutos). Este site é, ele próprio, um
+documento Quarto.
+
+## Anatomia de um documento
+
+Um arquivo `.qmd` tem três ingredientes:
+
+````
+---
+title: "Perfil logístico de Paranaguá"
+author: "Subsecretaria de Fomento e Planejamento"
+date: today
+lang: pt
+format:
+  html:
+    toc: true
+    code-fold: true
+  docx: default
+execute:
+  echo: false
+  warning: false
+---
+
+## Introdução
+
+O porto movimentou **`r round(tku, 1)` bilhões de t·km** em 2025.
+
+```{{r}}
+#| label: fig-serie
+#| fig-cap: "Evolução do TKU"
+ggplot(serie, aes(ano, tku)) + geom_line()
+```
+````
+
+1. **Cabeçalho YAML**, entre `---`: título, autoria, formato de saída e opções de execução.
+2. **Texto em Markdown**, com trechos de código embutidos para citar números no meio da frase.
+3. **Blocos de código**, que executam e inserem o resultado.
+
+## Opções de execução
+
+As mais úteis, no YAML (valem para o documento todo) ou no bloco (valem só para ele):
+
+| Opção | Efeito |
+|:--|:--|
+| `echo: false` | esconde o código, mostra o resultado — o padrão para relatório institucional |
+| `eval: false` | mostra o código sem executar |
+| `include: false` | executa sem mostrar nada (para preparar dados) |
+| `warning: false`, `message: false` | esconde avisos e mensagens dos pacotes |
+| `code-fold: true` | mostra o código recolhido, que o leitor pode abrir |
+| `cache: true` | guarda o resultado; não reexecuta se o código não mudou |
+| `freeze: auto` | reexecuta só quando o arquivo muda (o que este site usa) |
+
+```{r}
+#| eval: false
+# no bloco, a sintaxe é com #| no começo da linha
+#| label: tbl-resumo
+#| tbl-cap: "Resumo por perfil de carga"
+#| echo: false
+```
+
+## Figuras, tabelas e referências cruzadas
+
+O Quarto numera e referencia automaticamente, desde que o rótulo siga a convenção:
+`fig-` para figuras, `tbl-` para tabelas, `sec-` para seções, `eq-` para equações.
+
+````
+```{{r}}
+#| label: fig-fluxos
+#| fig-cap: "Fluxos de cabotagem em TKU"
+#| fig-width: 8
+#| fig-height: 5
+mapa_fluxos
+```
+
+Como mostra a @fig-fluxos, o corredor Norte–Sudeste concentra...
+Veja também a @tbl-corredores e a @sec-m5-mapas.
+````
+
+A numeração se ajusta sozinha quando você insere uma figura no meio do documento — o que
+elimina a revisão manual de "Figura 7 (ver Figura 12)" que todo relatório longo tem.
+
+## Tabelas
+
+```{r}
+library(dplyr)
+
+resumo <- tibble::tibble(
+  perfil = c("Granel Líquido e Gasoso", "Carga Conteinerizada",
+             "Granel Sólido", "Carga Geral"),
+  tku_bi = c(157.2, 76.0, 46.1, 7.7),
+  part = c(0.548, 0.265, 0.161, 0.027)
+)
+```
+
+```{r}
+#| label: tbl-knitr
+#| tbl-cap: "Com knitr::kable — simples e suficiente na maioria dos casos"
+resumo |>
+  mutate(part = scales::percent(part, accuracy = 0.1)) |>
+  knitr::kable(col.names = c("Perfil", "TKU (bi t·km)", "Participação"),
+               align = "lrr")
+```
+
+```{r}
+#| label: tbl-gt
+#| tbl-cap: "Com gt — quando a tabela é o produto"
+resumo |>
+  gt::gt() |>
+  gt::fmt_number(columns = tku_bi, decimals = 1, dec_mark = ",", sep_mark = ".") |>
+  gt::fmt_percent(columns = part, decimals = 1, dec_mark = ",") |>
+  gt::cols_label(perfil = "Perfil da carga", tku_bi = "TKU (bi t·km)",
+                 part = "Participação") |>
+  gt::tab_source_note("Fonte: ANTAQ, Estatístico Aquaviário (TB6.1), 2025.") |>
+  gt::tab_options(table.font.size = 12)
+```
+
+`kable` resolve o dia a dia; `gt` entra quando a tabela precisa de formatação fina — grupos,
+notas de rodapé, destaque condicional, totais.
+
+## Números no meio do texto
+
+Este é o recurso que mais evita erro em relatório institucional: em vez de digitar o número,
+você o calcula.
+
+```{r}
+tku_total <- sum(resumo$tku_bi)
+maior <- resumo |> slice_max(tku_bi, n = 1)
+```
+
+O texto abaixo é escrito assim — e se o dado mudar, ele muda junto:
+
+````
+A cabotagem movimentou `r round(tku_total, 1)` bilhões de t·km em 2025,
+sendo `r maior$perfil` o perfil dominante, com
+`r scales::percent(maior$part)` do total.
+````
+
+E se lê assim:
+
+> A cabotagem movimentou `r round(tku_total, 1)` bilhões de t·km em 2025, sendo
+> `r maior$perfil` o perfil dominante, com `r scales::percent(maior$part)` do total.
+
+## Formatos de saída
+
+```yaml
+format:
+  html:
+    toc: true
+    toc-title: "Sumário"
+    code-fold: true
+    embed-resources: true      # um único arquivo, para enviar por e-mail
+  docx:
+    reference-doc: modelo-mt.docx   # aplica a identidade visual do órgão
+  pdf:
+    documentclass: scrreprt
+    papersize: a4
+    geometry: margin=2.5cm
+    lang: pt-BR
+```
+
+O `reference-doc` merece destaque no contexto do Ministério: você formata **uma vez** um
+arquivo `.docx` com os estilos oficiais (fonte, cores, cabeçalho, numeração) e todos os
+relatórios saem com essa identidade, sem trabalho manual.
+
+```{r}
+#| eval: false
+quarto::quarto_render("relatorio.qmd")                    # todos os formatos do YAML
+quarto::quarto_render("relatorio.qmd", output_format = "docx")
+```
+
+## Estrutura de um projeto de relatório
+
+```
+relatorio-paranagua/
+├── relatorio.qmd            # o documento
+├── _quarto.yml              # opções compartilhadas (se houver vários)
+├── R/
+│   ├── funcoes.R            # funções, carregadas com source()
+│   └── 01-preparar-dados.R  # o processamento pesado, rodado antes
+├── dados/
+│   └── processado.rds       # o dado pronto para o relatório
+├── referencias.bib
+└── modelo-mt.docx
+```
+
+A separação importa: o relatório **não** deve conter o processamento pesado. Ele lê um dado já
+tratado e se concentra em apresentar. Assim o documento renderiza em segundos, e o
+processamento — que leva minutos — roda só quando o dado de origem muda.
+
+## Citações e bibliografia
+
+```yaml
+bibliography: referencias.bib
+csl: associacao-brasileira-de-normas-tecnicas.csl   # ABNT
+```
+
+No texto, `[@antaq2025]` gera a citação e monta a lista de referências ao final,
+automaticamente, no estilo definido. O arquivo `.bib` pode ser exportado do Zotero ou do
+Mendeley.
+
+## Divisões visuais
+
+::: {.callout-tip}
+## Blocos de destaque
+
+Os blocos coloridos deste site são `callout`s: `note`, `tip`, `warning`, `important`,
+`caution`. Em um relatório técnico, servem para separar premissas, limitações e recomendações
+do corpo do texto.
+:::
+
+````
+::: {.callout-warning}
+## Limitação
+A tonelagem é estimada a partir do TKU e de distâncias em linha reta.
+:::
+````
+
+```{r}
+#| eval: false
+# painéis lado a lado, úteis para comparar cenários
+#| layout-ncol: 2
+```
+
+## Do documento ao site
+
+Quando os relatórios viram uma coleção — um por trimestre, um por corredor —, o passo natural
+é publicá-los como site, exatamente como este material. O `_quarto.yml` define a navegação, e
+o GitHub Pages hospeda sem custo. É o mesmo ferramental, com outra escala.

@@ -7,13 +7,13 @@ ofertado à Subsecretaria de Fomento e Planejamento do **Ministério dos Transpo
 
 30 horas, 5 módulos semanais de 6h (3h síncronas + 3h assíncronas), formato on-line.
 
-| Módulo | Tema | Situação |
+| Módulo | Tema | Estudo de caso |
 |:--:|:--|:--|
-| 1 | Fundamentos de R e manipulação de dados | publicado |
-| 2 | Objetos espaciais: vetores e rasters | em preparação |
-| 3 | Integração de bases, roteamento e matrizes OD | em preparação |
-| 4 | Geoestatística, sensoriamento remoto e acessibilidade | em preparação |
-| 5 | Mapas temáticos, relatórios reproduzíveis e projeto final | em preparação |
+| 1 | Fundamentos de R e manipulação de dados | TKU da cabotagem (ANTAQ) |
+| 2 | Objetos espaciais: vetores e rasters | Faixa de influência da BR-116 (Serra do Mar) |
+| 3 | Integração de bases, roteamento e matrizes OD | Fluxos de cabotagem no mapa do Brasil |
+| 4 | Geoestatística, sensoriamento remoto e acessibilidade | Declividade × traçado; acessibilidade em Fortaleza |
+| 5 | Mapas temáticos, relatórios reproduzíveis e projeto final | Relatório parametrizado; projeto final |
 
 ## Estrutura do repositório
 
@@ -22,7 +22,7 @@ ofertado à Subsecretaria de Fomento e Planejamento do **Ministério dos Transpo
 ├── _quarto.yml              # configuração do livro (navegação, formato)
 ├── index.qmd                # apresentação e cronograma
 ├── m1-*.qmd                 # capítulos do módulo 1
-├── m2-00 … m5-00            # visão geral dos módulos 2 a 5
+├── m2-*.qmd … m5-*.qmd      # capítulos dos módulos 2 a 5
 ├── a-dados.qmd              # dicionário e fontes dos dados
 ├── a-slides.qmd             # slides e gravações
 ├── a-recursos.qmd           # referências
@@ -31,6 +31,16 @@ ofertado à Subsecretaria de Fomento e Planejamento do **Ministério dos Transpo
 ├── R/                       # scripts auxiliares
 └── .github/workflows/       # publicação automática no GitHub Pages
 ```
+
+## Dados
+
+Os dados de exemplo pequenos estão em `dados/` e vão para o repositório. Os demais são
+baixados pelo próprio código na primeira execução e guardados em `dados/brutos/`, que está no
+`.gitignore` — malhas do IBGE (`geobr`), grade estatística, OpenStreetMap (`osmdata`),
+altimetria (`elevatr`) e acessibilidade (`aopdata`).
+
+Exigem preparo manual apenas os blocos do `r5r` (módulo 4), que precisam do **JDK 21** e de uma
+pasta com o `.pbf` do OSM e o GTFS da cidade; esses blocos estão marcados como não executados.
 
 ## Como renderizar localmente
 

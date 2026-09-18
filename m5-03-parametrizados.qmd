@@ -1,0 +1,197 @@
+# Relatórios parametrizados {#sec-m5-parametrizados}
+
+Um relatório parametrizado é um modelo com "buracos": o município, o trecho, o ano, o cenário.
+Você renderiza o mesmo arquivo várias vezes, mudando o parâmetro — e obtém um relatório por
+caso, todos com a mesma estrutura e a mesma metodologia.
+
+É a resposta para o pedido recorrente: *"faça esse mesmo estudo para os outros 27 corredores"*.
+
+```{r}
+library(dplyr)
+library(stringr)
+library(readxl)
+```
+
+## Declarar os parâmetros
+
+No YAML do documento modelo:
+
+```yaml
+---
+title: "Perfil de cabotagem: `r params$municipio`"
+params:
+  municipio: "Paranaguá"
+  uf: "PR"
+  ano: 2025
+---
+```
+
+Dentro do documento, os valores estão em `params`:
+
+```{r}
+#| eval: false
+params$municipio
+params$ano
+```
+
+Durante o desenvolvimento, é prático simular os parâmetros para poder rodar o código linha a
+linha no console:
+
+```{r}
+# no desenvolvimento; quando renderizado, `params` vem do YAML
+if (!exists("params")) params <- list(municipio = "Paranaguá", uf = "PR", ano = 2025)
+
+params$municipio
+```
+
+## O corpo do relatório usa os parâmetros
+
+```{r}
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  mutate(across(where(is.character), str_squish)) |>
+  filter(tku > 0)
+
+dados_muni <- cabotagem |>
+  filter(cidade_destino == params$municipio, uf_destino == params$uf)
+
+resumo <- dados_muni |>
+  summarise(
+    ligacoes = n(),
+    tku_bi = sum(tku) / 1e9,
+    perfis = n_distinct(perfil),
+    origens = n_distinct(paste(cidade_origem, uf_origem))
+  )
+
+resumo |> knitr::kable()
+```
+
+E o texto se escreve em função do resultado:
+
+> O município de `r params$municipio` (`r params$uf`) recebeu
+> `r round(resumo$tku_bi, 1)` bilhões de t·km em `r params$ano`, distribuídos em
+> `r resumo$ligacoes` ligações de cabotagem originadas em `r resumo$origens`
+> localidades distintas.
+
+```{r}
+#| label: fig-param
+#| fig-cap: "Origens do TKU recebido pelo município"
+#| fig-height: 3.6
+library(ggplot2)
+
+dados_muni |>
+  mutate(origem = if_else(is.na(cidade_origem), "ZEE/Plataforma",
+                          paste0(cidade_origem, " (", uf_origem, ")"))) |>
+  summarise(tku_bi = sum(tku) / 1e9, .by = origem) |>
+  slice_max(tku_bi, n = 8) |>
+  ggplot(aes(tku_bi, reorder(origem, tku_bi))) +
+  geom_col(fill = "#1a5b8a") +
+  labs(x = "TKU (bi t·km)", y = NULL) +
+  theme_minimal(base_size = 9)
+```
+
+## Renderizar para vários casos
+
+```{r}
+#| eval: false
+library(quarto)
+
+casos <- cabotagem |>
+  summarise(tku = sum(tku), .by = c(cidade_destino, uf_destino)) |>
+  slice_max(tku, n = 10)
+
+dir.create("resultados/relatorios", recursive = TRUE, showWarnings = FALSE)
+
+for (i in seq_len(nrow(casos))) {
+  municipio <- casos$cidade_destino[i]
+  uf        <- casos$uf_destino[i]
+
+  arquivo_saida <- paste0(
+    "perfil_",
+    municipio |> str_to_lower() |> stringi::stri_trans_general("Latin-ASCII") |>
+      str_replace_all("[^a-z]+", "_"),
+    "_", uf, ".html"
+  )
+
+  message("Renderizando ", municipio, " (", i, "/", nrow(casos), ")")
+
+  quarto_render(
+    input = "modelo_perfil.qmd",
+    output_file = arquivo_saida,
+    execute_params = list(municipio = municipio, uf = uf, ano = 2025)
+  )
+
+  file.rename(arquivo_saida, file.path("resultados/relatorios", arquivo_saida))
+}
+```
+
+Alguns detalhes que evitam frustração:
+
+- `output_file` precisa ser só o **nome** do arquivo, não um caminho — daí o `file.rename()`
+  depois.
+- Renderizações em série reaproveitam pouco; se o preparo dos dados é pesado, faça-o **antes**
+  do laço e salve um `.rds` que o modelo apenas lê.
+- Envolva a chamada em `tryCatch()` quando os casos vierem de uma lista longa: um município
+  sem dados não deve interromper os outros 27.
+
+```{r}
+#| eval: false
+resultados <- lapply(seq_len(nrow(casos)), function(i) {
+  tryCatch({
+    quarto_render("modelo_perfil.qmd",
+                  execute_params = list(municipio = casos$cidade_destino[i],
+                                        uf = casos$uf_destino[i], ano = 2025))
+    data.frame(caso = casos$cidade_destino[i], status = "ok")
+  }, error = function(e) {
+    data.frame(caso = casos$cidade_destino[i], status = paste("erro:", e$message))
+  })
+})
+
+bind_rows(resultados)
+```
+
+Essa tabela de status é o "relatório do relatório": em uma rodada de 27 documentos, ela diz
+quais saíram e quais falharam, sem que você precise conferir pasta por arquivo.
+
+## Um índice dos relatórios gerados
+
+```{r}
+#| eval: false
+arquivos <- list.files("resultados/relatorios", pattern = "\\.html$")
+
+indice <- tibble::tibble(
+  arquivo = arquivos,
+  link = paste0("[", str_remove(arquivos, "\\.html$"), "](", arquivos, ")")
+)
+
+writeLines(c("# Relatórios por município", "", indice$link),
+           "resultados/relatorios/index.md")
+```
+
+Com isso, a entrega deixa de ser uma pasta com 27 arquivos soltos e passa a ser um conjunto
+navegável — que, publicado no GitHub Pages, vira um portal de consulta permanente.
+
+## Quando parametrizar
+
+| Situação | Vale a pena? |
+|:--|:--|
+| Mesmo estudo para muitas unidades (municípios, trechos, corredores) | sim, claramente |
+| Relatório recorrente (mensal, trimestral) com estrutura fixa | sim — o parâmetro é o período |
+| Cenários de uma mesma análise | sim — o parâmetro é o cenário |
+| Documento único, feito uma vez | não; parametrizar custa mais do que rende |
+
+::: {.callout-tip}
+## Automatizar a recorrência
+
+Um relatório mensal pode ser agendado: no Windows, pelo Agendador de Tarefas, chamando
+`Rscript -e 'quarto::quarto_render("relatorio.qmd")'`; em servidor Linux, por `cron`; ou no
+próprio GitHub, com um *workflow* agendado — o mesmo mecanismo que publica este site. O dado
+é atualizado na fonte, e o relatório chega pronto.
+:::

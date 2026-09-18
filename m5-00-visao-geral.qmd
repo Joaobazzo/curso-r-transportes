@@ -1,49 +1,55 @@
-# Módulo 5 — visão geral {#sec-m5}
-
-::: {.callout-note appearance="simple"}
-Capítulo em preparação. O conteúdo será publicado aqui na semana do módulo.
-:::
+# Visão geral do módulo {#sec-m5}
 
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
 **Datas (Opção A):** aulas em 03/11 e 04/11; material assíncrono liberado em 05/11
-**Pacotes:** Quarto/`rmarkdown`, `ggplot2`, `sf`, `mapgl`, `gtfstools`, `r5r`, `accessibility`
+**Pacotes:** Quarto, `rmarkdown`, `knitr`, `gt`, `ggplot2`, `sf`, `ggspatial`, `patchwork`, `mapgl`
+**Entrega:** projeto final — relatório técnico reproduzível com dados reais
 :::
 
-## Mapas temáticos avançados, relatórios reproduzíveis e projeto final
+## O que você vai conseguir fazer no fim do módulo
 
-### Aula síncrona
+- Produzir mapas temáticos com padrão de publicação: classificação justificada, paleta
+  adequada ao tipo de variável, elementos cartográficos completos e legendas legíveis.
+- Escrever um documento que **se atualiza sozinho** quando o dado muda — texto, tabelas,
+  gráficos e mapas gerados pelo mesmo código.
+- Gerar o mesmo relatório para vários municípios, trechos ou cenários, em um laço.
+- Exportar para HTML, PDF e Word, sem refazer o trabalho.
+- Entregar uma análise que outra pessoa consegue reexecutar — que é o objetivo de todo o
+  curso.
 
-- Mapas temáticos de qualidade de publicação: coropléticos, classes (Jenks e alternativas,
-  ver @sec-m1-ggplot2), rosa dos ventos, escala, inserções.
-- Automação de relatórios em Quarto/R Markdown: parâmetros, iteração por município,
-  exportação para PDF, Word e HTML.
+## Roteiro
 
-### Conteúdo assíncrono
+### Aula síncrona (3h)
 
-Desenvolvimento do **projeto final**: um relatório técnico reproduzível com dados reais. Duas
-opções.
+| Bloco | Conteúdo | Capítulo |
+|:--|:--|:--|
+| 1 | Mapas temáticos: classificação, paletas, elementos, composição | @sec-m5-mapas |
+| 2 | Quarto: estrutura, figuras, tabelas, referências cruzadas, formatos | @sec-m5-quarto |
+| 3 | Relatórios parametrizados e automação | @sec-m5-parametrizados |
 
-#### Opção 1 — Perfil de município portuário
+### Conteúdo assíncrono (3h)
 
-A partir de dados do SIDRA, do Censo e do transporte de cabotagem (ANTAQ), produzir um
-relatório automatizado para um município de destino presente na base de cabotagem, contendo:
+| Bloco | Conteúdo | Capítulo |
+|:--|:--|:--|
+| 4 | Projeto final: escolha, roteiro e critérios | @sec-m5-projeto |
+| 5 | Boas práticas e próximos passos | @sec-m5-proximos-passos |
 
-1. tabela com a descrição básica do município a partir do `geobr`;
-2. gráfico de projeção populacional com `ggplot2`;
-3. mapa de população por setor/zona censitária;
-4. mapa de fluxos origem–destino.
+## Pacotes do módulo
 
-#### Opção 2 — Acessibilidade a oportunidades de saúde
+```{r}
+#| eval: false
+pacotes <- c("quarto", "rmarkdown", "knitr", "gt", "kableExtra",
+             "ggspatial", "patchwork", "scales", "classInt", "mapgl")
 
-1. Baixar estabelecimentos de saúde (`aopdata`), GTFS, rede do OpenStreetMap
-   (`osmextract`) e dados populacionais (`geobr`, `sidrar`).
-2. Editar o GTFS removendo linhas alimentadoras (`gtfstools`).
-3. Rodar `r5r` e `accessibility` com o GTFS original e o modificado.
-4. Comparar tempo mínimo até a estação mais próxima e indicadores cumulativos de
-   acessibilidade nos dois cenários.
+faltando <- setdiff(pacotes, rownames(installed.packages()))
+if (length(faltando) > 0) install.packages(faltando)
+```
 
-### Entrega
+Para exportar em PDF, é preciso uma distribuição LaTeX. A mais simples é a que o próprio R
+instala:
 
-O relatório é entregue como projeto Quarto no repositório do participante, com dados,
-scripts e o documento renderizado — o mesmo padrão usado neste site.
+```{r}
+#| eval: false
+tinytex::install_tinytex()
+```

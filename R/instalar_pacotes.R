@@ -25,14 +25,24 @@ pacotes_modulo1 <- c(
 pacotes_opcionais <- c("data.table", "duckplyr", "duckdb", "arrow", "skimr")
 
 pacotes_espaciais <- c(
-  "sf", "terra", "leaflet", "mapgl", "duckspatial",
+  "sf", "terra", "tidyterra", "leaflet", "mapgl", "duckspatial",
   "geobr", "censobr", "sidrar", "geocodebr",
-  "osmdata", "osmextract"
+  "osmdata", "osmextract", "elevatr", "ggspatial", "units", "RColorBrewer"
 )
 
+# módulo 4: geoestatística e acessibilidade
+pacotes_geoestatistica <- c("spdep", "gstat", "sp")
+
+# módulo 5: relatórios
+pacotes_relatorios <- c("quarto", "rmarkdown", "knitr", "gt")
+
 pacotes_transportes <- c(
-  "r5r", "dodgr", "accessibility", "aopdata", "gtfstools", "Matrix"
+  "r5r", "dodgr", "accessibility", "aopdata", "gtfstools", "Matrix",
+  "sfnetworks", "stplanr"
 )
+
+# módulo 3: bases grandes e SQL
+pacotes_dados_grandes <- c("duckdb", "duckplyr", "DBI", "dbplyr", "data.table", "arrow")
 
 instalar <- function(pacotes) {
   faltando <- setdiff(pacotes, rownames(installed.packages()))
@@ -52,9 +62,12 @@ instalar <- function(pacotes) {
 instalar(pacotes_modulo1)
 
 # descomente conforme o curso avança
-# instalar(pacotes_opcionais)
-# instalar(pacotes_espaciais)
-# instalar(pacotes_transportes)
+# instalar(pacotes_opcionais)          # módulo 1 (exemplos não executados)
+# instalar(pacotes_espaciais)          # módulo 2
+# instalar(pacotes_dados_grandes)      # módulo 3
+# instalar(pacotes_transportes)        # módulos 3 e 4
+# instalar(pacotes_geoestatistica)     # módulo 4
+# instalar(pacotes_relatorios)         # módulo 5
 
 # r5r exige Java 21; verifique com:
 # rJava::.jinit(); rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")

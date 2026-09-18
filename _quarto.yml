@@ -69,6 +69,11 @@ book:
     - part: "Módulo 5 — Mapas temáticos, relatórios reproduzíveis e projeto final"
       chapters:
         - m5-00-visao-geral.qmd
+        - m5-01-mapas-tematicos.qmd
+        - m5-02-quarto.qmd
+        - m5-03-parametrizados.qmd
+        - m5-04-projeto.qmd
+        - m5-05-proximos-passos.qmd
   appendices:
     - a-dados.qmd
     - a-slides.qmd

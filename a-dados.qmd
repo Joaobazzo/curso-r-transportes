@@ -39,7 +39,31 @@ Após a padronização de nomes adotada no curso (@sec-m1-manipulacao):
 - As ligações com origem na ZEE/Plataforma Continental respondem por cerca de 38% do TKU
   total e não devem ser descartadas como "UF inválida".
 
-## Baixados por script
+## Baixados pelo próprio código
+
+Os capítulos baixam estes dados na primeira execução e guardam em `dados/brutos/`, que não vai
+para o repositório. Nas execuções seguintes, leem do cache.
+
+| Arquivo gerado | Origem | Capítulo |
+|:--|:--|:--|
+| `muni_pr_sc.gpkg`, `muni_br.gpkg`, `uf_br.gpkg`, `pr.gpkg` | `geobr` (malhas do IBGE) | módulos 2, 3 e 5 |
+| `grade_pr.gpkg` | `geobr::read_statistical_grid()` — população por célula | @sec-m2-estudo-de-caso, @sec-m4-autocorrelacao |
+| `br116_serra.gpkg`, `pontes_br116.gpkg`, `portos_osm.gpkg` | OpenStreetMap via `osmdata` | módulos 2, 3 e 4 |
+| `dem_serra.tif` | altimetria via `elevatr` (AWS Terrain Tiles) | @sec-m2-raster, @sec-m4-declividade |
+| `aop_fortaleza.rds` | `aopdata` — acessibilidade em Fortaleza, 2019 | @sec-m4-acessibilidade |
+| `od_sintetica.csv/.parquet` | gerado localmente (2 milhões de linhas) | @sec-m3-duckdb |
+
+## Preparo manual (apenas o `r5r`)
+
+Os blocos do `r5r` no @sec-m4-r5r não são executados na construção do site. Para rodá-los:
+
+1. **JDK 21** instalado (`java -version` responde 21).
+2. Pasta `dados/brutos/fortaleza/` com:
+   - o `.pbf` do OpenStreetMap — `osmextract::oe_download(osmextract::oe_match("Ceará")$url, download_directory = "dados/brutos/fortaleza")`;
+   - o **GTFS de Fortaleza** em `.zip`, sem descompactar, de
+     <https://dados.fortaleza.ce.gov.br/dataset/?tags=gtfs>.
+
+## Outras fontes citadas no material
 
 | Base | Pacote/rotina | Uso |
 |:--|:--|:--|

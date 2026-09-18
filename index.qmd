@@ -41,13 +41,13 @@ São **30 horas**, divididas em 5 módulos semanais de 6 horas: **3 horas síncr
 encontros de 1h30) e **3 horas assíncronas** (material gravado e exercícios guiados),
 para até 30 participantes, em formato on-line.
 
-| Módulo | Tema | Situação |
-|:------:|:-----|:---------|
-| 1 | [Fundamentos de R e manipulação de dados](m1-00-visao-geral.qmd) | Disponível |
-| 2 | [Objetos espaciais: vetores e rasters](m2-00-visao-geral.qmd) | Em preparação |
-| 3 | [Integração de bases, roteamento e matrizes OD](m3-00-visao-geral.qmd) | Em preparação |
-| 4 | [Geoestatística, sensoriamento remoto e acessibilidade](m4-00-visao-geral.qmd) | Em preparação |
-| 5 | [Mapas temáticos, relatórios reproduzíveis e projeto final](m5-00-visao-geral.qmd) | Em preparação |
+| Módulo | Tema | Estudo de caso |
+|:------:|:-----|:---------------|
+| 1 | [Fundamentos de R e manipulação de dados](m1-00-visao-geral.qmd) | TKU da cabotagem (ANTAQ) |
+| 2 | [Objetos espaciais: vetores e rasters](m2-00-visao-geral.qmd) | Faixa de influência da BR-116 |
+| 3 | [Integração de bases, roteamento e matrizes OD](m3-00-visao-geral.qmd) | Fluxos de cabotagem no mapa |
+| 4 | [Geoestatística, sensoriamento remoto e acessibilidade](m4-00-visao-geral.qmd) | Declividade × traçado; acessibilidade em Fortaleza |
+| 5 | [Mapas temáticos, relatórios reproduzíveis e projeto final](m5-00-visao-geral.qmd) | Relatório parametrizado e projeto final |
 
 ## Cronograma
 

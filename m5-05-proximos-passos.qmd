@@ -1,0 +1,88 @@
+# Boas práticas e próximos passos {#sec-m5-proximos-passos}
+
+## O que levar do curso
+
+Se tudo o mais for esquecido, que fiquem estes seis hábitos:
+
+1. **Projeto e caminhos relativos.** Nada de `setwd("C:/Users/...")`. É o que permite que o
+   script rode na máquina do colega.
+2. **O dado bruto nunca é editado.** Toda limpeza acontece em código, o que a torna auditável
+   e repetível quando a base for atualizada.
+3. **Checagens explícitas.** `stopifnot()` nos pontos em que uma premissa precisa valer, e
+   contagem de linhas antes e depois de cada `join`.
+4. **Investigar antes de descartar.** As duas vezes em que o dado da ANTAQ pareceu errado, a
+   investigação revelou estrutura: uma dimensão a mais e uma categoria legítima (@sec-m1-limpeza).
+5. **Declarar as escolhas.** CRS, método de classificação, limite de rampa, fator de correção,
+   horário de partida — tudo o que muda o resultado precisa estar escrito.
+6. **O relatório é código.** Se ele não renderiza do zero, ele não está pronto.
+
+## Erros que voltam sempre
+
+| Sintoma | Causa provável |
+|:--|:--|
+| "As camadas não se sobrepõem" | CRS diferente — `st_transform()`, nunca `st_set_crs()` |
+| *Buffer* com forma estranha ou área absurda | operação métrica em coordenadas geográficas |
+| O total do relatório dobrou | `join` com chave duplicada do lado direito |
+| Uma coluna numérica virou texto | separador decimal, `-` ou `n/d` no lugar de `NA` |
+| O gráfico saiu vazio | `NA` introduzido por conversão silenciosa |
+| Setores "sem população" | município com nome grafado de outro jeito na outra base |
+| `Inf` em roteamento | pontos em componentes desconectados da rede |
+| O mapa perdeu fluxo | pares sem coordenada — confira a soma antes e depois |
+
+## Como continuar aprendendo
+
+**Referência do dia a dia**
+
+- [R for Data Science (2ª ed.)](https://r4ds.hadley.nz/) — manipulação e visualização.
+- [Geocomputation with R](https://r.geocompx.org/) — o livro de referência em espacial.
+- [Introduction to urban accessibility with R](https://ipeagit.github.io/intro_access_book/) —
+  em português, do grupo que faz o `r5r` e o `aopdata`.
+- As [*cheat sheets*](https://posit.co/resources/cheatsheets/) de `dplyr`, `ggplot2`, `sf` e
+  Quarto, impressas e ao lado do teclado.
+
+**Comunidades**
+
+- A seção *issues* dos pacotes: é onde os autores respondem, e onde estão os problemas reais.
+- [R-bloggers](https://www.r-bloggers.com/) e o fórum [Posit Community](https://forum.posit.co/).
+- O ecossistema [ipeaGIT](https://github.com/ipeaGIT), que mantém `geobr`, `censobr`, `r5r`,
+  `aopdata`, `gtfstools` e `geocodebr` — vale acompanhar os lançamentos.
+
+**Próximos temas naturais para esta equipe**
+
+| Tema | Por onde começar |
+|:--|:--|
+| Modelos de demanda (geração, distribuição, escolha modal) | `mlogit`, `apollo` |
+| Regressão espacial | `spatialreg`, `GWmodel` |
+| Séries temporais e previsão | `fable`, `forecast` |
+| Painéis interativos | `shiny`, `flexdashboard`, `mapgl` |
+| Automação de rotinas e APIs | `httr2`, `targets`, GitHub Actions |
+| Grandes volumes | `arrow`, `duckdb`, `sfarrow` |
+
+O pacote `targets` merece uma menção especial: ele organiza análises longas como um
+encadeamento de etapas, reexecutando só o que mudou. É o passo natural depois que o script de
+um projeto passa de algumas centenas de linhas.
+
+## Manter o material vivo
+
+Este site continua disponível depois do curso e pode receber acréscimos: novos estudos de caso,
+correções e código que a própria equipe desenvolver. Contribuições são bem-vindas pelo
+repositório:
+
+```bash
+git clone https://github.com/Joaobazzo/curso-r-transportes.git
+cd curso-r-transportes
+quarto preview
+```
+
+Correções e sugestões pelas
+[*issues*](https://github.com/Joaobazzo/curso-r-transportes/issues) — inclusive erros de
+digitação, que são as mais fáceis de resolver e as mais úteis para quem vier depois.
+
+## Encerramento
+
+O objetivo do curso nunca foi ensinar uma linguagem, e sim mudar o formato do trabalho: sair de
+análises que existem uma vez, dentro de uma planilha, para análises que ficam registradas,
+podem ser auditadas, corrigidas e reexecutadas quando o dado muda.
+
+Se, ao final, uma rotina que hoje leva um dia passar a levar dez minutos — e puder ser repetida
+por qualquer colega da equipe —, o curso cumpriu o que se propôs.

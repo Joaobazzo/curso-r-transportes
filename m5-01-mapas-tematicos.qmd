@@ -1,0 +1,272 @@
+# Mapas temáticos {#sec-m5-mapas}
+
+Um mapa técnico bem-feito não é questão de estética: cada decisão — classificação, paleta,
+projeção, elementos — muda o que o leitor conclui. Este capítulo percorre essas decisões com
+um exemplo único, refinado passo a passo.
+
+```{r}
+library(sf)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(readxl)
+library(classInt)
+```
+
+## O dado
+
+TKU de cabotagem atraído por UF — o resultado do módulo 1, agora para virar mapa.
+
+```{r}
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+names(cabotagem) <- colunas
+
+por_uf <- cabotagem |>
+  filter(tku > 0) |>
+  mutate(uf_destino = str_to_upper(str_squish(uf_destino))) |>
+  summarise(tku_bi = sum(tku) / 1e9, .by = uf_destino)
+
+if (!file.exists("dados/brutos/uf_br.gpkg")) {
+  st_write(geobr::read_state(year = 2020, showProgress = FALSE),
+           "dados/brutos/uf_br.gpkg", quiet = TRUE)
+}
+
+ufs <- st_read("dados/brutos/uf_br.gpkg", quiet = TRUE) |>
+  left_join(por_uf, by = c("abbrev_state" = "uf_destino")) |>
+  mutate(tku_bi = tidyr::replace_na(tku_bi, 0))
+
+summary(ufs$tku_bi)
+```
+
+## Versão 1 — o mapa cru
+
+```{r}
+#| label: fig-v1
+#| fig-cap: "Primeira tentativa: escala contínua, sem tratamento"
+#| fig-height: 4.6
+ggplot(ufs) +
+  geom_sf(aes(fill = tku_bi)) +
+  theme_void()
+```
+
+O problema é visível: a distribuição é muito assimétrica, então quase tudo fica na mesma cor e
+só um ou dois estados se destacam. O mapa não informa.
+
+## Versão 2 — classificar
+
+Classificar é agrupar os valores em faixas. O método muda a leitura, como vimos em
+@sec-m1-ggplot2 — aqui, aplicado ao mapa.
+
+```{r}
+#| label: fig-v2
+#| fig-cap: "Os mesmos dados com três métodos de classificação"
+#| fig-height: 3.4
+classificar <- function(x, estilo, n = 5) {
+  brks <- classIntervals(x[x > 0], n = n, style = estilo)$brks
+  cut(x, breaks = unique(c(0, brks)), include.lowest = TRUE, dig.lab = 2)
+}
+
+mapa_classe <- function(estilo, titulo) {
+  ufs |>
+    mutate(classe = classificar(tku_bi, estilo)) |>
+    ggplot() +
+    geom_sf(aes(fill = classe), colour = "white", linewidth = 0.15) +
+    scale_fill_brewer(palette = "YlGnBu", na.value = "grey93", name = NULL) +
+    labs(title = titulo) +
+    theme_void(base_size = 8) +
+    theme(plot.title = element_text(hjust = 0.5, size = 9),
+          legend.key.size = unit(0.3, "cm"))
+}
+
+patchwork::wrap_plots(
+  mapa_classe("quantile", "Quantis"),
+  mapa_classe("jenks",    "Jenks"),
+  mapa_classe("equal",    "Intervalos iguais"),
+  nrow = 1
+)
+```
+
+| Método | Efeito no mapa | Quando usar |
+|:--|:--|:--|
+| Quantis | mesmo número de unidades por classe; sempre "colorido" | ranques, comparações relativas |
+| Jenks | respeita os agrupamentos naturais dos dados | distribuições assimétricas — o caso mais comum |
+| Intervalos iguais | faixas de mesma amplitude | quando a escala tem significado próprio (%, temperatura) |
+
+::: {.callout-important}
+O método de classificação **precisa estar na legenda ou na nota do mapa**. Dois mapas do mesmo
+dado com métodos diferentes contam histórias diferentes, e o leitor tem o direito de saber
+qual foi usado.
+:::
+
+## Versão 3 — a paleta certa para o tipo de variável
+
+```{r}
+#| label: fig-paletas
+#| fig-cap: "Tipos de paleta: sequencial, divergente e qualitativa"
+#| fig-height: 2.6
+exemplo <- expand.grid(x = 1:9, y = 1)
+
+p <- function(cores, titulo) {
+  ggplot(exemplo, aes(x, y, fill = factor(x))) +
+    geom_tile(colour = "white") +
+    scale_fill_manual(values = cores, guide = "none") +
+    labs(title = titulo) +
+    theme_void(base_size = 8) +
+    theme(plot.title = element_text(hjust = 0.5, size = 8))
+}
+
+patchwork::wrap_plots(
+  p(RColorBrewer::brewer.pal(9, "YlGnBu"), "Sequencial\n(quantidade)"),
+  p(RColorBrewer::brewer.pal(9, "RdBu"),   "Divergente\n(desvio de um ponto médio)"),
+  p(RColorBrewer::brewer.pal(9, "Set1"),   "Qualitativa\n(categorias)"),
+  nrow = 1
+)
+```
+
+- **Sequencial** para quantidades (TKU, população, acessibilidade).
+- **Divergente** quando há um ponto de referência com significado: saldo, variação percentual,
+  diferença entre cenários. O branco (ou cinza) marca o zero.
+- **Qualitativa** para categorias sem ordem: modo, perfil de carga, jurisdição.
+
+Duas verificações rápidas de acessibilidade visual: converta o mapa para tons de cinza e veja
+se a ordem ainda se lê; e evite vermelho-verde como par de contraste, que é o tipo mais comum
+de daltonismo. As paletas `viridis` resolvem os dois problemas por construção.
+
+## Versão 4 — o mapa completo
+
+```{r}
+#| label: fig-mapa-final
+#| fig-cap: "TKU de cabotagem atraído por unidade da federação, 2025"
+#| fig-height: 6
+ufs_cls <- ufs |>
+  mutate(classe = classificar(tku_bi, "jenks"))
+
+rotulos <- ufs_cls |>
+  filter(tku_bi > 5) |>
+  st_point_on_surface()
+
+ggplot(ufs_cls) +
+  geom_sf(aes(fill = classe), colour = "white", linewidth = 0.2) +
+  geom_sf_text(data = rotulos, aes(label = abbrev_state),
+               size = 2.6, colour = "grey15", fontface = "bold") +
+  scale_fill_brewer(palette = "YlGnBu", na.value = "grey93",
+                    name = "TKU (bi t·km)") +
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.2,
+                              text_cex = 0.6) +
+  ggspatial::annotation_north_arrow(
+    location = "tl", style = ggspatial::north_arrow_minimal(),
+    height = unit(0.9, "cm"), width = unit(0.9, "cm")) +
+  labs(
+    title = "Cabotagem: TKU atraído por UF de destino",
+    subtitle = "Bilhões de toneladas-quilômetro úteis, 2025",
+    caption = paste0(
+      "Fonte: ANTAQ, Estatístico Aquaviário (TB6.1), 2025. Malha: IBGE (2020).\n",
+      "Classificação por quebras naturais (Jenks), 5 classes. ",
+      "Projeção: SIRGAS 2000 / Policônica do Brasil (EPSG:5880)."
+    )
+  ) +
+  coord_sf(crs = 5880) +
+  theme_void(base_size = 10) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12),
+    plot.subtitle = element_text(colour = "grey35", size = 9),
+    plot.caption = element_text(colour = "grey45", size = 7, hjust = 0),
+    legend.position = c(0.18, 0.28)
+  )
+```
+
+A nota de rodapé desse mapa contém as quatro informações que um mapa técnico precisa
+declarar: **fonte do dado**, **fonte da malha**, **método de classificação** e **projeção**.
+É o que separa um gráfico de uma peça técnica.
+
+## Composição: mapa principal com inserção
+
+```{r}
+#| label: fig-inset
+#| fig-cap: "Mapa de detalhe com mapa de situação"
+#| fig-height: 5
+principal <- ufs_cls |> filter(abbrev_state %in% c("PR", "SC", "RS"))
+
+g_principal <- ggplot(principal) +
+  geom_sf(aes(fill = classe), colour = "white", linewidth = 0.3) +
+  geom_sf_text(aes(label = abbrev_state), size = 3) +
+  scale_fill_brewer(palette = "YlGnBu", na.value = "grey93", name = "TKU (bi)") +
+  theme_void(base_size = 9)
+
+g_situacao <- ggplot(ufs) +
+  geom_sf(fill = "grey93", colour = "white", linewidth = 0.1) +
+  geom_sf(data = principal, fill = "#b3402a", colour = NA) +
+  theme_void()
+
+g_principal +
+  patchwork::inset_element(g_situacao, left = 0.72, bottom = 0.72,
+                           right = 1, top = 1)
+```
+
+`patchwork::inset_element()` resolve o mapa de situação — aquele retângulo no canto que mostra
+onde, no país, fica a área ampliada. É esperado em qualquer mapa de recorte regional.
+
+## Símbolos proporcionais e fluxos
+
+Coroplético é para taxas e densidades. Para **totais**, a representação correta é o símbolo
+proporcional:
+
+```{r}
+#| label: fig-simbolos
+#| fig-cap: "Símbolos proporcionais: TKU atraído por UF"
+#| fig-height: 5.4
+centros <- ufs_cls |> filter(tku_bi > 0) |> st_point_on_surface()
+
+ggplot() +
+  geom_sf(data = ufs, fill = "grey97", colour = "white", linewidth = 0.2) +
+  geom_sf(data = centros, aes(size = tku_bi), colour = "#1a5b8a", alpha = 0.65) +
+  scale_size_area(max_size = 14, name = "TKU (bi t·km)") +
+  coord_sf(crs = 5880) +
+  theme_void(base_size = 10)
+```
+
+`scale_size_area()` é a função correta aqui: ela garante que a **área** do círculo seja
+proporcional ao valor. Com `scale_size()`, o proporcional é o raio — e o olho lê área, o que
+exagera as diferenças por um fator quadrático.
+
+## Mapas interativos no relatório
+
+```{r}
+#| eval: false
+library(mapgl)
+
+maplibre(bounds = ufs) |>
+  add_fill_layer(
+    id = "tku",
+    source = st_transform(ufs_cls, 4326),
+    fill_color = interpolate(
+      column = "tku_bi",
+      values = c(0, 10, 30, 60),
+      stops = c("#f7fcf0", "#7bccc4", "#2b8cbe", "#084081")
+    ),
+    fill_opacity = 0.8,
+    tooltip = "abbrev_state"
+  ) |>
+  add_legend("TKU (bi t·km)", values = c(0, 60),
+             colors = c("#f7fcf0", "#084081"))
+```
+
+Em um relatório HTML, o mapa interativo é um ganho real: o leitor explora. Em PDF ou Word, ele
+vira uma imagem estática — então o documento precisa funcionar nos dois casos, com o mapa
+estático como base e o interativo como complemento.
+
+## Lista de verificação antes de entregar um mapa
+
+1. O leitor sabe **o que** está representado? (título e subtítulo)
+2. Sabe de **onde** vem o dado? (fonte, ano, malha)
+3. Sabe **como** as classes foram formadas? (método e número de classes)
+4. A projeção está declarada e é adequada à área?
+5. Há escala gráfica e indicação de norte?
+6. A paleta corresponde ao tipo de variável e funciona em tons de cinza?
+7. A legenda é legível no tamanho final de impressão?
+8. Totais estão em símbolos proporcionais, e taxas em coroplético?
