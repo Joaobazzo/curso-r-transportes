@@ -1,0 +1,302 @@
+# Estudo de caso: fluxos da cabotagem no mapa {#sec-m3-estudo-de-caso}
+
+No módulo 1 chegamos a uma matriz origem–destino da cabotagem em TKU. Ela era uma tabela.
+Agora ela vira mapa — e, no caminho, responde a uma pergunta que a tabela não respondia:
+
+> *Onde estão, geograficamente, os corredores de cabotagem do país; quanta carga (em
+> toneladas) eles movimentam; e qual a distância média percorrida por tonelada?*
+
+```{r}
+library(sf)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(readxl)
+
+crs_br <- 5880   # SIRGAS 2000 / Policônica do Brasil — para o mapa nacional
+```
+
+## Passo 1 — A matriz OD municipal
+
+```{r}
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+stopifnot(ncol(cabotagem) == length(colunas))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  mutate(across(where(is.character), str_squish)) |>
+  filter(tku > 0) |>
+  mutate(
+    uf_origem  = str_to_upper(uf_origem),
+    uf_destino = str_to_upper(uf_destino),
+    offshore   = uf_origem == "ZEE/PLAT. CONTINENTAL",
+    tku_bi     = tku / 1e9
+  )
+
+od <- cabotagem |>
+  summarise(tku = sum(tku), .by = c(offshore, uf_origem, cidade_origem,
+                                    uf_destino, cidade_destino))
+
+c(pares = nrow(od), tku_bi = round(sum(od$tku) / 1e9, 1))
+```
+
+## Passo 2 — Coordenadas: do nome do município ao ponto
+
+Aqui a ponte entre o módulo 1 (padronização de texto e `join`) e o módulo 2 (geometria).
+
+```{r}
+arquivo <- "dados/brutos/muni_br.gpkg"
+if (!file.exists(arquivo)) {
+  br <- geobr::read_municipality(code_muni = "all", year = 2022,
+                                 simplified = TRUE, showProgress = FALSE)
+  st_write(br, arquivo, quiet = TRUE)
+}
+muni <- st_read(arquivo, quiet = TRUE)
+
+chave <- function(nome, uf) {
+  paste(
+    nome |> str_to_lower() |> stringi::stri_trans_general("Latin-ASCII") |> str_squish(),
+    str_to_upper(uf), sep = "|"
+  )
+}
+
+centroides <- muni |>
+  st_point_on_surface() |>
+  mutate(k = chave(name_muni, abbrev_state)) |>
+  select(k, code_muni, name_muni, abbrev_state)
+
+nrow(centroides)
+```
+
+```{r}
+# diagnóstico ANTES do join: que municípios da ANTAQ não existem na malha do IBGE?
+pontas <- bind_rows(
+  od |> filter(!offshore) |> transmute(k = chave(cidade_origem, uf_origem)),
+  od |> transmute(k = chave(cidade_destino, uf_destino))
+) |>
+  distinct()
+
+nao_encontrados <- pontas |> anti_join(st_drop_geometry(centroides), by = "k")
+nao_encontrados
+```
+
+Se essa tabela vier vazia, a padronização resolveu tudo. Quando aparece algo, as causas
+usuais são grafia antiga do município, acento diferente ou instalação registrada em município
+vizinho — e a correção é uma tabela de-para explícita, nunca um ajuste silencioso:
+
+```{r}
+#| eval: false
+de_para <- tibble::tribble(
+  ~k_antaq,              ~k_ibge,
+  "santana do livramento|RS", "sant ana do livramento|RS"
+)
+```
+
+### O caso offshore
+
+As 37 ligações que saem da Zona Econômica Exclusiva não têm município de origem. Ignorá-las
+apagaria 38% do TKU (ver @sec-m1-limpeza), então elas ganham uma **origem explícita no mar** —
+um ponto representativo na Bacia de Campos, onde está a maior parte da produção:
+
+```{r}
+ponto_zee <- st_sfc(st_point(c(-40.20, -22.40)), crs = 4674)
+
+origens <- od |>
+  mutate(k = if_else(offshore, "zee", chave(cidade_origem, uf_origem)))
+
+coords_zee <- tibble::tibble(k = "zee", code_muni = NA_real_,
+                             name_muni = "ZEE / Plataforma Continental",
+                             abbrev_state = NA_character_,
+                             geom = ponto_zee) |>
+  st_as_sf()
+
+pontos <- bind_rows(centroides |> rename(geom = geom), coords_zee)
+```
+
+::: {.callout-important}
+Um ponto único para toda a ZEE é uma **simplificação declarada**, não um dado. Ela serve para
+o mapa comunicar a origem marítima do fluxo; não serve para calcular distância de navegação
+real. Qualquer número derivado dessa geometria precisa vir com essa ressalva no relatório — e
+é por isso que, no passo 5, tratamos a distância com um fator de correção explícito.
+:::
+
+## Passo 3 — Montar as linhas de desejo
+
+```{r}
+xy <- st_coordinates(pontos)
+idx <- setNames(seq_len(nrow(pontos)), pontos$k)
+
+od_geo <- origens |>
+  mutate(
+    k_o = k,
+    k_d = chave(cidade_destino, uf_destino),
+    i_o = idx[k_o],
+    i_d = idx[k_d]
+  ) |>
+  filter(!is.na(i_o), !is.na(i_d))
+
+c(pares_totais = nrow(origens),
+  pares_com_geometria = nrow(od_geo),
+  tku_preservado = round(sum(od_geo$tku) / sum(origens$tku), 3))
+
+linhas <- st_sf(
+  od_geo,
+  geometry = Map(\(a, b) st_linestring(rbind(xy[a, ], xy[b, ])),
+                 od_geo$i_o, od_geo$i_d) |> st_sfc(crs = 4674)
+) |>
+  mutate(tku_bi = tku / 1e9)
+```
+
+A linha `tku_preservado` é a checagem que importa: se o valor não for próximo de 1, parte do
+fluxo ficou de fora do mapa por falta de coordenada — e o mapa passaria a contar uma história
+diferente da tabela.
+
+## Passo 4 — O mapa de fluxos
+
+```{r}
+#| label: fig-caso-fluxos
+#| fig-cap: "Fluxos de cabotagem em TKU (2025): 40 maiores ligações municipais"
+#| fig-height: 6.5
+arquivo_uf <- "dados/brutos/uf_br.gpkg"
+if (!file.exists(arquivo_uf)) {
+  ufs <- geobr::read_state(year = 2020, showProgress = FALSE)
+  st_write(ufs, arquivo_uf, quiet = TRUE)
+}
+ufs <- st_read(arquivo_uf, quiet = TRUE) |> st_transform(crs_br)
+
+top_linhas <- linhas |>
+  slice_max(tku_bi, n = 40) |>
+  arrange(tku_bi) |>
+  st_transform(crs_br)
+
+pontos_usados <- pontos |>
+  filter(k %in% c(top_linhas$k_o, top_linhas$k_d)) |>
+  st_transform(crs_br)
+
+ggplot() +
+  geom_sf(data = ufs, fill = "grey97", colour = "grey86", linewidth = 0.2) +
+  geom_sf(data = top_linhas,
+          aes(linewidth = tku_bi, colour = offshore, alpha = tku_bi)) +
+  geom_sf(data = pontos_usados, size = 0.9, colour = "grey25") +
+  scale_linewidth_continuous(range = c(0.2, 3.2), name = "TKU (bi t·km)",
+                             transform = "sqrt") +
+  scale_alpha_continuous(range = c(0.4, 0.9), guide = "none") +
+  scale_colour_manual(values = c(`FALSE` = "#1a5b8a", `TRUE` = "#b3402a"),
+                      labels = c(`FALSE` = "porto a porto", `TRUE` = "offshore (ZEE)"),
+                      name = NULL) +
+  labs(
+    title = "Cabotagem: principais fluxos em TKU, 2025",
+    caption = paste("Fonte: ANTAQ, Estatístico Aquaviário (TB6.1).",
+                    "Linhas retas entre centroides municipais; origem offshore representada",
+                    "por ponto único na Bacia de Campos.")
+  ) +
+  theme_void(base_size = 10) +
+  theme(plot.title = element_text(face = "bold", size = 12),
+        legend.position = "bottom")
+```
+
+A `transform = "sqrt"` na espessura não é detalhe estético: sem ela, a maior ligação — quase
+28 bilhões de t·km — teria uma linha dezenas de vezes mais grossa que a mediana e cobriria o
+litoral inteiro.
+
+## Passo 5 — De TKU a toneladas
+
+O dado publicado é TKU. Como TKU = toneladas × quilômetros, conhecendo a distância podemos
+estimar a tonelagem — e é aí que a geometria começa a produzir informação nova.
+
+```{r}
+linhas <- linhas |>
+  mutate(
+    dist_reta_km = as.numeric(units::set_units(st_length(geometry), km)),
+    # a navegação acompanha a costa: a rota real é maior que a linha reta.
+    # 1,25 é um fator ilustrativo; em estudo oficial, use distâncias náuticas.
+    dist_rota_km = dist_reta_km * 1.25,
+    toneladas_est = tku / dist_rota_km
+  )
+
+linhas |>
+  st_drop_geometry() |>
+  summarise(
+    tku_bi = sum(tku) / 1e9,
+    toneladas_mi = sum(toneladas_est, na.rm = TRUE) / 1e6,
+    distancia_media_km = sum(tku, na.rm = TRUE) / sum(toneladas_est, na.rm = TRUE)
+  ) |>
+  mutate(across(everything(), \(x) round(x, 1))) |>
+  knitr::kable()
+```
+
+```{r}
+linhas |>
+  st_drop_geometry() |>
+  slice_max(tku, n = 10) |>
+  transmute(
+    origem  = if_else(offshore, "ZEE/Plataforma", paste0(cidade_origem, " (", uf_origem, ")")),
+    destino = paste0(cidade_destino, " (", uf_destino, ")"),
+    `TKU (bi)` = round(tku / 1e9, 2),
+    `Dist. (km)` = round(dist_rota_km),
+    `Toneladas (mi)` = round(toneladas_est / 1e6, 2)
+  ) |>
+  knitr::kable(align = "llrrr")
+```
+
+::: {.callout-warning}
+Esse número é uma **estimativa**, e o relatório precisa dizer isso em uma frase: ele depende da
+distância suposta, que é a linha reta corrigida por um fator. Para o dado oficial de tonelagem,
+a própria ANTAQ publica a movimentação em toneladas nas tabelas de carga — e comparar a
+estimativa com o publicado é, aliás, um excelente exercício de validação.
+:::
+
+## Passo 6 — Corredores
+
+```{r}
+corredores <- linhas |>
+  st_drop_geometry() |>
+  mutate(corredor = case_when(
+    offshore ~ paste("Offshore →", uf_destino),
+    TRUE     ~ paste(uf_origem, "→", uf_destino)
+  )) |>
+  summarise(tku_bi = sum(tku) / 1e9,
+            toneladas_mi = sum(toneladas_est, na.rm = TRUE) / 1e6,
+            ligacoes = n(),
+            .by = corredor) |>
+  arrange(desc(tku_bi))
+
+corredores |>
+  slice_head(n = 12) |>
+  mutate(part = tku_bi / sum(corredores$tku_bi),
+         across(c(tku_bi, toneladas_mi), \(x) round(x, 2)),
+         part = scales::percent(part, accuracy = 0.1)) |>
+  knitr::kable(align = "lrrrr")
+```
+
+## Passo 7 — Exportar
+
+```{r}
+#| eval: false
+dir.create("resultados", showWarnings = FALSE)
+
+st_write(st_transform(linhas, 4674), "resultados/cabotagem_fluxos.gpkg",
+         layer = "fluxos_od", delete_dsn = TRUE)
+
+writexl::write_xlsx(
+  list("Corredores" = corredores,
+       "Pares OD"   = st_drop_geometry(linhas)),
+  "resultados/cabotagem_od_2025.xlsx"
+)
+```
+
+## O que este estudo de caso mostrou
+
+1. O `join` por nome de município — o assunto do módulo 1 — é o que conecta uma base
+   tabular a uma base geográfica. A padronização de texto não é preciosismo: sem ela, o mapa
+   perde fluxo.
+2. A verificação `tku_preservado` é o hábito que separa um mapa correto de um mapa bonito.
+3. Toda simplificação geométrica (um ponto para a ZEE, linha reta em vez de rota, fator de
+   correção de distância) precisa estar **escrita** — no código e na legenda do mapa.
+4. Com geometria, o dado publicado (TKU) gera informação nova (toneladas estimadas, distância
+   média, corredores) — que é exatamente o tipo de análise que justifica a ferramenta.

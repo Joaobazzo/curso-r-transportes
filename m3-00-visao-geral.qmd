@@ -1,36 +1,82 @@
-# Módulo 3 — visão geral {#sec-m3}
-
-::: {.callout-note appearance="simple"}
-Capítulo em preparação. O conteúdo será publicado aqui na semana do módulo.
-:::
+# Visão geral do módulo {#sec-m3}
 
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
 **Datas (Opção A):** aulas em 13/10 e 14/10; material assíncrono liberado em 15/10
-**Pacotes:** `r5r`, `dodgr`, `duckdb`, `osmdata`, `osmextract`, `geocodebr`, `censobr`, `Matrix`
+**Pacotes:** `osmdata`, `osmextract`, `duckdb`, `duckplyr`, `geocodebr`, `dodgr`, `r5r`, `Matrix`, `sf`
+**Estudo de caso:** matriz OD e fluxos espaciais da cabotagem, com cálculo de TKU
 :::
 
-## Integração de bases, roteamento e matrizes OD
+## O que você vai conseguir fazer no fim do módulo
 
-### Aula síncrona
+- Extrair do OpenStreetMap a malha viária e os pontos de interesse de uma área de estudo.
+- Consultar bases grandes com SQL, direto do R, sem carregar tudo na memória.
+- Transformar listas de endereços em coordenadas (geocodificação) e avaliar a qualidade do
+  resultado.
+- Calcular rotas, distâncias e tempos de viagem sobre uma rede real.
+- Representar matrizes origem–destino de forma eficiente e convertê-las em **fluxos
+  espaciais** — as linhas de desejo que aparecem nos mapas de carga.
+- Calcular indicadores de transporte (TKU) a partir de uma matriz OD.
 
-- Introdução ao roteamento com `r5r` e `dodgr`: rede, *snapping*, parâmetros de viagem.
-- Processamento com SQL via `duckdb` dentro do R.
-- Extração de dados do OpenStreetMap com `osmdata` e `osmextract`.
-- Geocodificação de endereços brasileiros com `geocodebr`.
-- Extração de dados censitários com `censobr` e `geobr`.
-- Matrizes esparsas com `Matrix`: por que não usar `matrix` densa em problemas com muitas
-  zonas.
+## Roteiro
 
-### Conteúdo assíncrono
+### Aula síncrona (3h)
 
-- Construção de mapas origem–destino.
-- Conversão de matrizes OD em fluxos espaciais (linhas de desejo) com `sf` e `ggplot2`.
-- Limpeza de dados de fluxo.
+| Bloco | Conteúdo | Capítulo |
+|:--|:--|:--|
+| 1 | Extração de dados do OpenStreetMap | @sec-m3-osm |
+| 2 | Processamento com SQL via DuckDB; comparação de desempenho | @sec-m3-duckdb |
+| 3 | Geocodificação de endereços com `geocodebr` | @sec-m3-geocodificacao |
+| 4 | Roteamento com `dodgr` e `r5r` | @sec-m3-roteamento |
 
-### Estudos de caso
+### Conteúdo assíncrono (3h)
 
-1. Cálculo de indicadores de **TKU** a partir de matrizes OD e criação de grades espaciais —
-   continuação direta de @sec-m1-estudo-de-caso, agora com a geometria dos portos.
-2. Ler e processar uma base de roteamento com `duckdb` e comparar o tempo de processamento
-   com `data.table`, `dplyr` e R base.
+| Bloco | Conteúdo | Capítulo |
+|:--|:--|:--|
+| 5 | Matrizes OD, matrizes esparsas e fluxos espaciais | @sec-m3-matrizes |
+| 6 | Estudo de caso: fluxos e TKU da cabotagem no mapa do Brasil | @sec-m3-estudo-de-caso |
+| 7 | Exercícios | @sec-m3-exercicios |
+
+## Pacotes do módulo
+
+```{r}
+#| eval: false
+pacotes <- c("osmdata", "osmextract", "duckdb", "duckplyr", "DBI", "dbplyr",
+             "data.table", "arrow", "geocodebr", "dodgr", "r5r", "Matrix", "sfnetworks")
+
+faltando <- setdiff(pacotes, rownames(installed.packages()))
+if (length(faltando) > 0) install.packages(faltando)
+```
+
+::: {.callout-important}
+## O `r5r` precisa de Java 21
+
+O `r5r` é uma interface para o R5, o motor de roteamento da Conveyal, escrito em Java. Sem o
+**JDK 21** instalado, o pacote carrega mas falha ao construir a rede. Verifique antes do
+encontro:
+
+```{r}
+#| eval: false
+# no terminal do sistema
+# java -version    -> deve responder "21"
+
+# dentro do R
+rJava::.jinit()
+rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")
+```
+
+Se a instalação depender da TI do Ministério, peça o **JDK 21 (Temurin ou Oracle)** no mesmo
+chamado do R e do Rtools. Enquanto isso, o `dodgr` roda em R puro e cobre boa parte dos
+exemplos.
+:::
+
+## Uma observação sobre escala
+
+Este é o módulo em que os dados deixam de caber confortavelmente na memória. Três hábitos que
+atravessam todos os capítulos:
+
+1. **Recorte antes de carregar**: filtre na consulta (SQL, `query=` do `osmextract`,
+   `wkt_filter` do `sf`), não depois.
+2. **Guarde resultados intermediários** em `.parquet` ou `.rds`, e leia de lá.
+3. **Meça**: `system.time()` em volta de cada etapa pesada mostra onde está o gargalo — e
+   frequentemente ele não está onde se imagina.

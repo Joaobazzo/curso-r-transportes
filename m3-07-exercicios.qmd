@@ -1,0 +1,209 @@
+# Exercícios {#sec-m3-exercicios}
+
+```{r}
+library(sf)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(Matrix)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+names(cabotagem) <- colunas
+cabotagem <- cabotagem |>
+  mutate(across(where(is.character), str_squish)) |>
+  filter(tku > 0) |>
+  mutate(uf_origem = str_to_upper(uf_origem),
+         uf_destino = str_to_upper(uf_destino))
+```
+
+## 1. SQL no lugar do `dplyr`
+
+Responda com **uma consulta SQL no DuckDB**, sobre o CSV da cabotagem: qual o TKU total por
+perfil de carga, apenas para destinos no Nordeste?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+library(DBI); library(duckdb)
+
+con <- dbConnect(duckdb())
+
+dbGetQuery(con, "
+  SELECT \"Perfil da Carga\" AS perfil,
+         COUNT(*) AS ligacoes,
+         SUM(\"TKU (t x km)\") / 1e9 AS tku_bi
+  FROM read_csv_auto('dados/cabotagem_tku_2025.csv')
+  WHERE \"UF de Destino\" IN ('AL','BA','CE','MA','PB','PE','PI','RN','SE')
+  GROUP BY perfil
+  ORDER BY tku_bi DESC
+")
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
+Nomes de coluna com espaço precisam de aspas duplas em SQL — mais um argumento para
+padronizar os nomes na entrada, como fizemos no módulo 1.
+:::
+
+## 2. Matriz esparsa
+
+Monte a matriz OD interestadual da cabotagem como `sparseMatrix`, com UFs nas linhas e
+colunas. Qual a densidade da matriz (fração de pares com fluxo)?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+od_uf <- cabotagem |>
+  filter(uf_origem %in% state.abb | TRUE) |>     # mantém todas, inclusive ZEE
+  summarise(tku = sum(tku), .by = c(uf_origem, uf_destino))
+
+zonas <- sort(unique(c(od_uf$uf_origem, od_uf$uf_destino)))
+
+m <- sparseMatrix(
+  i = match(od_uf$uf_origem, zonas),
+  j = match(od_uf$uf_destino, zonas),
+  x = od_uf$tku / 1e9,
+  dims = c(length(zonas), length(zonas)),
+  dimnames = list(zonas, zonas)
+)
+
+c(zonas = length(zonas),
+  pares_com_fluxo = length(m@x),
+  densidade = round(length(m@x) / length(zonas)^2, 3))
+
+round(m[1:6, 1:6], 2)
+```
+:::
+
+## 3. Emissão, atração e saldo
+
+A partir da matriz do exercício 2, monte a tabela de TKU emitido, atraído e saldo por UF, e
+faça um gráfico de barras divergente do saldo.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+#| label: fig-ex-saldo
+#| fig-cap: "Saldo de TKU (atraído − emitido) por UF"
+margens <- tibble::tibble(
+  uf      = rownames(m),
+  emitido = Matrix::rowSums(m),
+  atraido = Matrix::colSums(m)
+) |>
+  mutate(saldo = atraido - emitido) |>
+  arrange(saldo)
+
+ggplot(margens, aes(x = saldo, y = reorder(uf, saldo), fill = saldo > 0)) +
+  geom_col() +
+  geom_vline(xintercept = 0, colour = "grey30") +
+  scale_fill_manual(values = c(`TRUE` = "#1a5b8a", `FALSE` = "#b3402a"), guide = "none") +
+  labs(x = "Saldo (bi t·km)", y = NULL) +
+  theme_minimal(base_size = 10)
+```
+:::
+
+## 4. Concentração dos corredores
+
+Quantos pares de UF concentram 80% do TKU? Compare com o resultado do módulo 1, que foi
+calculado por par de municípios. Por que os números diferem?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+od_uf |>
+  arrange(desc(tku)) |>
+  mutate(part_acum = cumsum(tku) / sum(tku)) |>
+  summarise(
+    pares_totais = n(),
+    pares_ate_80 = sum(part_acum < 0.80) + 1
+  ) |>
+  mutate(proporcao = round(pares_ate_80 / pares_totais, 3))
+```
+
+A agregação por UF concentra mais que a agregação por município: várias ligações municipais
+diferentes se somam no mesmo par de estados. Toda medida de concentração depende da unidade
+de agregação — e por isso ela precisa estar dita junto com o número.
+:::
+
+## 5. Extração do OSM
+
+Extraia do OpenStreetMap todos os terminais ferroviários (`railway = station`) do estado do
+Paraná e conte quantos existem. Depois, marque no mapa os que estão a menos de 20 km do Porto
+de Paranaguá.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+#| eval: false
+res <- osmdata::opq(bbox = c(-54.62, -26.72, -48.02, -22.52), timeout = 180) |>
+  osmdata::add_osm_feature(key = "railway", value = "station") |>
+  osmdata::osmdata_sf()
+
+estacoes <- res$osm_points |> filter(!is.na(name)) |> select(osm_id, name)
+nrow(estacoes)
+
+porto <- st_sfc(st_point(c(-48.5119, -25.5016)), crs = 4326)
+
+proximas <- estacoes[st_is_within_distance(estacoes, porto, 20000, sparse = FALSE)[, 1], ]
+proximas$name
+```
+:::
+
+## 6. Custo generalizado
+
+Usando a função de custo generalizado do @sec-m3-roteamento, compare três alternativas de
+transporte para a mesma carga entre Manaus e Santos: cabotagem (2.800 km, 12 dias),
+rodoviário (3.900 km, 5 dias) e uma combinação (2.000 km de cabotagem + 400 km rodoviários).
+Assuma os custos por km que julgar razoáveis e **documente as premissas**.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+premissas <- tibble::tribble(
+  ~modo,           ~custo_ton_km, ~custo_ton_dia,
+  "cabotagem",              0.12,           1.50,
+  "rodoviario",             0.42,           8.00
+)
+
+alternativas <- tibble::tribble(
+  ~alternativa,       ~modo,        ~km,   ~dias,
+  "Cabotagem direta", "cabotagem", 2800,     12,
+  "Rodoviário",       "rodoviario",3900,      5,
+  "Combinado",        "cabotagem", 2000,      9,
+  "Combinado",        "rodoviario", 400,      1
+)
+
+alternativas |>
+  left_join(premissas, by = "modo") |>
+  mutate(custo = km * custo_ton_km + dias * custo_ton_dia) |>
+  summarise(custo_por_tonelada = round(sum(custo), 2), .by = alternativa) |>
+  arrange(custo_por_tonelada) |>
+  knitr::kable()
+```
+
+Os valores são ilustrativos: o exercício é sobre a **estrutura** do cálculo e sobre registrar
+as premissas de forma que outra pessoa possa contestá-las — que é o que distingue uma análise
+de uma opinião.
+:::
+
+## 7. Para entregar
+
+Escolha um recorte da sua área de trabalho e produza uma matriz OD com mapa de fluxos:
+
+1. defina as zonas (UF, município ou instalação) e justifique a escolha;
+2. monte a matriz, no formato longo e como `sparseMatrix`;
+3. desenhe as linhas de desejo, com escala de espessura adequada;
+4. calcule TKU, tonelagem e distância média;
+5. escreva um parágrafo sobre o que o mapa mostra e **duas** limitações do que foi feito.

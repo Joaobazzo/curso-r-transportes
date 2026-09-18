@@ -1,0 +1,211 @@
+# Dados do OpenStreetMap {#sec-m3-osm}
+
+O OSM é a base viária mais completa e atualizada disponível livremente no Brasil, e é o
+insumo de qualquer roteamento. Há dois caminhos de acesso, para necessidades diferentes.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+```
+
+| Pacote | Como funciona | Quando usar |
+|:--|:--|:--|
+| `osmdata` | consulta a API Overpass ao vivo | recortes pequenos, feições específicas, atributos raros |
+| `osmextract` | baixa extratos regionais `.pbf` prontos (Geofabrik) | malha viária inteira, insumo do `r5r` |
+
+A regra prática: se a resposta cabe em alguns milhares de feições, `osmdata`; se você quer
+"todas as vias de um estado", `osmextract`.
+
+## `osmdata`: consultas à Overpass
+
+Toda consulta tem a mesma estrutura: uma área (`opq`), um ou mais filtros de etiqueta
+(`add_osm_feature`) e o formato de saída (`osmdata_sf`).
+
+```{r}
+arquivo <- "dados/brutos/portos_osm.gpkg"
+
+if (!file.exists(arquivo)) {
+  res <- osmdata::opq(bbox = c(-48.75, -25.65, -48.35, -25.35), timeout = 120) |>
+    osmdata::add_osm_feature(key = "landuse", value = "port") |>
+    osmdata::osmdata_sf()
+
+  poligonos <- res$osm_polygons
+  if (!is.null(poligonos) && nrow(poligonos) > 0) {
+    st_write(poligonos |> select(any_of(c("osm_id", "name"))), arquivo, quiet = TRUE)
+  }
+}
+
+if (file.exists(arquivo)) {
+  portos_osm <- st_read(arquivo, quiet = TRUE)
+  nrow(portos_osm)
+}
+```
+
+O objeto devolvido por `osmdata_sf()` tem vários componentes, porque uma mesma consulta pode
+retornar tipos diferentes de geometria:
+
+```{r}
+#| eval: false
+res$osm_points        # nós
+res$osm_lines         # vias abertas
+res$osm_polygons      # vias fechadas (áreas)
+res$osm_multilines    # relações de linha (uma rodovia inteira, por exemplo)
+res$osm_multipolygons # relações de área (municípios, áreas com buracos)
+```
+
+### As etiquetas que importam em transportes
+
+```{r}
+#| eval: false
+# hierarquia viária
+add_osm_feature(key = "highway", value = c("motorway", "trunk", "primary"))
+
+# uma rodovia específica pelo código
+add_osm_feature(key = "ref", value = "BR-116")
+
+# infraestrutura logística
+add_osm_feature(key = "landuse",  value = "industrial")
+add_osm_feature(key = "railway",  value = "rail")
+add_osm_feature(key = "aeroway",  value = "aerodrome")
+add_osm_feature(key = "amenity",  value = "fuel")
+
+# transporte público
+add_osm_feature(key = "highway", value = "bus_stop")
+add_osm_feature(key = "public_transport", value = "platform")
+
+# restrições relevantes para carga
+add_osm_feature(key = "maxweight")
+add_osm_feature(key = "maxheight")
+add_osm_feature(key = "bridge", value = "yes")
+```
+
+`osmdata::available_tags("highway")` lista todos os valores possíveis de uma chave — útil
+porque a taxonomia do OSM é extensa e vale conferir antes de supor.
+
+```{r}
+osmdata::available_tags("highway") |> head(12)
+```
+
+### Um exemplo completo: pontes e restrições em um corredor
+
+```{r}
+arquivo_pontes <- "dados/brutos/pontes_br116.gpkg"
+
+if (!file.exists(arquivo_pontes)) {
+  res <- osmdata::opq(bbox = c(-49.40, -25.75, -48.40, -25.15), timeout = 180) |>
+    osmdata::add_osm_feature(key = "bridge", value = "yes") |>
+    osmdata::osmdata_sf()
+
+  pontes <- res$osm_lines |>
+    filter(!is.na(highway)) |>
+    select(any_of(c("osm_id", "name", "highway", "maxweight", "maxheight", "layer")))
+
+  st_write(pontes, arquivo_pontes, quiet = TRUE)
+}
+
+pontes <- st_read(arquivo_pontes, quiet = TRUE)
+
+c(pontes = nrow(pontes),
+  com_restricao_peso = sum(!is.na(pontes$maxweight)))
+```
+
+Esse resultado costuma surpreender: a maioria das pontes **não tem** a restrição de peso
+mapeada. É a ilustração concreta do limite do OSM — a geometria é boa, o atributo é parcial.
+Para restrições oficiais, a fonte é o DNIT.
+
+## `osmextract`: a malha viária inteira
+
+```{r}
+#| eval: false
+library(osmextract)
+
+# 1. descobrir qual extrato cobre a área
+oe_match("Ceará")
+oe_match("Paraná")
+
+# 2. baixar só o arquivo .pbf (é o que o r5r consome, no módulo 4)
+oe_download(
+  file_url = oe_match("Ceará")$url,
+  download_directory = "dados/brutos/osm"
+)
+
+# 3. ou já ler como sf, filtrando na origem com SQL
+rede <- oe_get(
+  place = "Ceará",
+  layer = "lines",
+  query = "SELECT osm_id, highway, name, maxspeed, oneway
+           FROM lines
+           WHERE highway IN ('motorway','trunk','primary','secondary','tertiary')",
+  download_directory = "dados/brutos/osm"
+)
+```
+
+O argumento `query` é o que torna isso viável: o filtro roda no arquivo, e só a malha
+principal chega ao R. Sem ele, "todas as linhas do Ceará" são milhões de feições, a maioria
+irrelevante para roteamento.
+
+::: {.callout-tip}
+## Tamanhos típicos
+
+| Recorte | `.pbf` |
+|:--|--:|
+| Uma cidade média | 10–40 MB |
+| Um estado | 50–600 MB |
+| Brasil inteiro | > 2 GB |
+
+Baixe o menor recorte que cobre a área de estudo. Para uma cidade, a região metropolitana já
+resolve; para roteamento de carga interestadual, o estado. O `.pbf` do Brasil inteiro raramente
+é necessário — e deixa o `r5r` muito lento para construir a rede.
+:::
+
+## Preparar a malha para roteamento
+
+Uma malha viária baixada crua ainda não é uma rede navegável. Três cuidados:
+
+```{r}
+#| eval: false
+rede_limpa <- rede |>
+  filter(!is.na(highway)) |>
+  filter(!highway %in% c("footway", "path", "cycleway", "steps", "pedestrian")) |>
+  mutate(
+    velocidade = readr::parse_number(maxspeed),
+    velocidade = dplyr::coalesce(velocidade, dplyr::case_match(
+      highway,
+      "motorway"  ~ 110,
+      "trunk"     ~ 90,
+      "primary"   ~ 80,
+      "secondary" ~ 60,
+      .default    = 40
+    )),
+    comprimento_m = as.numeric(st_length(geometry)),
+    tempo_min = comprimento_m / 1000 / velocidade * 60
+  )
+```
+
+Os três pontos: (1) remover o que não é trafegável pelo modo de interesse; (2) preencher a
+velocidade quando o atributo falta — e documentar a regra usada; (3) calcular o custo que o
+roteamento vai minimizar (tempo, distância, ou custo generalizado).
+
+::: {.callout-note}
+## Rede geométrica × rede topológica
+
+Um `sf` de linhas é uma coleção de geometrias: duas ruas que se cruzam na tela não estão
+necessariamente **conectadas** no grafo. Para roteamento é preciso uma rede topológica, com
+nós e arestas. É isso que o `dodgr`, o `r5r` e o pacote `sfnetworks` constroem a partir da
+geometria — e é por isso que o resultado depende da qualidade da malha de origem.
+:::
+
+```{r}
+#| eval: false
+# sfnetworks: rede topológica com sintaxe de tidyverse
+library(sfnetworks)
+
+net <- as_sfnetwork(rede_limpa, directed = FALSE) |>
+  tidygraph::convert(sfnetworks::to_spatial_subdivision) |>
+  tidygraph::activate("edges") |>
+  mutate(peso = comprimento_m)
+```
+
+No próximo capítulo saímos do OSM e vamos para o outro gargalo do módulo: consultar tabelas
+grandes sem estourar a memória.

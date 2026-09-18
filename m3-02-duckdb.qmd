@@ -1,0 +1,233 @@
+# SQL e DuckDB no R {#sec-m3-duckdb}
+
+Bases de roteamento, GPS, GTFS e comércio exterior têm milhões de linhas. Carregar tudo na
+memória para depois filtrar é o caminho mais lento — e frequentemente impossível. O DuckDB
+resolve isso: é um banco analítico que roda **dentro** do processo do R, sem servidor, sem
+instalação separada, lendo CSV e Parquet direto do disco.
+
+```{r}
+library(dplyr)
+library(DBI)
+library(duckdb)
+```
+
+::: {.callout-warning}
+Os exemplos deste capítulo geram um arquivo de cerca de 100 MB em `dados/brutos/`. Se o seu
+repositório estiver dentro de uma pasta sincronizada (Dropbox, OneDrive, Google Drive), pause
+a sincronização ou marque `dados/brutos/` como ignorada — senão o serviço tenta sincronizar o
+arquivo no meio do render.
+:::
+
+## Uma base grande para o exemplo
+
+Para que o capítulo seja reprodutível sem *download*, vamos gerar uma matriz de roteamento
+sintética com 2 milhões de pares OD — a ordem de grandeza de uma matriz de tempos de viagem
+entre setores censitários de uma região metropolitana.
+
+```{r}
+arquivo <- "dados/brutos/od_sintetica.csv"
+
+if (!file.exists(arquivo)) {
+  set.seed(42)
+  n <- 2e6
+  od <- data.frame(
+    origem     = sample(1:2000, n, replace = TRUE),
+    destino    = sample(1:2000, n, replace = TRUE),
+    modo       = sample(c("rodoviario", "ferroviario", "cabotagem"), n,
+                        replace = TRUE, prob = c(0.7, 0.2, 0.1)),
+    distancia_km = round(runif(n, 5, 2500), 1),
+    toneladas    = round(rlnorm(n, meanlog = 3, sdlog = 1.2), 2)
+  )
+  data.table::fwrite(od, arquivo)
+}
+
+round(file.size(arquivo) / 1024^2, 1)   # tamanho em MB
+```
+
+## Três formas de responder à mesma pergunta
+
+A pergunta: **qual o TKU total por modo?** — ou seja, somar `distancia_km × toneladas`
+agrupando por modo.
+
+```{r}
+# 1. DuckDB: a consulta roda no banco, só o resultado (3 linhas) volta para o R
+tempo_duckdb <- system.time({
+  con <- dbConnect(duckdb())
+  resultado_duckdb <- dbGetQuery(con, sprintf("
+    SELECT modo,
+           COUNT(*)                        AS pares,
+           SUM(distancia_km * toneladas)   AS tku
+    FROM read_csv_auto('%s')
+    GROUP BY modo
+    ORDER BY tku DESC
+  ", arquivo))
+  dbDisconnect(con, shutdown = TRUE)
+})
+
+resultado_duckdb
+```
+
+```{r}
+# 2. data.table: rápido, mas carrega a base inteira na memória
+tempo_dt <- system.time({
+  dt <- data.table::fread(arquivo)
+  resultado_dt <- dt[, .(pares = .N, tku = sum(distancia_km * toneladas)), by = modo]
+})
+```
+
+```{r}
+# 3. readr + dplyr: o mais legível, o mais lento e o que mais consome memória
+tempo_dplyr <- system.time({
+  resultado_dplyr <- readr::read_csv(arquivo, show_col_types = FALSE, progress = FALSE) |>
+    summarise(pares = n(), tku = sum(distancia_km * toneladas), .by = modo)
+})
+```
+
+```{r}
+#| label: tbl-desempenho
+tibble::tibble(
+  abordagem = c("DuckDB (SQL, sem carregar)", "data.table::fread", "readr + dplyr"),
+  segundos  = round(c(tempo_duckdb[["elapsed"]],
+                      tempo_dt[["elapsed"]],
+                      tempo_dplyr[["elapsed"]]), 2)
+) |>
+  arrange(segundos) |>
+  knitr::kable(caption = "Tempo para agregar 2 milhões de linhas")
+```
+
+Os números variam com a máquina, mas a ordem costuma se manter. Três observações que valem
+mais que os tempos em si:
+
+1. O DuckDB **não carrega o arquivo**: ele lê, agrega e descarta, em paralelo. O uso de
+   memória fica próximo de zero, o que é o que permite trabalhar com arquivos maiores que a
+   RAM.
+2. O `data.table` é muito rápido, mas precisa que a base caiba na memória.
+3. A diferença entre os três desaparece em bases pequenas. Abaixo de algumas centenas de
+   milhares de linhas, use o que for mais legível — que é o `dplyr`.
+
+## `duckplyr`: sintaxe de `dplyr`, motor de DuckDB
+
+Se você não quer escrever SQL, o `duckplyr` traduz os verbos do `dplyr` para o DuckDB.
+
+```{r}
+#| eval: false
+library(duckplyr)
+
+od_lazy <- read_csv_duckdb(arquivo)     # nada é lido ainda
+
+resultado <- od_lazy |>
+  filter(modo == "rodoviario", distancia_km > 500) |>
+  summarise(tku = sum(distancia_km * toneladas), .by = origem) |>
+  arrange(desc(tku)) |>
+  collect()                              # aqui a consulta é executada
+```
+
+A diferença é o `collect()` no final. Tudo antes dele é planejamento; o trabalho só acontece
+quando o resultado é pedido. Esse padrão — *lazy evaluation* — é o mesmo do `arrow` e do
+`dbplyr`.
+
+## Consultas com `dplyr` sobre uma tabela do banco
+
+Um terceiro caminho, útil quando a base já está em um banco:
+
+```{r}
+con <- dbConnect(duckdb())
+dbExecute(con, sprintf("CREATE VIEW od AS SELECT * FROM read_csv_auto('%s')", arquivo))
+
+tbl(con, "od") |>
+  filter(modo == "cabotagem") |>
+  group_by(origem) |>
+  summarise(tku = sum(distancia_km * toneladas), pares = n()) |>
+  arrange(desc(tku)) |>
+  head(5) |>
+  collect()
+```
+
+```{r}
+# para ver o SQL que o dplyr gerou — ótimo para aprender SQL
+tbl(con, "od") |>
+  filter(modo == "cabotagem") |>
+  group_by(origem) |>
+  summarise(tku = sum(distancia_km * toneladas)) |>
+  show_query()
+```
+
+```{r}
+dbDisconnect(con, shutdown = TRUE)
+```
+
+## Parquet: o formato para guardar bases grandes
+
+```{r}
+arquivo_parquet <- "dados/brutos/od_sintetica.parquet"
+
+con <- dbConnect(duckdb())
+if (!file.exists(arquivo_parquet)) {
+  dbExecute(con, sprintf(
+    "COPY (SELECT * FROM read_csv_auto('%s')) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)",
+    arquivo, arquivo_parquet))
+}
+
+tamanhos <- c(csv_mb = file.size(arquivo), parquet_mb = file.size(arquivo_parquet)) / 1024^2
+round(tamanhos, 1)
+```
+
+```{r}
+tempo_parquet <- system.time({
+  r <- dbGetQuery(con, sprintf(
+    "SELECT modo, SUM(distancia_km * toneladas) AS tku FROM '%s' GROUP BY modo",
+    arquivo_parquet))
+})
+dbDisconnect(con, shutdown = TRUE)
+
+round(tempo_parquet[["elapsed"]], 2)
+```
+
+O Parquet é **colunar e comprimido**: ocupa uma fração do CSV e, como guarda estatísticas por
+bloco, permite pular pedaços inteiros do arquivo na leitura. Para bases de trabalho que você
+consulta repetidamente, converter uma vez para Parquet costuma ser o melhor investimento de
+tempo do projeto.
+
+::: {.callout-tip}
+## SQL que resolve 90% dos casos
+
+```sql
+SELECT coluna1, coluna2, SUM(x) AS total   -- o que trazer
+FROM 'arquivo.parquet'                     -- de onde
+WHERE uf = 'PR' AND ano = 2025             -- filtro de linhas
+GROUP BY coluna1, coluna2                  -- agregação
+HAVING SUM(x) > 1000                       -- filtro do agregado
+ORDER BY total DESC                        -- ordenação
+LIMIT 20;                                  -- corte
+```
+
+O mapeamento para o `dplyr` é direto: `SELECT` → `select`/`summarise`, `WHERE` → `filter`
+antes, `GROUP BY` → `.by`, `HAVING` → `filter` depois, `ORDER BY` → `arrange`,
+`LIMIT` → `head`.
+:::
+
+## Espacial dentro do banco: `duckspatial`
+
+O DuckDB tem uma extensão espacial, que o `duckspatial` expõe ao R. Vale quando as geometrias
+são muitas — cruzar milhões de pontos de GPS com polígonos de zona, por exemplo.
+
+```{r}
+#| eval: false
+library(duckspatial)
+
+con <- dbConnect(duckdb())
+ddbs_install(con)
+ddbs_load(con)
+
+ddbs_write_vector(con, zonas, "zonas")
+ddbs_write_vector(con, pontos_gps, "gps")
+
+resultado <- dbGetQuery(con, "
+  SELECT z.id_zona, COUNT(*) AS n_pontos
+  FROM gps g JOIN zonas z ON ST_Within(g.geom, z.geom)
+  GROUP BY z.id_zona
+")
+```
+
+A junção espacial roda no banco, sem materializar nada no R. Para bases menores, `sf::st_join`
+continua sendo mais simples — e a simplicidade tem valor.

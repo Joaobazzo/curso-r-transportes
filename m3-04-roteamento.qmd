@@ -1,0 +1,202 @@
+# Roteamento {#sec-m3-roteamento}
+
+Roteamento é calcular o caminho e o custo (distância, tempo) entre pares de pontos sobre uma
+rede. É o que substitui a distância em linha reta do módulo 2 por algo que corresponde ao
+deslocamento real.
+
+Dois pacotes, com perfis distintos:
+
+| | `dodgr` | `r5r` |
+|:--|:--|:--|
+| Implementação | C++ dentro do R | motor R5 (Java) |
+| Modos | um modo por vez (carro, caminhão, a pé, bicicleta) | multimodal, com transporte público e GTFS |
+| Insumo | `sf` de linhas (ex.: OSM) | pasta com `.pbf` + GTFS |
+| Instalação | direta | exige **JDK 21** |
+| Uso típico | rede rodoviária, carga, distâncias | acessibilidade urbana, isócronas |
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+```
+
+## `dodgr`: roteamento sobre a malha viária
+
+```{r}
+#| eval: false
+library(dodgr)
+
+# 1. a malha: OSM filtrado para vias trafegáveis por automóvel
+rede <- osmextract::oe_get(
+  place = "Paraná", layer = "lines",
+  query = "SELECT osm_id, highway, name, maxspeed, oneway FROM lines
+           WHERE highway IN ('motorway','motorway_link','trunk','trunk_link',
+                             'primary','primary_link','secondary','tertiary')",
+  download_directory = "dados/brutos/osm"
+)
+
+# 2. construir o grafo com um perfil de peso
+grafo <- weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
+
+# 3. componente conectado principal (descarta trechos isolados)
+grafo <- grafo[grafo$component == 1, ]
+
+# 4. matriz de distâncias entre pontos
+origens  <- cbind(c(-49.2733, -48.5119), c(-25.4284, -25.5016))   # lon, lat
+destinos <- origens
+
+dodgr_dists(grafo, from = origens, to = destinos)      # metros
+dodgr_times(grafo, from = origens, to = destinos)      # segundos
+```
+
+```{r}
+#| eval: false
+# o caminho em si, como geometria — para desenhar no mapa
+caminho <- dodgr_paths(grafo, from = origens[1, , drop = FALSE],
+                       to = origens[2, , drop = FALSE])
+
+verts <- dodgr_vertices(grafo)
+rota <- verts[match(caminho[[1]][[1]], verts$id), c("x", "y")] |>
+  as.matrix() |>
+  st_linestring() |>
+  st_sfc(crs = 4326)
+```
+
+Pontos de atenção do `dodgr`:
+
+- `wt_profile` define como cada tipo de via é penalizado: `"motorcar"`, `"foot"`, `"bicycle"`.
+  Para caminhão, o caminho é ajustar o perfil manualmente (`weighting_profiles`), penalizando
+  vias estreitas e restrições de peso.
+- O *snapping* dos pontos à rede é automático e silencioso: um ponto longe da malha se liga ao
+  vértice mais próximo, possivelmente do outro lado do rio. Confira a distância de ligação.
+- Filtrar pelo componente conectado (`component == 1`) evita `Inf` em pares que "não se
+  alcançam" apenas porque a malha tem trechos soltos.
+
+## `r5r`: roteamento multimodal
+
+O `r5r` trabalha com uma **pasta de dados**: basta colocar nela o `.pbf` do OSM e um ou mais
+GTFS, e ele monta a rede.
+
+```{r}
+#| eval: false
+options(java.parameters = "-Xmx8G")    # ANTES de carregar o pacote
+library(r5r)
+
+pasta <- "dados/brutos/fortaleza"      # contém fortaleza.osm.pbf e gtfs_fortaleza.zip
+rede <- setup_r5(data_path = pasta)
+```
+
+::: {.callout-note}
+## `setup_r5()` ou `build_network()`?
+
+As versões mais recentes do `r5r` renomearam `setup_r5()` para `build_network()`, mantendo o
+comportamento. Se o seu R reclamar de função não encontrada ou avisar de depreciação, troque o
+nome — o restante do código é idêntico. Confira com `packageVersion("r5r")`.
+:::
+
+```{r}
+#| eval: false
+# matriz de tempos de viagem
+pontos <- data.frame(
+  id  = c("centro", "aeroporto", "porto"),
+  lon = c(-38.5267, -38.5326, -38.4756),
+  lat = c(-3.7275, -3.7763, -3.7147)
+)
+
+ttm <- travel_time_matrix(
+  rede,
+  origins            = pontos,
+  destinations       = pontos,
+  mode               = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2026-10-15 07:30:00", tz = "America/Fortaleza"),
+  max_trip_duration  = 120,
+  time_window        = 30,          # média de 30 partidas, minuto a minuto
+  percentiles        = c(25, 50, 75)
+)
+```
+
+Os argumentos que mudam o resultado — e que precisam estar no relatório:
+
+- `mode`: `"WALK"`, `"BICYCLE"`, `"CAR"`, `"TRANSIT"` (combinado com um modo de acesso).
+- `departure_datetime`: o horário importa muito no transporte público. Pico e entrepico dão
+  resultados diferentes.
+- `time_window` e `percentiles`: em vez de um único horário de partida, o R5 simula várias
+  partidas e devolve percentis — o que captura a variabilidade da espera. O percentil 50 é a
+  escolha usual; o 75 é mais honesto para quem depende de linha de baixa frequência.
+- `max_trip_duration`: corta a matriz e acelera muito o cálculo.
+
+```{r}
+#| eval: false
+# itinerários detalhados: cada etapa da viagem, com geometria
+det <- detailed_itineraries(
+  rede,
+  origins      = pontos[1, ],
+  destinations = pontos[2, ],
+  mode         = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2026-10-15 07:30:00"),
+  shortest_path = FALSE
+)
+
+det |> select(option, segment, mode, route, segment_duration, distance)
+```
+
+`detailed_itineraries()` é o que permite explicar um resultado: quando o tempo de viagem entre
+dois pontos parece alto demais, é olhando as etapas — caminhada, espera, linha, transferência
+— que se descobre por quê.
+
+```{r}
+#| eval: false
+# isócronas: até onde se chega em 15, 30 e 45 minutos
+iso <- isochrone(
+  rede,
+  origins            = pontos[1, ],
+  mode               = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2026-10-15 07:30:00"),
+  cutoffs            = c(15, 30, 45)
+)
+
+ggplot(iso) +
+  geom_sf(aes(fill = factor(isochrone)), alpha = 0.4, colour = NA) +
+  scale_fill_brewer(palette = "YlOrRd", direction = -1, name = "minutos") +
+  theme_void()
+```
+
+## Custo generalizado: o que realmente se minimiza
+
+Em transporte de carga, o caminho mais curto raramente é o escolhido. O que se minimiza é o
+**custo generalizado**, que combina distância, tempo, pedágio, consumo e restrições.
+
+```{r}
+custo_generalizado <- function(dist_km, tempo_h, pedagio_rs = 0,
+                               custo_km = 3.20, custo_hora = 45.00) {
+  dist_km * custo_km + tempo_h * custo_hora + pedagio_rs
+}
+
+exemplo <- data.frame(
+  alternativa = c("Rota A (curta, serra)", "Rota B (longa, planalto)"),
+  dist_km  = c(120, 165),
+  tempo_h  = c(2.6, 2.1),
+  pedagio  = c(18.50, 32.00)
+)
+
+exemplo |>
+  mutate(custo_rs = round(custo_generalizado(dist_km, tempo_h, pedagio), 2)) |>
+  arrange(custo_rs) |>
+  knitr::kable()
+```
+
+A rota mais curta não é a mais barata quando o tempo custa caro — e é exatamente esse tipo de
+comparação que justifica uma duplicação ou um contorno. Os parâmetros (`custo_km`,
+`custo_hora`) devem vir de fonte citável: o **Sistema de Custos Referenciais de Obras** e os
+estudos de custo operacional do próprio Ministério.
+
+## Qual usar
+
+- **Distâncias e tempos rodoviários, carga, matrizes grandes entre municípios:** `dodgr`.
+  Não precisa de Java e lida bem com redes extensas.
+- **Acessibilidade urbana, transporte público, isócronas, cenários de GTFS:** `r5r`.
+- **Uma rota específica para ilustrar um mapa:** qualquer um dos dois, ou até
+  `osrm`/`mapbox` via API quando a rede não precisa ser sua.
+
+No módulo 4 o `r5r` volta com o estudo de acessibilidade de Fortaleza; no próximo capítulo,
+os resultados de roteamento viram **matrizes OD**.
