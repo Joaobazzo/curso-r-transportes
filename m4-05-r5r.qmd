@@ -1,0 +1,274 @@
+# Roteamento multimodal e cenários com `r5r` {#sec-m4-r5r}
+
+Este capítulo mostra o fluxo completo de uma análise de cenário de transporte público: montar
+a rede, calcular a matriz de tempos, editar o GTFS para representar uma intervenção, recalcular
+e comparar. O exemplo é Fortaleza.
+
+::: {.callout-important}
+## Os blocos deste capítulo não são executados na construção do site
+
+Eles exigem o **JDK 21** e uma pasta com o `.pbf` do OpenStreetMap e o GTFS da cidade —
+arquivos grandes, que não ficam no repositório. O código está pronto para rodar na sua
+máquina, e o material do encontro síncrono percorre esses passos ao vivo. O preparo da pasta
+está em @sec-m4.
+:::
+
+```{r}
+#| eval: false
+options(java.parameters = "-Xmx8G")   # memória para a JVM, ANTES de carregar o pacote
+library(r5r)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(accessibility)
+```
+
+## 1. Montar a rede
+
+```{r}
+#| eval: false
+pasta <- "dados/brutos/fortaleza"
+list.files(pasta)     # deve conter um .osm.pbf e um ou mais .zip de GTFS
+
+rede <- setup_r5(data_path = pasta)     # nas versões novas: build_network()
+```
+
+Na primeira execução o R5 constrói um arquivo `.dat` com a rede — pode levar alguns minutos.
+Nas seguintes, ele reaproveita. Se o GTFS ou o `.pbf` mudarem, apague o `.dat` para forçar a
+reconstrução.
+
+```{r}
+#| eval: false
+# conferir o que entrou na rede
+street_network_to_sf(rede)$edges |> nrow()
+transit_network_to_sf(rede)$routes |> nrow()
+```
+
+Esse par de linhas é a verificação que evita a frustração mais comum: rodar tudo e descobrir
+no fim que o GTFS não foi reconhecido — porque estava descompactado, fora do período de
+validade, ou com erro de formato.
+
+## 2. Pontos de origem e destino
+
+```{r}
+#| eval: false
+# a grade hexagonal do aopdata serve bem como unidade de análise
+hex <- aopdata::read_access(city = "Fortaleza", mode = "public_transport",
+                            year = 2019, geometry = TRUE, showProgress = FALSE)
+
+pontos <- hex |>
+  filter(P001 > 0) |>
+  st_centroid() |>
+  transmute(id = id_hex,
+            lon = st_coordinates(geometry)[, 1],
+            lat = st_coordinates(geometry)[, 2]) |>
+  st_drop_geometry()
+
+nrow(pontos)
+```
+
+O `r5r` exige exatamente as colunas `id`, `lon` e `lat`. Pontos que caírem longe da rede são
+descartados com aviso — confira a contagem antes e depois.
+
+## 3. Matriz de tempos de viagem
+
+```{r}
+#| eval: false
+partida <- as.POSIXct("2026-10-15 07:00:00", tz = "America/Fortaleza")
+
+ttm <- travel_time_matrix(
+  rede,
+  origins      = pontos,
+  destinations = pontos,
+  mode         = c("WALK", "TRANSIT"),
+  departure_datetime = partida,
+  time_window       = 60,      # 60 partidas, minuto a minuto
+  percentiles       = c(50),
+  max_walk_time     = 20,      # minutos de caminhada em cada ponta
+  max_trip_duration = 90
+)
+
+nrow(ttm)
+head(ttm)
+```
+
+Os parâmetros que mais mudam o resultado, e que precisam aparecer na nota metodológica:
+
+| Parâmetro | Efeito |
+|:--|:--|
+| `departure_datetime` | pico × entrepico muda tempos e frequências |
+| `time_window` + `percentiles` | captura a variabilidade da espera; percentil 50 é o usual |
+| `max_walk_time` | caminhada máxima de acesso; 15–20 min é a prática corrente |
+| `max_trip_duration` | corta a matriz e acelera muito o cálculo |
+
+## 4. Isócronas
+
+```{r}
+#| eval: false
+origem <- pontos |> slice(1)
+
+iso <- isochrone(
+  rede,
+  origins = origem,
+  mode = c("WALK", "TRANSIT"),
+  departure_datetime = partida,
+  cutoffs = c(15, 30, 45, 60)
+)
+
+ggplot(iso) +
+  geom_sf(aes(fill = factor(isochrone)), colour = NA, alpha = 0.5) +
+  scale_fill_brewer(palette = "YlOrRd", direction = -1, name = "minutos") +
+  theme_void()
+```
+
+A isócrona é o produto de comunicação mais eficaz do módulo: qualquer pessoa entende "até onde
+dá para chegar em 30 minutos".
+
+## 5. Itinerários detalhados
+
+```{r}
+#| eval: false
+det <- detailed_itineraries(
+  rede,
+  origins      = pontos |> slice(1),
+  destinations = pontos |> slice(100),
+  mode = c("WALK", "TRANSIT"),
+  departure_datetime = partida,
+  shortest_path = FALSE
+)
+
+det |>
+  st_drop_geometry() |>
+  select(option, segment, mode, route, segment_duration, wait, distance)
+```
+
+Quando um resultado parece estranho, é aqui que se descobre o motivo: uma caminhada de 18
+minutos até o ponto, uma espera de 25 minutos, duas transferências.
+
+## 6. Editar o GTFS: o cenário
+
+`gtfstools` permite modificar a rede de transporte público para representar uma intervenção —
+remover linhas alimentadoras, mudar frequências, criar um corredor.
+
+```{r}
+#| eval: false
+library(gtfstools)
+
+gtfs <- read_gtfs(file.path(pasta, "gtfs_fortaleza.zip"))
+
+names(gtfs)                 # tabelas: agency, routes, trips, stop_times, shapes...
+nrow(gtfs$routes)
+```
+
+```{r}
+#| eval: false
+# cenário: remover as linhas alimentadoras (exemplo: as que contêm "ALIMENTADOR" no nome)
+alimentadoras <- gtfs$routes |>
+  filter(grepl("ALIMENT", toupper(route_long_name))) |>
+  pull(route_id)
+
+length(alimentadoras)
+
+gtfs_cenario <- filter_by_route_id(gtfs, route_id = alimentadoras, keep = FALSE)
+
+c(rotas_antes = nrow(gtfs$routes), rotas_depois = nrow(gtfs_cenario$routes))
+
+dir.create("dados/brutos/fortaleza_cenario", showWarnings = FALSE)
+file.copy(list.files(pasta, pattern = "\\.pbf$", full.names = TRUE),
+          "dados/brutos/fortaleza_cenario")
+write_gtfs(gtfs_cenario, "dados/brutos/fortaleza_cenario/gtfs_cenario.zip")
+```
+
+Outras edições úteis:
+
+```{r}
+#| eval: false
+filter_by_route_type(gtfs, route_type = 3)           # só ônibus
+filter_by_time_of_day(gtfs, from = "06:00:00", to = "09:00:00")
+filter_by_sf(gtfs, geom = area_estudo)               # recorte espacial
+get_trip_speed(gtfs)                                  # velocidade comercial por viagem
+get_trip_geometry(gtfs, file = "shapes")              # traçado das linhas como sf
+```
+
+## 7. Recalcular e comparar
+
+```{r}
+#| eval: false
+rede_cenario <- setup_r5("dados/brutos/fortaleza_cenario")
+
+ttm_cenario <- travel_time_matrix(
+  rede_cenario, origins = pontos, destinations = pontos,
+  mode = c("WALK", "TRANSIT"), departure_datetime = partida,
+  time_window = 60, percentiles = 50,
+  max_walk_time = 20, max_trip_duration = 90
+)
+
+uso_solo <- hex |>
+  st_drop_geometry() |>
+  transmute(id = id_hex, populacao = P001, empregos = T001, renda = R002)
+
+acesso <- function(m) {
+  cumulative_cutoff(
+    travel_matrix = m, land_use_data = uso_solo,
+    opportunity = "empregos", travel_cost = "travel_time_p50", cutoff = 60
+  )
+}
+
+comparacao <- acesso(ttm) |>
+  rename(atual = empregos) |>
+  left_join(acesso(ttm_cenario) |> rename(cenario = empregos), by = "id") |>
+  left_join(uso_solo, by = "id") |>
+  mutate(
+    perda_abs = cenario - atual,
+    perda_pct = 100 * (cenario / atual - 1)
+  )
+
+comparacao |>
+  summarise(
+    pessoas = sum(populacao, na.rm = TRUE),
+    perda_media_pct = weighted.mean(perda_pct, populacao, na.rm = TRUE),
+    .by = renda
+  ) |>
+  arrange(renda)
+```
+
+O resultado esperado desse tipo de cenário é uma perda de acessibilidade concentrada na
+periferia e nos estratos de renda mais baixa — que é justamente o argumento que a análise
+serve para quantificar, em vez de afirmar.
+
+```{r}
+#| eval: false
+hex |>
+  left_join(comparacao, by = c("id_hex" = "id")) |>
+  ggplot() +
+  geom_sf(aes(fill = perda_pct), colour = NA) +
+  scale_fill_gradient2(low = "#b3402a", mid = "grey95", high = "#1a5b8a",
+                       midpoint = 0, name = "Variação (%)") +
+  labs(title = "Impacto da remoção das linhas alimentadoras",
+       subtitle = "Variação dos empregos acessíveis em 60 min por transporte público") +
+  theme_void()
+```
+
+## 8. Alocação na rede: `flownet` e `stplanr`
+
+As linhas de desejo do módulo 3 mostram volume entre pares. Para mostrar o volume **sobre a
+infraestrutura**, cada par precisa ser roteado e os fluxos somados por trecho:
+
+```{r}
+#| eval: false
+# caminho 1: stplanr — rotear os pares e sobrepor
+rotas <- stplanr::route(l = linhas_od, route_fun = stplanr::route_osrm)
+carga <- stplanr::overline(rotas, attrib = "fluxo")
+
+ggplot(carga) +
+  geom_sf(aes(linewidth = fluxo), colour = "#1a5b8a", alpha = 0.7) +
+  scale_linewidth_continuous(range = c(0.2, 3)) +
+  theme_void()
+
+# caminho 2: flownet — estimação e alocação de fluxos em rede
+# remotes::install_github("SebKrantz/flownet")
+```
+
+O resultado é o **carregamento da rede**: o mapa em que a espessura está sobre a rodovia, e não
+no ar. É o produto que dialoga diretamente com o planejamento de capacidade — e o ponto de
+partida natural para um estudo de gargalos.

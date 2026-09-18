@@ -60,6 +60,12 @@ book:
     - part: "Módulo 4 — Geoestatística, sensoriamento remoto e acessibilidade"
       chapters:
         - m4-00-visao-geral.qmd
+        - m4-01-autocorrelacao.qmd
+        - m4-02-interpolacao.qmd
+        - m4-03-declividade.qmd
+        - m4-04-acessibilidade.qmd
+        - m4-05-r5r.qmd
+        - m4-06-exercicios.qmd
     - part: "Módulo 5 — Mapas temáticos, relatórios reproduzíveis e projeto final"
       chapters:
         - m5-00-visao-geral.qmd

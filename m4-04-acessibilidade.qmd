@@ -1,0 +1,261 @@
+# Acessibilidade a oportunidades {#sec-m4-acessibilidade}
+
+Acessibilidade é a facilidade de alcançar destinos de interesse — empregos, saúde, educação —
+a partir de um lugar, considerando o tempo de viagem real pela rede de transporte. É um
+indicador que reúne, em um número por lugar, a **distribuição das oportunidades** e o
+**desempenho do sistema de transporte**. É a medida que responde à pergunta "esta obra melhora
+a vida de quem?".
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(accessibility)
+```
+
+## As medidas
+
+| Medida | Pergunta que responde | Função |
+|:--|:--|:--|
+| Oportunidades cumulativas | quantos empregos alcanço em até 30 minutos? | `cumulative_cutoff()` |
+| Tempo mínimo | quanto tempo até o hospital mais próximo? | `cost_to_closest()` |
+| Gravitacional | quantas oportunidades, descontando as mais distantes? | `gravity()` |
+| Concorrência (2SFCA) | quantas oportunidades por pessoa, considerando a disputa? | `floating_catchment_area()` |
+
+A cumulativa é a mais usada porque é a mais fácil de comunicar ("empregos acessíveis em 30
+minutos de transporte público"); a de tempo mínimo é a mais adequada para serviços raros e
+essenciais (hospital de alta complexidade); a gravitacional é a mais defensável
+tecnicamente, e a mais difícil de explicar em uma reunião.
+
+## Dados prontos: `aopdata`
+
+O projeto Acesso a Oportunidades (Ipea) publica, para 20 cidades brasileiras, os indicadores
+já calculados em grade hexagonal — com população, renda, raça e oportunidades por hexágono.
+Para diagnóstico, é o caminho mais rápido.
+
+```{r}
+arquivo <- "dados/brutos/aop_fortaleza.rds"
+
+if (!file.exists(arquivo)) {
+  aop <- aopdata::read_access(
+    city = "Fortaleza",
+    mode = "public_transport",
+    year = 2019,
+    peak = TRUE,
+    geometry = TRUE,
+    showProgress = FALSE
+  )
+  saveRDS(aop, arquivo)
+}
+
+aop <- readRDS(arquivo)
+
+dim(aop)
+names(aop) |> head(30)
+```
+
+Os nomes das colunas seguem um padrão documentado: `P001` é a população total, `R001` a renda
+per capita, `T001` o total de empregos, e os indicadores de acesso combinam o tipo de medida
+(`CMA` = cumulativa ativa, `TMI` = tempo mínimo), a atividade (`TT` = todos os empregos,
+`ST` = saúde, `ET` = educação) e o limite de tempo.
+
+```{r}
+cols_cma <- grep("^CMATT", names(aop), value = TRUE)
+cols_cma
+
+# coluna de estrato de renda: o pacote traz quintil e decil (R002 e R003).
+# Confira no dicionário qual é qual antes de rotular o gráfico:
+# aopdata::aopdata_dictionary(lang = "pt")
+col_renda <- intersect(c("R002", "R003"), names(aop))[1]
+col_renda
+```
+
+```{r}
+#| label: fig-aop-mapa
+#| fig-cap: "Empregos acessíveis em até 60 minutos por transporte público — Fortaleza"
+#| fig-height: 5
+col_60 <- intersect(c("CMATT60"), names(aop))[1]
+
+if (!is.na(col_60)) {
+  aop_plot <- aop |>
+    filter(!is.na(.data[[col_60]]), P001 > 0) |>
+    mutate(acesso = .data[[col_60]])
+
+  ggplot(aop_plot) +
+    geom_sf(aes(fill = acesso), colour = NA) +
+    scale_fill_viridis_c(option = "inferno", direction = -1,
+                         labels = scales::label_number(big.mark = "."),
+                         name = "Empregos\nem 60 min") +
+    labs(caption = "Fonte: Ipea, Projeto Acesso a Oportunidades (aopdata), 2019.") +
+    theme_void(base_size = 9)
+}
+```
+
+### Acessibilidade e desigualdade
+
+O indicador ganha sentido quando cruzado com quem vive em cada lugar:
+
+```{r}
+if (!is.na(col_60)) {
+  aop |>
+    st_drop_geometry() |>
+    filter(P001 > 0, !is.na(.data[[col_60]]), !is.na(.data[[col_renda]])) |>
+    mutate(estrato_renda = .data[[col_renda]]) |>
+    summarise(
+      pessoas = sum(P001),
+      acesso_medio = round(weighted.mean(.data[[col_60]], P001, na.rm = TRUE)),
+      .by = estrato_renda
+    ) |>
+    arrange(estrato_renda) |>
+    rename(`Estrato de renda` = estrato_renda, `População` = pessoas,
+           `Empregos acessíveis em 60 min (média)` = acesso_medio) |>
+    knitr::kable(align = "lrr")
+}
+```
+
+A leitura típica desse tipo de tabela — os estratos mais pobres com acesso menor — é o
+principal argumento de equidade em avaliação de projetos de transporte urbano. As colunas
+`R002` e `R003` trazem os estratos de renda (quintil e decil); confira no dicionário do pacote
+qual é qual antes de rotular o gráfico, porque a troca inverte a leitura.
+
+## Calcular do zero: o pacote `accessibility`
+
+Quando a cidade não está no `aopdata`, ou quando se quer avaliar um **cenário** (uma linha
+nova, uma linha removida), é preciso calcular. O insumo é uma matriz de tempo de viagem —
+normalmente vinda do `r5r` (@sec-m4-r5r) — e uma tabela de uso do solo.
+
+Para demonstrar as funções de forma executável, vamos construir uma matriz de tempos
+**aproximada** a partir das distâncias entre os hexágonos, supondo uma velocidade média.
+
+```{r}
+set.seed(2026)
+
+hex <- aop |>
+  filter(P001 > 0) |>
+  select(id_hex, P001, T001, all_of(col_renda)) |>
+  slice_sample(n = 250)          # amostra, para o exemplo rodar rápido
+
+centros <- st_point_on_surface(st_transform(hex, 31984))   # UTM 24S (Fortaleza)
+
+d <- st_distance(centros) |> units::set_units(km) |> as.numeric()
+d <- matrix(d, nrow = nrow(hex))
+
+velocidade_kmh <- 18    # velocidade porta-a-porta típica de transporte público urbano
+
+matriz <- expand.grid(from_id = hex$id_hex, to_id = hex$id_hex,
+                      stringsAsFactors = FALSE) |>
+  mutate(travel_time = round(as.vector(d) / velocidade_kmh * 60, 1)) |>
+  filter(travel_time <= 90)
+
+uso_solo <- hex |>
+  st_drop_geometry() |>
+  rename(id = id_hex, populacao = P001, empregos = T001)
+
+head(matriz, 3)
+```
+
+::: {.callout-warning}
+Essa matriz é **ilustrativa**: distância em linha reta dividida por uma velocidade média não é
+tempo de viagem por transporte público. Ela serve para mostrar como as funções do
+`accessibility` operam. Em qualquer uso real, a matriz vem do `r5r`, com a rede, o GTFS e o
+horário de partida — e a diferença entre as duas é grande, sobretudo em cidades com barreiras
+físicas.
+:::
+
+```{r}
+# 1. oportunidades cumulativas em 30, 60 e 90 minutos
+cma <- cumulative_cutoff(
+  travel_matrix = matriz,
+  land_use_data = uso_solo,
+  opportunity   = "empregos",
+  travel_cost   = "travel_time",
+  cutoff        = c(30, 60, 90)
+)
+
+head(cma, 4)
+```
+
+```{r}
+# 2. tempo até a oportunidade mais próxima
+tmi <- cost_to_closest(
+  travel_matrix = matriz,
+  land_use_data = uso_solo,
+  opportunity   = "empregos",
+  travel_cost   = "travel_time",
+  n             = 1
+)
+
+summary(tmi[[ncol(tmi)]])   # a última coluna traz o tempo até a oportunidade mais próxima
+```
+
+```{r}
+# 3. medida gravitacional, com decaimento exponencial
+grav <- gravity(
+  travel_matrix = matriz,
+  land_use_data = uso_solo,
+  opportunity   = "empregos",
+  travel_cost   = "travel_time",
+  decay_function = decay_exponential(decay_value = 0.05)
+)
+
+head(grav, 4)
+```
+
+```{r}
+#| label: fig-decaimento
+#| fig-cap: "Funções de decaimento: o peso dado a uma oportunidade conforme o tempo de viagem"
+#| fig-height: 3.4
+t <- 0:90
+data.frame(
+  minutos = rep(t, 3),
+  peso = c(exp(-0.05 * t),
+           as.numeric(t <= 30),
+           pmax(0, 1 - t / 60)),
+  funcao = rep(c("exponencial (0,05)", "cumulativa (30 min)", "linear (60 min)"),
+               each = length(t))
+) |>
+  ggplot(aes(minutos, peso, colour = funcao)) +
+  geom_line(linewidth = 0.8) +
+  scale_colour_manual(values = c("#1a5b8a", "#b3402a", "#e0a03f"), name = NULL) +
+  labs(x = "Tempo de viagem (min)", y = "Peso da oportunidade") +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "top")
+```
+
+Esse gráfico é a melhor forma de explicar a escolha da medida em uma reunião técnica: a
+cumulativa trata um emprego a 29 minutos como plenamente acessível e um a 31 minutos como
+inacessível; as funções contínuas suavizam esse degrau. A escolha muda o resultado, e por isso
+precisa estar declarada.
+
+## Comparação de cenários
+
+A aplicação mais valiosa em planejamento não é o valor absoluto do indicador — é a
+**diferença entre dois cenários**:
+
+```{r}
+#| eval: false
+# matriz do cenário atual e do cenário com a intervenção (ver @sec-m4-r5r)
+acesso_atual  <- cumulative_cutoff(matriz_atual,  uso_solo, "empregos", "travel_time", 60)
+acesso_novo   <- cumulative_cutoff(matriz_cenario, uso_solo, "empregos", "travel_time", 60)
+
+comparacao <- acesso_atual |>
+  rename(acesso_atual = empregos) |>
+  left_join(rename(acesso_novo, acesso_novo = empregos), by = "id") |>
+  mutate(
+    variacao_abs = acesso_novo - acesso_atual,
+    variacao_pct = 100 * (acesso_novo / acesso_atual - 1)
+  ) |>
+  left_join(uso_solo, by = "id")
+
+# o número que interessa ao gestor: quantas pessoas ganharam acesso, e quem são
+comparacao |>
+  summarise(
+    pessoas_beneficiadas = sum(populacao[variacao_abs > 0]),
+    ganho_medio_pct = weighted.mean(variacao_pct, populacao, na.rm = TRUE),
+    .by = estrato_renda
+  )
+```
+
+É esse quadro — pessoas beneficiadas por faixa de renda — que transforma uma análise de
+transporte em um argumento de política pública. O módulo 5 fecha o curso construindo
+exatamente esse relatório.

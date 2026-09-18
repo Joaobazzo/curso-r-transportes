@@ -1,0 +1,156 @@
+# Exercícios {#sec-m4-exercicios}
+
+```{r}
+library(sf)
+library(terra)
+library(dplyr)
+library(ggplot2)
+library(spdep)
+```
+
+## 1. Vizinhança importa
+
+Refaça o I de Moran da densidade demográfica do Paraná (@sec-m4-autocorrelacao) com três
+critérios de vizinhança — contiguidade, 5 vizinhos mais próximos e distância de 60 km — e
+compare. A conclusão muda?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+muni <- st_read("dados/brutos/muni_pr_sc.gpkg", quiet = TRUE) |>
+  filter(abbrev_state == "PR") |> st_transform(31982)
+
+grade <- st_read("dados/brutos/grade_pr.gpkg", quiet = TRUE) |> st_transform(31982)
+pop_col <- intersect(c("POP", "pop"), names(grade))[1]
+
+pop_muni <- grade |>
+  mutate(pop = as.numeric(.data[[pop_col]])) |>
+  st_point_on_surface() |>
+  st_join(muni |> select(code_muni)) |>
+  st_drop_geometry() |>
+  summarise(pop = sum(pop, na.rm = TRUE), .by = code_muni) |>
+  filter(!is.na(code_muni))
+
+pr <- muni |>
+  left_join(pop_muni, by = "code_muni") |>
+  mutate(dens = tidyr::replace_na(pop, 0) /
+           as.numeric(units::set_units(st_area(geom), km^2)),
+         y = log1p(dens))
+
+coords <- st_coordinates(st_point_on_surface(pr))
+
+criterios <- list(
+  contiguidade = poly2nb(pr, queen = TRUE),
+  knn5         = knn2nb(knearneigh(coords, k = 5)),
+  dist60km     = dnearneigh(coords, 0, 60000)
+)
+
+purrr_free <- lapply(names(criterios), \(nome) {
+  lw <- nb2listw(criterios[[nome]], style = "W", zero.policy = TRUE)
+  t <- moran.test(pr$y, lw, zero.policy = TRUE)
+  data.frame(criterio = nome,
+             I = round(unname(t$estimate[1]), 3),
+             p = signif(t$p.value, 3))
+})
+
+bind_rows(purrr_free) |> knitr::kable()
+```
+
+O valor de I muda, mas a conclusão (há concentração significativa) se mantém — que é
+exatamente o teste de robustez que se espera em um relatório.
+:::
+
+## 2. Interpolação com menos pontos
+
+Refaça a interpolação de altitude do @sec-m4-interpolacao com 50 pontos em vez de 250. Como o
+RMSE se comporta? E o desvio-padrão da krigagem?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+library(gstat)
+
+dem <- rast("dados/brutos/dem_serra.tif") |> project("EPSG:31982") |>
+  aggregate(fact = 4, fun = "mean")
+names(dem) <- "altitude"
+
+testar_n <- function(n) {
+  set.seed(1)
+  am <- spatSample(dem, size = n, method = "random", as.points = TRUE, na.rm = TRUE) |>
+    st_as_sf()
+
+  cv <- krige.cv(altitude ~ 1, am, nmax = 20, debug.level = 0)
+  data.frame(n = n, rmse = round(sqrt(mean(cv$residual^2)), 1))
+}
+
+bind_rows(lapply(c(50, 100, 250, 500), testar_n)) |> knitr::kable()
+```
+
+O erro cai com o número de pontos, mas com retornos decrescentes — a informação que justifica
+o dimensionamento de uma campanha de medição.
+:::
+
+## 3. Rampa máxima
+
+No estudo de caso da declividade (@sec-m4-declividade), quantos quilômetros de cada
+alternativa excedem 8% de rampa? E qual a rampa do percentil 95?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+#| eval: false
+segmentos |>
+  st_drop_geometry() |>
+  summarise(
+    km_acima_8 = sum(comp_m[abs(rampa_pct) > 8], na.rm = TRUE) / 1000,
+    p95_rampa  = quantile(abs(rampa_pct), 0.95, na.rm = TRUE),
+    .by = alternativa
+  )
+```
+:::
+
+## 4. Acessibilidade e renda
+
+Com os dados do `aopdata` para Fortaleza, calcule a razão entre o acesso médio do estrato de
+renda mais alto e o do mais baixo, para 30 e para 60 minutos. A desigualdade aumenta ou diminui
+com o limite de tempo?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+#| eval: false
+aop <- readRDS("dados/brutos/aop_fortaleza.rds")
+col_renda <- intersect(c("R002", "R003"), names(aop))[1]
+
+razao <- function(col) {
+  d <- aop |>
+    st_drop_geometry() |>
+    filter(P001 > 0, !is.na(.data[[col]]), !is.na(.data[[col_renda]])) |>
+    summarise(acesso = weighted.mean(.data[[col]], P001), .by = all_of(col_renda))
+
+  max(d$acesso) / min(d$acesso)
+}
+
+c(`30 min` = razao("CMATT30"), `60 min` = razao("CMATT60")) |> round(2)
+```
+
+A razão costuma cair conforme o tempo aumenta: com mais tempo disponível, mesmo os lugares
+periféricos alcançam os centros de emprego. É um argumento importante — e frequentemente mal
+usado, porque "alcançar em 90 minutos" não é acessibilidade adequada.
+:::
+
+## 5. Para entregar
+
+Escolha **uma**:
+
+1. **Declividade**: aplique o procedimento do @sec-m4-declividade a um trecho de interesse da
+   sua área, com um limite de rampa que você justifique tecnicamente, e produza a tabela de
+   extensão por faixa e o mapa.
+2. **Acessibilidade**: escolha uma das cidades do `aopdata` e produza um diagnóstico de duas
+   páginas — mapa do indicador, tabela por estrato de renda e três parágrafos de interpretação.
+3. **Autocorrelação**: aplique o LISA a uma variável de transportes da sua área (acidentes,
+   volume, tempo de viagem) e identifique os agrupamentos críticos.

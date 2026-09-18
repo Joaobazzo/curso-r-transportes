@@ -1,0 +1,209 @@
+# Interpolação espacial {#sec-m4-interpolacao}
+
+Interpolar é estimar o valor de uma variável contínua onde não houve medição, a partir dos
+pontos onde houve. É o que se faz com postos de contagem de tráfego, estações meteorológicas,
+sondagens geotécnicas, medições de ruído — situações em que a amostra é cara e a cobertura
+completa é impossível.
+
+Este capítulo usa um truque didático: vamos interpolar a **altitude** a partir de uma amostra
+de pontos e comparar com o modelo digital de elevação completo. Como conhecemos a resposta
+certa, dá para **medir o erro** de cada método — o que quase nunca é possível em uma aplicação
+real.
+
+```{r}
+library(sf)
+library(terra)
+library(dplyr)
+library(ggplot2)
+library(gstat)
+```
+
+## A amostra
+
+```{r}
+if (!file.exists("dados/brutos/dem_serra.tif")) {
+  area <- st_bbox(c(xmin = -49.40, ymin = -25.75, xmax = -48.40, ymax = -25.15),
+                  crs = st_crs(4326)) |> st_as_sfc() |> st_as_sf()
+  terra::writeRaster(
+    terra::rast(elevatr::get_elev_raster(locations = area, z = 10, clip = "bbox")),
+    "dados/brutos/dem_serra.tif", overwrite = TRUE)
+}
+
+dem <- rast("dados/brutos/dem_serra.tif") |>
+  project("EPSG:31982") |>
+  aggregate(fact = 4, fun = "mean")     # suaviza e acelera o exemplo
+
+names(dem) <- "altitude"
+
+set.seed(2026)
+amostra <- spatSample(dem, size = 250, method = "random",
+                      as.points = TRUE, na.rm = TRUE) |>
+  st_as_sf()
+
+nrow(amostra)
+summary(amostra$altitude)
+```
+
+```{r}
+#| label: fig-amostra
+#| fig-cap: "Os 250 pontos amostrados sobre o modelo digital de elevação"
+#| fig-height: 4.4
+ggplot() +
+  tidyterra::geom_spatraster(data = dem) +
+  geom_sf(data = amostra, size = 0.6, colour = "white") +
+  scale_fill_viridis_c(option = "turbo", na.value = NA, name = "Altitude (m)") +
+  theme_void(base_size = 9)
+```
+
+## A grade de saída
+
+```{r}
+e <- as.vector(ext(dem))          # xmin, xmax, ymin, ymax
+
+caixa <- st_bbox(c(xmin = e[["xmin"]], xmax = e[["xmax"]],
+                   ymin = e[["ymin"]], ymax = e[["ymax"]]),
+                 crs = st_crs(amostra)) |>
+  st_as_sfc()
+
+grade <- st_make_grid(caixa, cellsize = 500, what = "centers") |>
+  st_as_sf() |>
+  rename(geometry = x)
+
+nrow(grade)
+```
+
+## Método 1 — Inverso da distância (IDW)
+
+A estimativa é a média dos pontos vizinhos, ponderada pelo inverso da distância elevada a uma
+potência. Simples, rápido, sem premissas estatísticas — e por isso mesmo sem medida de
+incerteza.
+
+```{r}
+idw_res <- gstat::idw(altitude ~ 1, locations = amostra, newdata = grade,
+                      idp = 2, nmax = 12, debug.level = 0)
+
+grade$idw <- idw_res$var1.pred
+summary(grade$idw)
+```
+
+`idp` é a potência: valores maiores dão mais peso aos pontos próximos, gerando superfícies
+mais "abruptas"; `nmax` limita quantos vizinhos entram na conta.
+
+## Método 2 — Krigagem
+
+A krigagem modela explicitamente **como a semelhança entre pontos decai com a distância** — o
+variograma — e usa esse modelo para estimar, produzindo também a variância da estimativa.
+
+```{r}
+#| label: fig-variograma
+#| fig-cap: "Variograma experimental e modelo ajustado"
+#| fig-height: 4
+v_exp <- variogram(altitude ~ 1, amostra)
+
+v_mod <- fit.variogram(v_exp, vgm(psill = var(amostra$altitude),
+                                  model = "Sph", range = 15000, nugget = 0))
+
+v_mod
+
+print(plot(v_exp, v_mod, xlab = "Distância (m)", ylab = "Semivariância"))
+```
+
+Os três parâmetros do variograma têm leitura direta:
+
+- **alcance** (*range*): a partir de que distância dois pontos deixam de se parecer. Aqui, a
+  escala espacial do relevo.
+- **patamar** (*sill*): a variância total do fenômeno.
+- **efeito pepita** (*nugget*): variação em distância zero — erro de medida ou variabilidade
+  em escala menor que a amostra.
+
+```{r}
+k_res <- krige(altitude ~ 1, locations = amostra, newdata = grade,
+               model = v_mod, debug.level = 0)
+
+grade$krige    <- k_res$var1.pred
+grade$krige_sd <- sqrt(k_res$var1.var)
+```
+
+## Comparar e validar
+
+Como temos o raster verdadeiro, podemos medir o erro ponto a ponto:
+
+```{r}
+grade$real <- terra::extract(dem, vect(grade), ID = FALSE)[[1]]
+
+erros <- grade |>
+  st_drop_geometry() |>
+  filter(!is.na(real)) |>
+  summarise(
+    across(c(idw, krige), list(
+      rmse = ~sqrt(mean((.x - real)^2, na.rm = TRUE)),
+      mae  = ~mean(abs(.x - real), na.rm = TRUE),
+      vies = ~mean(.x - real, na.rm = TRUE)
+    ))
+  ) |>
+  round(1)
+
+erros |> t() |> knitr::kable(col.names = "metros")
+```
+
+```{r}
+#| label: fig-interp-comparacao
+#| fig-cap: "Superfícies estimadas e erro da krigagem"
+#| fig-height: 3.6
+para_plot <- function(col, titulo, paleta = "turbo") {
+  ggplot(grade) +
+    geom_sf(aes(colour = .data[[col]]), size = 0.35) +
+    scale_colour_viridis_c(option = paleta, name = NULL) +
+    labs(title = titulo) +
+    theme_void(base_size = 8) +
+    theme(plot.title = element_text(hjust = 0.5, size = 9),
+          legend.key.width = unit(0.3, "cm"))
+}
+
+patchwork::wrap_plots(
+  para_plot("idw", "IDW"),
+  para_plot("krige", "Krigagem"),
+  para_plot("krige_sd", "Desvio-padrão da krigagem", "rocket"),
+  nrow = 1
+)
+```
+
+O terceiro painel é o que justifica a krigagem: ela informa **onde a estimativa é confiável**.
+O desvio-padrão é baixo perto dos pontos amostrados e cresce nos vazios — exatamente a
+informação que um gestor precisa para decidir onde instalar o próximo posto de medição.
+
+## Validação cruzada, quando não há gabarito
+
+Na vida real não existe o raster verdadeiro. A alternativa é a validação cruzada: retirar
+pontos da amostra, estimar, e comparar com o valor observado.
+
+```{r}
+cv <- krige.cv(altitude ~ 1, amostra, model = v_mod, nfold = 5, debug.level = 0)
+
+c(
+  rmse = sqrt(mean(cv$residual^2)),
+  mae  = mean(abs(cv$residual)),
+  vies = mean(cv$residual)
+) |> round(1)
+```
+
+::: {.callout-important}
+## Interpolar exige justificativa
+
+Interpolação supõe continuidade espacial do fenômeno. Altitude, temperatura e nível de ruído
+são contínuos — a interpolação faz sentido. **Volume de tráfego não é**: ele se distribui pela
+rede, não pelo plano, e interpolar VMDA entre dois postos passando por cima de uma área sem
+estradas produz um mapa sem significado. Nesse caso, a interpolação correta é **ao longo da
+rede** (referenciamento linear entre postos consecutivos), não sobre a superfície.
+:::
+
+## Aplicação típica no setor
+
+| Variável | Interpolar no plano? | Observação |
+|:--|:--|:--|
+| Altitude, declividade | sim | já vem como raster; interpolar só se a amostra for esparsa |
+| Precipitação, temperatura | sim | krigagem com deriva pela altitude é comum |
+| Ruído, qualidade do ar | sim | com modelo de propagação, melhor que interpolação pura |
+| VMDA / volume de tráfego | **não** | distribuir ao longo da rede entre postos |
+| Custo do frete | não | depende de rota e de mercado, não de proximidade |
+| Acessibilidade | não | calcule pela rede (próximos capítulos) |

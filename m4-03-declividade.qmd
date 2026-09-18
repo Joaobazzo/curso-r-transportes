@@ -1,0 +1,301 @@
+# Estudo de caso: declividade × traçado {#sec-m4-declividade}
+
+A pergunta deste capítulo é de projeto:
+
+> *Dadas duas alternativas de traçado entre o planalto curitibano e o litoral, qual delas
+> enfrenta o relevo mais favorável? Que extensão de cada uma excede a declividade admissível,
+> e onde estão esses trechos?*
+
+É o cruzamento clássico entre um dado **raster** (o modelo digital de elevação) e um dado
+**vetorial** (os traçados) — a operação que o programa do curso descreve como "cruzamento de
+declividade com traçados propostos".
+
+```{r}
+library(sf)
+library(terra)
+library(dplyr)
+library(ggplot2)
+
+crs_trabalho <- 31982
+```
+
+## Passo 1 — O terreno
+
+```{r}
+if (!file.exists("dados/brutos/dem_serra.tif")) {
+  area <- st_bbox(c(xmin = -49.40, ymin = -25.75, xmax = -48.40, ymax = -25.15),
+                  crs = st_crs(4326)) |> st_as_sfc() |> st_as_sf()
+  terra::writeRaster(
+    terra::rast(elevatr::get_elev_raster(locations = area, z = 11, clip = "bbox")),
+    "dados/brutos/dem_serra.tif", overwrite = TRUE)
+}
+
+dem <- rast("dados/brutos/dem_serra.tif") |> project("EPSG:31982")
+names(dem) <- "altitude"
+
+declividade <- terrain(dem, v = "slope", unit = "percent")
+names(declividade) <- "declividade"
+
+c(resolucao_m = round(res(dem)[1], 1),
+  alt_min = round(global(dem, "min", na.rm = TRUE)[[1]]),
+  alt_max = round(global(dem, "max", na.rm = TRUE)[[1]]))
+```
+
+::: {.callout-note}
+A declividade em **porcentagem** é a convenção da engenharia rodoviária (uma rampa de 6%
+sobe 6 m a cada 100 m de percurso horizontal). O `terra` também calcula em graus
+(`unit = "degrees"`), usado em geomorfologia. Não misture as duas no mesmo documento.
+:::
+
+## Passo 2 — Os traçados
+
+A alternativa 1 é o traçado existente da BR-116, obtido do OpenStreetMap. A alternativa 2 é um
+traçado hipotético — a linha que alguém desenharia ligando os mesmos extremos por outro vale.
+
+```{r}
+if (!file.exists("dados/brutos/br116_serra.gpkg")) {
+  consulta <- osmdata::opq(bbox = c(-49.40, -25.75, -48.40, -25.15), timeout = 120) |>
+    osmdata::add_osm_feature(key = "ref", value = "BR-116") |>
+    osmdata::osmdata_sf()
+  st_write(consulta$osm_lines |>
+             select(any_of(c("osm_id", "name", "ref", "highway"))) |>
+             st_transform(4674),
+           "dados/brutos/br116_serra.gpkg", quiet = TRUE)
+}
+
+br116 <- st_read("dados/brutos/br116_serra.gpkg", quiet = TRUE) |>
+  st_transform(crs_trabalho)
+
+# alternativa 1: o trecho contínuo mais longo da BR-116 no recorte
+alt1 <- br116 |>
+  mutate(comp = as.numeric(st_length(geom))) |>
+  slice_max(comp, n = 1) |>
+  st_geometry()
+
+# alternativa 2: traçado hipotético entre os mesmos extremos, por outro caminho
+extremos <- st_cast(alt1, "POINT")
+p_ini <- extremos[1]
+p_fim <- extremos[length(extremos)]
+
+desvio <- st_point(colMeans(rbind(st_coordinates(p_ini), st_coordinates(p_fim))) +
+                     c(4000, -6000))
+
+alt2 <- st_sfc(
+  st_linestring(rbind(st_coordinates(p_ini), st_coordinates(desvio),
+                      st_coordinates(p_fim))),
+  crs = crs_trabalho
+)
+
+tracados <- st_sf(
+  alternativa = c("Alt. 1 — traçado existente", "Alt. 2 — traçado hipotético"),
+  geometry = c(alt1, alt2)
+) |>
+  mutate(extensao_km = round(as.numeric(st_length(geometry)) / 1000, 1))
+
+st_drop_geometry(tracados)
+```
+
+::: {.callout-warning}
+A alternativa 2 é uma linha inventada para o exercício, com três vértices. Um traçado real
+vem do projeto geométrico, respeitando raio mínimo de curva, rampa máxima e a poligonal
+levantada em campo — e chega aqui como *shapefile*. O procedimento de análise, porém, é
+exatamente o mesmo, e é isso que o capítulo demonstra.
+:::
+
+## Passo 3 — Segmentar o traçado
+
+A declividade não é uma propriedade do traçado inteiro: ela varia trecho a trecho. Por isso o
+primeiro passo analítico é **quebrar cada traçado em segmentos** de comprimento fixo.
+
+```{r}
+segmentar <- function(linha, passo_m = 200) {
+  comp <- as.numeric(st_length(linha))
+  n <- max(2, floor(comp / passo_m))
+
+  pontos <- st_line_sample(linha, n = n) |> st_cast("POINT")
+  coords <- st_coordinates(pontos)
+
+  segs <- lapply(seq_len(nrow(coords) - 1), \(i) {
+    st_linestring(coords[i:(i + 1), ])
+  }) |>
+    st_sfc(crs = st_crs(linha))
+
+  st_sf(seg_id = seq_along(segs), geometry = segs) |>
+    mutate(
+      comp_m = as.numeric(st_length(geometry)),
+      dist_acum_km = cumsum(comp_m) / 1000
+    )
+}
+
+segmentos <- bind_rows(
+  segmentar(alt1) |> mutate(alternativa = tracados$alternativa[1]),
+  segmentar(alt2) |> mutate(alternativa = tracados$alternativa[2])
+)
+
+count(st_drop_geometry(segmentos), alternativa)
+```
+
+## Passo 4 — Cruzar com o terreno
+
+Duas medidas de declividade, que é útil calcular e comparar:
+
+1. a **declividade do terreno** sob o segmento, extraída do raster;
+2. a **rampa do traçado**, calculada pela diferença de altitude entre as pontas do segmento
+   dividida pelo comprimento — que é o que de fato importa para o projeto.
+
+```{r}
+segmentos <- segmentos |>
+  mutate(
+    # 1. declividade média do terreno sob o segmento
+    decliv_terreno = terra::extract(declividade, vect(segmentos),
+                                    fun = mean, na.rm = TRUE, ID = FALSE)[[1]],
+    # 2. rampa do próprio traçado
+    alt_ini = terra::extract(dem, vect(st_line_sample(geometry, sample = 0) |>
+                                         st_cast("POINT")), ID = FALSE)[[1]],
+    alt_fim = terra::extract(dem, vect(st_line_sample(geometry, sample = 1) |>
+                                         st_cast("POINT")), ID = FALSE)[[1]],
+    rampa_pct = 100 * (alt_fim - alt_ini) / comp_m
+  )
+
+segmentos |>
+  st_drop_geometry() |>
+  summarise(
+    segmentos = n(),
+    extensao_km = round(sum(comp_m) / 1000, 1),
+    decliv_terreno_media = round(mean(decliv_terreno, na.rm = TRUE), 1),
+    rampa_media_abs = round(mean(abs(rampa_pct), na.rm = TRUE), 1),
+    rampa_max_abs = round(max(abs(rampa_pct), na.rm = TRUE), 1),
+    .by = alternativa
+  ) |>
+  knitr::kable()
+```
+
+## Passo 5 — Classificar por critério de projeto
+
+A rampa máxima admissível depende da classe da rodovia e do relevo. As manuais de projeto
+geométrico trabalham com faixas; vamos usar três classes simples e explícitas:
+
+```{r}
+limite_desejavel <- 4    # %
+limite_maximo    <- 6    # %
+
+segmentos <- segmentos |>
+  mutate(
+    classe = case_when(
+      abs(rampa_pct) <= limite_desejavel ~ "até 4% (desejável)",
+      abs(rampa_pct) <= limite_maximo    ~ "4% a 6% (admissível)",
+      TRUE                               ~ "acima de 6% (crítico)"
+    ),
+    classe = factor(classe, levels = c("até 4% (desejável)", "4% a 6% (admissível)",
+                                       "acima de 6% (crítico)"))
+  )
+
+resumo <- segmentos |>
+  st_drop_geometry() |>
+  summarise(km = sum(comp_m) / 1000, .by = c(alternativa, classe)) |>
+  mutate(part = km / sum(km), .by = alternativa)
+
+resumo |>
+  mutate(km = round(km, 1), part = scales::percent(part, accuracy = 0.1)) |>
+  arrange(alternativa, classe) |>
+  knitr::kable(align = "llrr")
+```
+
+Esta é a tabela que responde à pergunta do capítulo — e o formato em que um resultado assim
+entra em uma nota técnica: extensão e participação por faixa de rampa, para cada alternativa.
+
+## Passo 6 — O perfil e o mapa
+
+```{r}
+#| label: fig-perfil
+#| fig-cap: "Perfil altimétrico e rampa por segmento, nas duas alternativas"
+#| fig-height: 5.2
+perfil <- segmentos |>
+  st_drop_geometry() |>
+  mutate(dist_km = dist_acum_km)
+
+g1 <- ggplot(perfil, aes(dist_km, alt_ini, colour = alternativa)) +
+  geom_line(linewidth = 0.8) +
+  scale_colour_manual(values = c("#1a5b8a", "#b3402a"), name = NULL) +
+  labs(x = NULL, y = "Altitude (m)") +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "top")
+
+g2 <- ggplot(perfil, aes(dist_km, rampa_pct, colour = alternativa)) +
+  geom_hline(yintercept = c(-6, -4, 4, 6), linetype = "dotted", colour = "grey60") +
+  geom_line(linewidth = 0.6, alpha = 0.9) +
+  scale_colour_manual(values = c("#1a5b8a", "#b3402a"), guide = "none") +
+  labs(x = "Distância ao longo do traçado (km)", y = "Rampa (%)") +
+  theme_minimal(base_size = 9)
+
+patchwork::wrap_plots(g1, g2, ncol = 1, heights = c(1, 1))
+```
+
+```{r}
+#| label: fig-mapa-declividade
+#| fig-cap: "Traçados sobre a declividade do terreno; em destaque, os segmentos críticos"
+#| fig-height: 5.4
+recorte <- st_bbox(st_buffer(st_union(tracados), 4000))
+
+decliv_recorte <- crop(declividade, ext(recorte[c("xmin", "xmax", "ymin", "ymax")]))
+
+ggplot() +
+  tidyterra::geom_spatraster(data = decliv_recorte) +
+  geom_sf(data = segmentos, aes(colour = classe), linewidth = 0.9) +
+  scale_fill_gradientn(colours = c("#f7f7f7", "#cfd8dc", "#8fa3ad", "#4d5c63"),
+                       na.value = NA, name = "Declividade\ndo terreno (%)") +
+  scale_colour_manual(values = c("até 4% (desejável)" = "#1a9850",
+                                 "4% a 6% (admissível)" = "#e0a03f",
+                                 "acima de 6% (crítico)" = "#b3402a"),
+                      name = "Rampa do traçado") +
+  coord_sf(xlim = recorte[c("xmin", "xmax")], ylim = recorte[c("ymin", "ymax")],
+           expand = FALSE) +
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.25) +
+  labs(caption = paste("Fontes: altimetria AWS Terrain Tiles (via elevatr);",
+                       "eixo viário OpenStreetMap. Elaboração própria.")) +
+  theme_void(base_size = 9) +
+  theme(legend.position = "right")
+```
+
+## Passo 7 — Movimento de terra, uma primeira aproximação
+
+Com o raster e o traçado é possível estimar, grosseiramente, o volume de corte e aterro —
+supondo um greide que suavize o perfil:
+
+```{r}
+greide <- perfil |>
+  arrange(alternativa, dist_km) |>
+  mutate(
+    greide_m = stats::predict(stats::loess(alt_ini ~ dist_km, span = 0.3)),
+    dif_m = alt_ini - greide_m,
+    .by = alternativa
+  )
+
+greide |>
+  summarise(
+    corte_m3_aprox  = sum(pmax(dif_m, 0) * 20 * 200),   # 20 m de largura, 200 m de segmento
+    aterro_m3_aprox = sum(pmax(-dif_m, 0) * 20 * 200),
+    .by = alternativa
+  ) |>
+  mutate(across(where(is.numeric), \(x) round(x / 1e6, 2))) |>
+  rename(`Corte (Mm³)` = corte_m3_aprox, `Aterro (Mm³)` = aterro_m3_aprox) |>
+  knitr::kable()
+```
+
+::: {.callout-important}
+Esse número é uma **ordem de grandeza**, não um quantitativo. Ele supõe seção transversal
+constante, ignora obras de arte, taludes, empolamento e o próprio projeto geométrico. Serve
+para comparar alternativas em estudo preliminar — e o relatório precisa dizer isso com todas
+as letras. O quantitativo real vem do projeto, não do raster.
+:::
+
+## O que este estudo de caso mostrou
+
+1. O cruzamento raster × vetor se resume a três funções: `terrain()` para derivar a
+   declividade, `st_line_sample()` para segmentar, `extract()` para cruzar.
+2. Distinguir **declividade do terreno** de **rampa do traçado** muda a conclusão: um traçado
+   pode atravessar terreno íngreme com rampa suave, que é o que faz um projeto bom.
+3. O resultado útil não é o mapa: é a tabela de extensão por faixa de rampa, que entra
+   direto na comparação de alternativas.
+4. Toda premissa — limite de rampa, largura da plataforma, o *span* do greide — está escrita
+   em uma variável no topo do bloco, e não escondida no meio de uma conta.
