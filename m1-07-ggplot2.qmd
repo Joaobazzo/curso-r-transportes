@@ -217,7 +217,7 @@ Outras escalas úteis:
 ```{r}
 #| eval: false
 scale_y_continuous(limits = c(0, 40))                    # limites
-scale_y_continuous(trans = "log10")                      # transformação
+scale_y_continuous(transform = "log10")                      # transformação
 scale_x_date(date_labels = "%b/%Y", date_breaks = "3 months")  # datas
 scale_fill_viridis_c()                                   # contínua perceptualmente uniforme
 scale_fill_viridis_d()                                   # discreta

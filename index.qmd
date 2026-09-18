@@ -51,26 +51,7 @@ para até 30 participantes, em formato on-line.
 
 ## Cronograma
 
-Encontros síncronos duas vezes por semana, em dias alternados, das **14h às 15h30**
-(horário de Brasília); nas quartas-feiras, das **13h às 14h30** (ou 9h–10h30). O material
-assíncrono de cada módulo é liberado às 14h do dia seguinte ao segundo encontro e fica
-disponível durante todo o curso.
-
-| Módulo | Aula 1 | Aula 2 | Assíncrona |
-|:------:|:-------|:-------|:-----------|
-| 1 | 28/09, seg | 30/09, qua | 01/10, qui |
-| 2 | 05/10, seg | 07/10, qua | 08/10, qui |
-| 3 | 13/10, ter^*^ | 14/10, qua | 15/10, qui |
-| 4 | 19/10, seg | 21/10, qua | 22/10, qui |
-| 5 | 03/11, ter^*^ | 04/11, qua | 05/11, qui |
-
-^*^ Data remanejada em razão de feriado nacional (12/10, Nossa Senhora Aparecida;
-02/11, Finados). Não há atividades na semana de 26 a 30 de outubro.
-
-::: {.callout-note}
-O cronograma acima corresponde à **Opção A** (segundas e quartas). Caso a turma opte por
-outra grade de dias, apenas as datas mudam — o conteúdo de cada módulo é o mesmo.
-:::
+A definir.
 
 ## Como acompanhar
 
@@ -91,6 +72,5 @@ outra grade de dias, apenas as datas mudam — o conteúdo de cada módulo é o 
 
 ## Instrutor
 
-**João Pedro Bazzo Vieira** — pesquisador e consultor em análise de dados de transportes,
-com trabalhos em acessibilidade urbana, emissões e modelagem de redes de transporte, e
+**João Pedro Bazzo Vieira** — doutorando em engenharia de transportes pela Universidade de Toronto, com trabalhos em acessibilidade urbana, emissões e modelagem de redes de transporte, e
 coautor de pacotes de R do ecossistema `ipeaGIT` (`gtfs2gps`, `gtfs2emis`, entre outros).

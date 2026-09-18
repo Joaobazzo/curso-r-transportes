@@ -1,55 +1,86 @@
-# Módulo 2 — visão geral {#sec-m2}
-
-::: {.callout-note appearance="simple"}
-Capítulo em preparação. O conteúdo será publicado aqui na semana do módulo. A estrutura
-abaixo é o programa acordado e serve como guia de estudo prévio.
-:::
+# Visão geral do módulo {#sec-m2}
 
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
 **Datas (Opção A):** aulas em 05/10 e 07/10; material assíncrono liberado em 08/10
-**Pacotes:** `sf`, `terra`, `duckspatial`, `geobr`, `censobr`, `sidrar`, `leaflet`, `mapgl`
+**Pacotes:** `sf`, `terra`, `tidyterra`, `geobr`, `censobr`, `sidrar`, `osmdata`, `elevatr`, `leaflet`, `ggspatial`
+**Estudo de caso:** faixa de influência populacional da BR-116 na Serra do Mar (PR/SC)
 :::
 
-## Objetos espaciais: vetores e rasters
+## O que você vai conseguir fazer no fim do módulo
 
-### Aula síncrona
+- Ler, escrever e converter dados espaciais nos formatos que circulam no Ministério:
+  `.shp`, `.gpkg`, `.geojson`, `.csv` com coordenadas e GeoTIFF.
+- Reconhecer e trocar sistemas de coordenadas sem corromper a geometria, e saber **quando**
+  reprojetar é obrigatório.
+- Fazer as operações que hoje você faz por menu no QGIS/ArcGIS — *buffer*, interseção,
+  recorte, junção espacial, cálculo de área e distância — em código reexecutável.
+- Ler e processar rasters (altimetria, uso do solo) e extrair valores por geometria.
+- Baixar bases públicas brasileiras direto do R: malhas do IBGE, Censo, SIDRA e
+  OpenStreetMap.
+- Produzir um mapa estático de qualidade de publicação e um mapa interativo para conferência.
 
-- Vetores em R com `sf`: estrutura do objeto, geometria como coluna.
-- Tipos de objetos espaciais: pontos, linhas, polígonos, coleções.
-- Importação de `.shp`, `.gpkg` e SQLite; escrita nos mesmos formatos.
-- Sistemas de coordenadas e projeções: SIRGAS 2000, WGS84, UTM, quando reprojetar.
-- Operações com `terra`: leitura, recorte, reamostragem e álgebra de rasters.
-- Operações raster–vetor: extração de valores por geometria (`terra::extract`).
-- Geovisualização: `ggplot2` + `geom_sf`, `leaflet` e `mapgl` para mapas interativos.
-- Conversão entre formatos: DEM, SHP, GPKG e matrizes.
+## Roteiro
 
-### Conteúdo assíncrono
+### Aula síncrona (3h)
 
-- Operações geométricas com `sf` e `duckspatial`: `st_buffer`, `st_intersects`,
-  `st_touches`, `st_within`, `st_distance`.
-- Conexão com bases públicas: `geobr` (malhas, rodovias, municípios) e `sidrar` (agregados
-  do IBGE).
-- Junções espaciais entre bases de origens diferentes.
+| Bloco | Conteúdo | Capítulo |
+|:--|:--|:--|
+| 1 | O objeto `sf`: estrutura, leitura, escrita, tipos de geometria | @sec-m2-sf |
+| 2 | Sistemas de coordenadas e projeções: SIRGAS 2000, UTM, quando reprojetar | @sec-m2-crs |
+| 3 | Rasters com `terra`: leitura, recorte, álgebra, extração por geometria | @sec-m2-raster |
+| 4 | Geovisualização: `geom_sf`, `leaflet`, mapas de conferência | @sec-m2-mapas |
 
-### Estudo de caso
+### Conteúdo assíncrono (3h)
 
-Avaliar a **população adjacente a um eixo de rodovia federal**: recortar a malha censitária
-por um *buffer* ao longo do traçado, integrar com dados socioeconômicos do Censo via
-`censobr` e `geobr`, e produzir a tabela de população e domicílios na faixa de influência.
+| Bloco | Conteúdo | Capítulo |
+|:--|:--|:--|
+| 5 | Operações geométricas e junções espaciais | @sec-m2-geometrias |
+| 6 | Bases públicas brasileiras: `geobr`, `censobr`, `sidrar`, `osmdata` | @sec-m2-bases |
+| 7 | Estudo de caso: população na faixa de influência da BR-116 | @sec-m2-estudo-de-caso |
+| 8 | Exercícios | @sec-m2-exercicios |
 
-## Preparação recomendada
+## Pacotes do módulo
 
 ```{r}
 #| eval: false
-install.packages(c("sf", "terra", "leaflet", "geobr", "censobr", "sidrar", "mapgl"))
+pacotes <- c("sf", "terra", "tidyterra", "geobr", "censobr", "sidrar",
+             "osmdata", "osmextract", "elevatr", "leaflet", "ggspatial", "units")
+
+faltando <- setdiff(pacotes, rownames(installed.packages()))
+if (length(faltando) > 0) install.packages(faltando)
 ```
 
-No Windows, `sf` e `terra` exigem o **Rtools** instalado (ver @sec-m1-ambiente). Confirme
-antes do encontro:
+::: {.callout-important}
+## No Windows, instale o Rtools antes
+
+`sf` e `terra` dependem das bibliotecas GDAL, PROJ e GEOS, que são compiladas na instalação.
+Sem o **Rtools** (ver @sec-m1-ambiente) a instalação falha com erro de compilação. Confirme
+depois com:
 
 ```{r}
 #| eval: false
-library(sf); sf_extSoftVersion()
+library(sf);    sf_extSoftVersion()
 library(terra); terra::gdal()
 ```
+:::
+
+## Sobre os *downloads* deste módulo
+
+Os blocos deste módulo baixam dados públicos na primeira execução e **guardam em disco**, em
+`dados/brutos/`. Nas execuções seguintes, leem do cache — o render fica rápido e funciona sem
+internet. O padrão usado em todo o material é este:
+
+```{r}
+#| eval: false
+arquivo <- "dados/brutos/municipios_pr.gpkg"
+
+if (!file.exists(arquivo)) {
+  muni <- geobr::read_municipality(code_muni = "PR", year = 2022)
+  sf::st_write(muni, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE)
+```
+
+Vale adotar esse hábito nos seus próprios scripts: além de acelerar, ele garante que a
+análise continue reproduzindo o **mesmo** resultado quando a base de origem for atualizada.

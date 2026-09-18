@@ -1,0 +1,192 @@
+# Exercícios {#sec-m2-exercicios}
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+crs_trabalho <- 31982
+
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+if (!file.exists(arquivo)) {
+  muni <- dplyr::bind_rows(
+    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
+    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  )
+  st_write(muni, arquivo, quiet = TRUE)
+}
+muni <- st_read(arquivo, quiet = TRUE) |> st_transform(crs_trabalho)
+
+portos <- data.frame(
+  nome = c("Paranaguá", "Antonina", "São Francisco do Sul", "Itajaí", "Imbituba"),
+  lon  = c(-48.5119, -48.7119, -48.6383, -48.6486, -48.6706),
+  lat  = c(-25.5016, -25.4283, -26.2400, -26.9077, -28.2300)
+) |>
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  st_transform(crs_trabalho)
+```
+
+## 1. Do CSV ao mapa
+
+A tabela de portos abaixo está em coordenadas geográficas. Transforme em `sf`, reprojete para
+UTM 22S, e descubra em que município cai cada porto.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+portos |>
+  st_join(muni |> select(name_muni, abbrev_state, code_muni)) |>
+  st_drop_geometry() |>
+  knitr::kable()
+```
+
+Se algum porto não casar (coordenada caindo no mar), o conserto é
+`st_join(..., join = st_nearest_feature)`.
+:::
+
+## 2. Conferindo unidades
+
+Calcule a área do município de Guaraqueçaba em km² de três formas: em `EPSG:4326`, em
+`EPSG:31982` e com `simplified = TRUE` versus `FALSE` na malha do `geobr`. As diferenças
+importam?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+gq <- muni |> filter(name_muni == "Guaraqueçaba")
+
+c(
+  utm_km2 = as.numeric(units::set_units(st_area(gq), km^2)),
+  geo_km2 = as.numeric(units::set_units(st_area(st_transform(gq, 4326)), km^2))
+) |> round(1)
+```
+
+As duas são próximas: o `s2` calcula área geodésica correta em graus. A diferença relevante
+está na **simplificação** da malha, que pode mudar a área em alguns por cento — por isso
+`simplified = FALSE` para medir.
+:::
+
+## 3. Faixa de domínio
+
+Crie uma faixa de 100 m de cada lado do eixo da BR-116 (a "faixa de domínio" aproximada) e
+calcule sua área em hectares. Quantos municípios ela atravessa?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+br116 <- st_read("dados/brutos/br116_serra.gpkg", quiet = TRUE) |>
+  st_transform(crs_trabalho)
+
+dominio <- st_union(br116) |> st_buffer(100)
+
+c(
+  hectares = round(as.numeric(units::set_units(st_area(dominio), ha)), 1),
+  municipios = sum(st_intersects(muni, dominio, sparse = FALSE)[, 1])
+)
+
+muni[st_intersects(muni, dominio, sparse = FALSE)[, 1], ] |>
+  st_drop_geometry() |>
+  pull(name_muni)
+```
+:::
+
+## 4. Vizinhança
+
+Monte a lista de municípios que fazem fronteira com Paranaguá e calcule, para cada um, a
+extensão da fronteira compartilhada em km.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+pgua <- muni |> filter(name_muni == "Paranaguá")
+vizinhos <- muni[st_touches(muni, pgua, sparse = FALSE)[, 1], ]
+
+vizinhos |>
+  mutate(
+    fronteira_km = as.numeric(units::set_units(
+      st_length(st_intersection(geom, st_boundary(pgua$geom))), km))
+  ) |>
+  st_drop_geometry() |>
+  select(name_muni, fronteira_km) |>
+  arrange(desc(fronteira_km)) |>
+  mutate(fronteira_km = round(fronteira_km, 1)) |>
+  knitr::kable()
+```
+:::
+
+## 5. Raster: perfil de altitude
+
+Extraia a altitude ao longo do eixo da BR-116, a cada 500 m, e faça um gráfico do perfil
+(distância no eixo x, altitude no eixo y).
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+#| label: fig-ex-perfil
+#| fig-cap: "Perfil altimétrico aproximado ao longo do eixo da BR-116"
+library(terra)
+
+dem <- rast("dados/brutos/dem_serra.tif") |> project("EPSG:31982")
+
+# um único trecho contínuo, para o perfil fazer sentido
+trecho <- br116 |>
+  mutate(comp = as.numeric(st_length(geom))) |>
+  slice_max(comp, n = 1)
+
+pontos <- st_line_sample(st_geometry(trecho), density = 1 / 500) |>
+  st_cast("POINT") |>
+  st_as_sf()
+
+perfil <- data.frame(
+  dist_km = seq_len(nrow(pontos)) * 0.5,
+  alt_m   = terra::extract(dem, vect(pontos), ID = FALSE)[[1]]
+)
+
+ggplot(perfil, aes(dist_km, alt_m)) +
+  geom_line(colour = "#1a5b8a", linewidth = 0.8) +
+  geom_area(fill = "#1a5b8a", alpha = 0.15) +
+  labs(x = "Distância ao longo do trecho (km)", y = "Altitude (m)") +
+  theme_minimal(base_size = 10)
+```
+
+`st_line_sample(density = 1/500)` gera um ponto a cada 500 m — a base de qualquer análise "ao
+longo do eixo", que no módulo 4 vira o cálculo de declividade por segmento.
+:::
+
+## 6. Mapa de conferência
+
+Monte um `leaflet` com a faixa de 5 km da BR-116 sobre imagem de satélite e verifique
+visualmente se ela cobre o corredor esperado.
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+#| eval: false
+library(leaflet)
+
+faixa5 <- st_union(br116) |> st_buffer(5000) |> st_transform(4326) |> st_as_sf()
+
+leaflet() |>
+  addProviderTiles("Esri.WorldImagery") |>
+  addPolygons(data = faixa5, fillColor = "#1a5b8a", fillOpacity = 0.2,
+              color = "white", weight = 1) |>
+  addPolylines(data = st_transform(br116, 4326), color = "#e07b39", weight = 2)
+```
+:::
+
+## 7. Para entregar
+
+Escolha um trecho de rodovia federal da sua área de trabalho e produza:
+
+1. um mapa da faixa de influência de 5 km, com escala, norte e fonte;
+2. uma tabela de população por município na faixa;
+3. três linhas de texto interpretando o resultado — quais municípios concentram a população
+   afetada e o que isso sugere para a priorização de intervenções.
+
+Entregue como script `.R` comentado ou, se quiser adiantar o módulo 5, como documento Quarto.

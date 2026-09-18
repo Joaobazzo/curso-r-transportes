@@ -1,0 +1,242 @@
+# Bases públicas brasileiras {#sec-m2-bases}
+
+Este capítulo é o que torna o R particularmente produtivo para o trabalho do Ministério: em
+vez de navegar por portais, baixar ZIPs e abrir shapefiles um a um, as principais bases
+brasileiras vêm por função — versionadas, documentadas e com o código IBGE como chave.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+```
+
+## `geobr` — malhas e geometrias oficiais do IBGE
+
+```{r}
+#| eval: false
+geobr::list_geobr()   # todas as funções, com os anos disponíveis
+```
+
+As que mais usamos:
+
+| Função | O que traz |
+|:--|:--|
+| `read_country()`, `read_region()`, `read_state()` | limites nacionais, regionais e estaduais |
+| `read_municipality()` | malha municipal |
+| `read_census_tract()` | setores censitários |
+| `read_weighting_area()` | áreas de ponderação |
+| `read_statistical_grid()` | grade estatística do IBGE |
+| `read_urban_area()` | manchas urbanizadas |
+| `read_health_facilities()` | estabelecimentos de saúde (CNES) |
+| `read_schools()` | escolas (Censo Escolar) |
+| `read_biomes()`, `read_conservation_units()`, `read_indigenous_land()` | recortes ambientais e territoriais |
+
+```{r}
+arquivo <- "dados/brutos/muni_br.gpkg"
+
+if (!file.exists(arquivo)) {
+  br <- geobr::read_municipality(code_muni = "all", year = 2022,
+                                 simplified = TRUE, showProgress = FALSE)
+  st_write(br, arquivo, quiet = TRUE)
+}
+br <- st_read(arquivo, quiet = TRUE)
+
+nrow(br)
+head(br, 3) |> st_drop_geometry()
+```
+
+Argumentos que importam:
+
+- `code_muni` / `code_state`: aceita código IBGE, sigla da UF (`"PR"`) ou `"all"`.
+- `year`: a malha muda a cada censo e a cada criação de município — **declare sempre**.
+- `simplified = TRUE` (padrão): geometria leve, para mapas. Use `FALSE` para medir área.
+- `cache = TRUE` (padrão): o arquivo fica guardado localmente após o primeiro *download*.
+
+::: {.callout-warning}
+## A malha certa para cada uso
+
+Para **mapas**, `simplified = TRUE` é o que você quer: renderiza rápido e a diferença é
+invisível na escala de impressão. Para **medir área, fazer interseção ou calcular população em
+faixa de influência**, use `simplified = FALSE` — a geometria simplificada corta esquinas e
+introduz erro de alguns por cento, além de deixar vãos entre polígonos vizinhos.
+:::
+
+## `censobr` — microdados e agregados do Censo
+
+O `censobr` distribui o Censo em formato Parquet, com leitura preguiçosa: a função devolve um
+objeto `arrow` que só é materializado no `collect()`. Isso permite trabalhar com o Censo
+inteiro em um notebook comum.
+
+```{r}
+#| eval: false
+# agregados por setor censitário
+setores <- censobr::read_tracts(year = 2022, dataset = "Basico",
+                                as_data_frame = FALSE, showProgress = FALSE)
+
+pop_setor <- setores |>
+  filter(abbrev_state == "PR") |>
+  select(code_tract, code_muni, name_muni, V0001) |>   # V0001 = população residente
+  collect()
+```
+
+```{r}
+#| eval: false
+# microdados de população e domicílios
+censobr::read_population(year = 2010, columns = c("code_muni", "V0601", "V6036"))
+censobr::read_households(year = 2010, columns = c("code_muni", "V0201"))
+
+# dicionário das variáveis — indispensável, os nomes são códigos
+censobr::data_dictionary(year = 2022, dataset = "tracts")
+```
+
+::: {.callout-note}
+## Sobre os anos disponíveis
+
+O `censobr` cobre 2000, 2010 e — nas versões mais recentes — o Censo 2022, cuja divulgação foi
+progressiva. Se `year = 2022` não estiver disponível na sua versão, troque por `2010`: o
+código é idêntico, apenas os nomes das variáveis mudam. Confira com
+`packageVersion("censobr")` e `censobr::data_dictionary()`.
+:::
+
+O casamento entre `censobr` (atributos) e `geobr` (geometria) se faz pelo código do setor ou
+do município — o `join` do módulo 1, agora com geometria de um lado:
+
+```{r}
+#| eval: false
+setores_geo <- geobr::read_census_tract(code_tract = "PR", year = 2022,
+                                        simplified = FALSE, showProgress = FALSE)
+
+setores_pop <- setores_geo |>
+  left_join(pop_setor, by = "code_tract", relationship = "one-to-one")
+```
+
+## `sidrar` — tabelas do SIDRA/IBGE
+
+O SIDRA é onde estão as séries agregadas: população estimada, projeções, PIB municipal, PNAD,
+produção agrícola. O `sidrar` traz qualquer tabela pelo número.
+
+```{r}
+#| eval: false
+# População residente por município (Censo 2022, tabela 4709)
+pop <- sidrar::get_sidra(
+  x = 4709,
+  variable = 93,
+  geo = "City",
+  geo.filter = list("State" = 41)    # 41 = Paraná
+)
+
+# PIB municipal (tabela 5938)
+pib <- sidrar::get_sidra(x = 5938, variable = 37, period = "2021",
+                         geo = "City", geo.filter = list("State" = 41))
+
+# procurar tabelas e ver a estrutura de uma delas
+sidrar::search_sidra("população")
+sidrar::info_sidra(4709)
+```
+
+A saída vem "larga" e com nomes de coluna longos, em português — é um caso clássico para
+`janitor::clean_names()` e para o `pivot_longer` do módulo 1.
+
+```{r}
+#| eval: false
+pop_limpa <- pop |>
+  janitor::clean_names() |>
+  transmute(
+    code_muni = as.numeric(municipio_codigo),
+    municipio = municipio,
+    populacao = valor
+  )
+```
+
+::: {.callout-tip}
+O SIDRA limita o tamanho da consulta. Para séries longas em todos os municípios do Brasil,
+quebre por UF em um laço (`lapply` por código de UF) e empilhe com `bind_rows()` — o padrão do
+módulo 1.
+:::
+
+## `osmdata` e `osmextract` — OpenStreetMap
+
+Dois caminhos, para necessidades diferentes:
+
+- **`osmdata`** consulta a API Overpass ao vivo. Ideal para recortes pequenos e feições
+  específicas (postos de combustível, terminais, uma rodovia).
+- **`osmextract`** baixa extratos regionais prontos em `.pbf` (Geofabrik). Ideal para redes
+  viárias inteiras e para alimentar o `r5r` no módulo 4.
+
+```{r}
+arquivo_br116 <- "dados/brutos/br116_serra.gpkg"
+
+if (!file.exists(arquivo_br116)) {
+  consulta <- osmdata::opq(bbox = c(-49.40, -25.75, -48.40, -25.15), timeout = 120) |>
+    osmdata::add_osm_feature(key = "ref", value = "BR-116") |>
+    osmdata::osmdata_sf()
+
+  br116 <- consulta$osm_lines |>
+    select(any_of(c("osm_id", "name", "ref", "highway", "lanes", "maxspeed"))) |>
+    st_transform(4674)
+
+  st_write(br116, arquivo_br116, quiet = TRUE)
+}
+
+br116 <- st_read(arquivo_br116, quiet = TRUE)
+nrow(br116)
+st_geometry_type(br116, by_geometry = FALSE) |> unique()
+```
+
+```{r}
+#| label: fig-br116
+#| fig-cap: "Trechos da BR-116 no recorte da Serra do Mar, conforme o OpenStreetMap"
+#| fig-height: 4.4
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+muni <- st_read(arquivo, quiet = TRUE)
+
+ggplot() +
+  geom_sf(data = muni, fill = "grey97", colour = "grey85", linewidth = 0.2) +
+  geom_sf(data = br116, colour = "#e07b39", linewidth = 0.7) +
+  coord_sf(xlim = c(-49.45, -48.35), ylim = c(-25.80, -25.10)) +
+  labs(caption = "Fonte: OpenStreetMap.") +
+  theme_void(base_size = 10)
+```
+
+```{r}
+#| eval: false
+# osmextract: a malha viária de um estado inteiro, a partir do .pbf
+rede <- osmextract::oe_get(
+  place = "Ceará",
+  layer = "lines",
+  query = "SELECT osm_id, highway, name FROM lines WHERE highway IS NOT NULL",
+  download_directory = "dados/brutos/osm"
+)
+
+# só o arquivo .pbf, que é o que o r5r consome (módulo 4)
+osmextract::oe_download(
+  file_url = osmextract::oe_match("Ceará")$url,
+  download_directory = "dados/brutos/osm"
+)
+```
+
+::: {.callout-important}
+## O OSM é excelente, com duas ressalvas
+
+1. **É colaborativo.** A geometria é geralmente muito boa; os atributos (`maxspeed`, `lanes`,
+   `surface`) são incompletos e variam por região. Para o traçado oficial das rodovias
+   federais, a fonte é o **SNV do DNIT** (<http://servicos.dnit.gov.br/vgeo/>) ou a
+   [Base Georreferenciada do MT](https://www.gov.br/transportes/pt-br/assuntos/transporte-terrestre/base-de-dados-georreferenciada).
+2. **Muda todo dia.** Registre a data da extração — `dados/brutos/br116_serra.gpkg` com a data
+   no nome é uma prática que salva a reprodutibilidade do relatório.
+:::
+
+## Outras fontes que valem conhecer
+
+| Fonte | Como acessar | Uso |
+|:--|:--|:--|
+| SNV — rodovias federais | [VGeo/DNIT](http://servicos.dnit.gov.br/vgeo/), *download* manual | traçado oficial, trechos, jurisdição |
+| Base georreferenciada do MT (BIT) | [portal do MT](https://www.gov.br/transportes/pt-br/assuntos/dados-de-transportes/bit) | rodovias, ferrovias, hidrovias, portos, aeroportos |
+| PNCT — contagem de tráfego | [Dados PNCT](http://servicos.dnit.gov.br/dadospnct) | VMDA por posto, na malha federal |
+| ANTAQ — Estatístico Aquaviário | [download](https://web3.antaq.gov.br/ea/sense/download.html) | cargas, atracações, instalações |
+| Acesso a Oportunidades (Ipea) | `aopdata` | acessibilidade e oportunidades em 20 cidades |
+| GTFS de transporte público | portais municipais, [Mobility Database](https://mobilitydatabase.org/feeds?q=brazil) | rede de transporte coletivo |
+| Geocodificação de endereços | `geocodebr` | endereço → coordenada (módulo 3) |
+
+Nos módulos 3 e 4 usamos `aopdata`, `geocodebr`, GTFS e os dados da ANTAQ; os dois primeiros
+itens da tabela entram no estudo de caso a seguir, como alternativa oficial ao OSM.

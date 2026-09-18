@@ -1,0 +1,291 @@
+# Operações geométricas {#sec-m2-geometrias}
+
+Este capítulo é a tradução direta do menu **Vetor > Geoprocessamento** do QGIS para código.
+Cada operação aqui é uma tarefa que hoje você faz clicando — e que, em código, fica registrada
+e reexecutável.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+crs_trabalho <- 31982   # SIRGAS 2000 / UTM 22S (PR/SC)
+```
+
+Vamos trabalhar com dados reais: os municípios do litoral do Paraná e de Santa Catarina.
+
+```{r}
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+
+if (!file.exists(arquivo)) {
+  muni <- dplyr::bind_rows(
+    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
+    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  )
+  st_write(muni, arquivo, quiet = TRUE)
+}
+
+muni <- st_read(arquivo, quiet = TRUE) |> st_transform(crs_trabalho)
+
+# padroniza o nome da coluna de geometria: cada fonte usa um nome diferente
+# ("geom", "geometry", "SHAPE"), e isso quebra código escrito para outra base
+st_geometry(muni) <- "geom"
+
+dim(muni)
+names(muni)
+```
+
+```{r}
+portos <- data.frame(
+  nome = c("Paranaguá", "Antonina", "São Francisco do Sul", "Itajaí", "Imbituba"),
+  lon  = c(-48.5119, -48.7119, -48.6383, -48.6486, -48.6706),
+  lat  = c(-25.5016, -25.4283, -26.2400, -26.9077, -28.2300)
+) |>
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  st_transform(crs_trabalho)
+```
+
+## Medidas: área, comprimento, perímetro, centroide
+
+```{r}
+muni_area <- muni |>
+  mutate(
+    area_km2 = as.numeric(units::set_units(st_area(geom), km^2)),
+    # perímetro: converter o polígono em linha e medir o comprimento
+    perim_km = as.numeric(units::set_units(
+      st_length(st_cast(geom, "MULTILINESTRING")), km))
+  )
+
+muni_area |>
+  st_drop_geometry() |>
+  slice_max(area_km2, n = 5) |>
+  select(name_muni, abbrev_state, area_km2, perim_km) |>
+  mutate(across(where(is.numeric), \(x) round(x, 1))) |>
+  knitr::kable()
+```
+
+```{r}
+centroides <- st_centroid(muni)          # centro geométrico
+ponto_interno <- st_point_on_surface(muni)  # garantidamente dentro do polígono
+```
+
+`st_centroid()` de um município com formato muito irregular, ou com ilhas, pode cair **fora**
+do polígono — o que quebra junções espaciais. `st_point_on_surface()` resolve isso.
+
+## *Buffer* — a área de influência
+
+```{r}
+buffer_portos <- st_buffer(portos, dist = 15000)   # 15 km, em metros (CRS projetado)
+
+as.numeric(units::set_units(st_area(buffer_portos), km^2)) |> round(1)
+```
+
+```{r}
+#| label: fig-buffer
+#| fig-cap: "Áreas de influência de 15 km em torno dos portos"
+#| fig-height: 5
+ggplot() +
+  geom_sf(data = muni, fill = "grey97", colour = "grey80", linewidth = 0.2) +
+  geom_sf(data = buffer_portos, fill = "#1a5b8a", alpha = 0.25, colour = "#1a5b8a") +
+  geom_sf(data = portos, size = 1.8, colour = "#0d3b5c") +
+  geom_sf_text(data = portos, aes(label = nome), size = 2.6, nudge_y = 12000) +
+  theme_void(base_size = 10)
+```
+
+Variações úteis:
+
+```{r}
+#| eval: false
+st_buffer(x, dist = 500, endCapStyle = "FLAT")    # buffer de linha sem "tampa" redonda
+st_buffer(x, dist = -200)                          # buffer negativo: encolhe o polígono
+st_buffer(x, dist = c(1000, 5000, 10000))          # um raio por feição (vetorizado)
+```
+
+O *buffer* negativo é um truque prático: `st_buffer(area, -100)` remove uma faixa de 100 m da
+borda, útil para descartar efeitos de borda em amostragens.
+
+## Relações espaciais: quem está onde
+
+As funções `st_*` de predicado respondem perguntas de pertencimento. Todas retornam uma lista
+de índices por padrão, ou uma matriz lógica com `sparse = FALSE`.
+
+```{r}
+# quais municípios contêm um porto?
+com_porto <- muni[st_intersects(muni, portos, sparse = FALSE) |> apply(1, any), ]
+com_porto |> st_drop_geometry() |> select(name_muni, abbrev_state)
+```
+
+```{r}
+# quantos portos por município (contagem)
+st_intersects(muni, portos) |> lengths() |> table()
+```
+
+| Predicado | Pergunta |
+|:--|:--|
+| `st_intersects()` | tocam-se de qualquer forma? (o mais usado) |
+| `st_within()` | A está dentro de B? |
+| `st_contains()` | A contém B? |
+| `st_touches()` | encostam-se apenas pela borda? |
+| `st_crosses()` | cruzam-se (linha × linha, linha × polígono)? |
+| `st_disjoint()` | não se tocam? |
+| `st_is_within_distance()` | estão a menos de X metros? |
+
+```{r}
+# municípios vizinhos de Paranaguá (compartilham fronteira)
+pgua <- muni |> filter(name_muni == "Paranaguá")
+vizinhos <- muni[st_touches(muni, pgua, sparse = FALSE), ]
+vizinhos |> st_drop_geometry() |> pull(name_muni)
+```
+
+```{r}
+# municípios a menos de 50 km de um porto
+proximos <- muni[st_is_within_distance(muni, portos, dist = 50000, sparse = FALSE) |>
+                   apply(1, any), ]
+nrow(proximos)
+```
+
+## Junção espacial (`st_join`)
+
+É o equivalente espacial do `left_join` do módulo 1: em vez de casar por uma coluna, casa por
+posição.
+
+```{r}
+portos_com_muni <- st_join(portos, muni |> select(name_muni, abbrev_state, code_muni))
+
+portos_com_muni |>
+  st_drop_geometry() |>
+  knitr::kable()
+```
+
+Note que o porto ganhou o **código IBGE** do município — exatamente a chave que faltava no
+módulo 1 para cruzar com dados do Censo e do SIDRA. É assim que se constrói a ponte entre o
+dado espacial e o dado tabular.
+
+```{r}
+#| eval: false
+st_join(a, b, join = st_within)         # muda o predicado
+st_join(a, b, join = st_nearest_feature) # casa com a feição MAIS PRÓXIMA (sempre casa)
+st_join(a, b, left = FALSE)              # inner join espacial
+```
+
+`st_nearest_feature` é a solução para pontos que caem pouco fora do polígono — coordenada de
+porto que caiu no mar, parada de ônibus na borda do setor censitário.
+
+## Interseção, diferença e união
+
+```{r}
+# INTERSEÇÃO: recorta uma camada pela outra, mantendo os atributos das duas
+recorte <- st_intersection(muni, buffer_portos |> st_union())
+
+nrow(muni)
+nrow(recorte)     # só os municípios tocados, e só a parte dentro do buffer
+```
+
+```{r}
+#| label: fig-intersecao
+#| fig-cap: "Interseção entre municípios e as áreas de influência dos portos"
+#| fig-height: 4.5
+ggplot() +
+  geom_sf(data = muni, fill = "grey97", colour = "grey85", linewidth = 0.2) +
+  geom_sf(data = recorte, aes(fill = abbrev_state), colour = "white", linewidth = 0.2) +
+  scale_fill_manual(values = c(PR = "#1a5b8a", SC = "#e07b39"), name = "UF") +
+  theme_void(base_size = 10)
+```
+
+A interseção é a operação-chave do estudo de caso: ela responde "que parte de cada setor
+censitário está dentro da faixa de influência" — e, com isso, quanta população está lá.
+
+```{r}
+#| eval: false
+st_difference(a, b)      # o que está em A e não em B (recorte inverso)
+st_sym_difference(a, b)  # o que está em um e não no outro
+st_union(a)              # dissolve todas as feições em uma
+st_union(a, b)           # une duas camadas
+st_combine(a)            # agrupa sem dissolver as fronteiras internas
+```
+
+A diferença entre `st_union()` e `st_combine()` importa: o primeiro **apaga** as fronteiras
+internas (um polígono só); o segundo apenas junta em uma feição *multipart*, preservando as
+linhas. Para "dissolver por UF", é `st_union()` dentro de `group_by`:
+
+```{r}
+ufs <- muni |>
+  group_by(abbrev_state) |>
+  summarise(geom = st_union(geom), n_muni = n())
+
+ufs |> st_drop_geometry()
+```
+
+## Distâncias
+
+```{r}
+# matriz de distâncias porto × porto, em km
+d <- st_distance(portos) |>
+  units::set_units(km) |>
+  as.numeric() |>
+  matrix(nrow = nrow(portos), dimnames = list(portos$nome, portos$nome))
+
+round(d, 1)
+```
+
+```{r}
+# para cada município, a distância ao porto mais próximo
+muni_d <- muni |>
+  mutate(
+    dist_porto_km = round(
+      apply(st_distance(st_point_on_surface(geom), portos), 1, min) / 1000, 1),
+    porto_proximo = portos$nome[st_nearest_feature(st_point_on_surface(geom), portos)]
+  )
+
+muni_d |>
+  st_drop_geometry() |>
+  slice_min(dist_porto_km, n = 5) |>
+  select(name_muni, abbrev_state, porto_proximo, dist_porto_km) |>
+  knitr::kable()
+```
+
+Essa é a estrutura de um indicador de acesso rudimentar — distância euclidiana ao
+equipamento mais próximo. No módulo 4 substituímos essa linha reta por **tempo de viagem pela
+rede**, que é o que de fato importa em planejamento.
+
+## Simplificação e desempenho
+
+Malhas do IBGE em resolução plena são pesadas. Para mapas e para operações exploratórias, vale
+simplificar:
+
+```{r}
+#| eval: false
+# simplificação geométrica (cuidado: cria vãos entre polígonos vizinhos)
+muni_simples <- st_simplify(muni, dTolerance = 200, preserveTopology = TRUE)
+
+# o geobr já oferece a versão simplificada, que é a melhor opção
+geobr::read_municipality(code_muni = "PR", year = 2022, simplified = TRUE)
+```
+
+Três hábitos que resolvem quase todo problema de lentidão:
+
+1. Filtre **antes** de operar: recorte a área de estudo na leitura (`query`, `wkt_filter`).
+2. Use a malha simplificada para visualizar e a plena só para medir.
+3. Grave os resultados intermediários em `.gpkg` e leia de lá — não recalcule a cada render.
+
+::: {.callout-note}
+## `duckspatial`: quando a base não cabe na memória
+
+Para operações espaciais em bases muito grandes, o `duckspatial` expõe a extensão espacial do
+DuckDB com sintaxe de `dplyr`, no mesmo espírito do `duckplyr` do módulo 1: a operação roda no
+banco e só o resultado volta para o R.
+
+```{r}
+#| eval: false
+library(duckdb); library(duckspatial)
+
+con <- dbConnect(duckdb())
+ddbs_install(con); ddbs_load(con)
+
+ddbs_write_vector(con, muni, "muni")
+ddbs_read_vector(con, "SELECT name_muni, ST_Area(geom) AS area FROM muni LIMIT 5")
+```
+
+Vale a pena a partir de algumas centenas de milhares de feições; abaixo disso, `sf` é mais
+simples e rápido o suficiente.
+:::

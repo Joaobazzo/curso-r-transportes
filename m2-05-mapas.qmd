@@ -1,0 +1,210 @@
+# Geovisualização {#sec-m2-mapas}
+
+Dois tipos de mapa, com finalidades diferentes: o **estático**, que entra no relatório, e o
+**interativo**, que serve para conferir o dado e para publicar online. Este capítulo cobre o
+essencial dos dois; o acabamento de publicação é o assunto do módulo 5.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+if (!file.exists(arquivo)) {
+  muni <- dplyr::bind_rows(
+    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
+    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  )
+  st_write(muni, arquivo, quiet = TRUE)
+}
+muni <- st_read(arquivo, quiet = TRUE)
+
+portos <- data.frame(
+  nome = c("Paranaguá", "Antonina", "São Francisco do Sul", "Itajaí", "Imbituba"),
+  tku_bi = c(21.4, 1.2, 8.7, 6.3, 3.1),
+  lon = c(-48.5119, -48.7119, -48.6383, -48.6486, -48.6706),
+  lat = c(-25.5016, -25.4283, -26.2400, -26.9077, -28.2300)
+) |>
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+```
+
+## `geom_sf`: o mapa no `ggplot2`
+
+`geom_sf()` desenha qualquer objeto `sf` e descobre sozinho se é ponto, linha ou polígono.
+Toda a gramática do módulo 1 continua valendo.
+
+```{r}
+#| label: fig-mapa-base
+#| fig-cap: "Mapa mínimo"
+#| fig-height: 4
+ggplot(muni) + geom_sf()
+```
+
+```{r}
+#| label: fig-mapa-coropletico
+#| fig-cap: "Coroplético: área dos municípios"
+#| fig-height: 4.6
+muni |>
+  mutate(area_km2 = as.numeric(units::set_units(st_area(geom), km^2))) |>
+  ggplot() +
+  geom_sf(aes(fill = area_km2), colour = "white", linewidth = 0.1) +
+  scale_fill_viridis_c(option = "mako", direction = -1, transform = "log10",
+                       name = "Área (km²)",
+                       labels = scales::label_number(big.mark = ".")) +
+  theme_void(base_size = 10)
+```
+
+A regra do coroplético: **cor no polígono representa taxa ou densidade, não total**. Mapear
+população absoluta por município colore o mapa pelo tamanho do município, não pelo fenômeno.
+Para totais, use símbolos proporcionais.
+
+## Camadas, símbolos proporcionais e rótulos
+
+```{r}
+#| label: fig-mapa-camadas
+#| fig-cap: "Municípios, portos com símbolo proporcional ao TKU e rótulos"
+#| fig-height: 5.4
+ggplot() +
+  geom_sf(data = muni, fill = "grey96", colour = "grey80", linewidth = 0.2) +
+  geom_sf(data = portos, aes(size = tku_bi), colour = "#1a5b8a", alpha = 0.75) +
+  ggrepel::geom_text_repel(
+    data = portos,
+    aes(label = nome, geometry = geometry),
+    stat = "sf_coordinates", size = 2.8, min.segment.length = 0
+  ) +
+  scale_size_continuous(range = c(2, 10), name = "TKU (bi t·km)") +
+  coord_sf(xlim = c(-49.5, -47.8), ylim = c(-28.8, -25.0)) +
+  labs(caption = "Valores ilustrativos.") +
+  theme_void(base_size = 10) +
+  theme(legend.position = "right")
+```
+
+Três detalhes técnicos desse bloco:
+
+- `stat = "sf_coordinates"` com `aes(geometry = ...)` é o que permite ao `ggrepel` afastar os
+  rótulos sobrepostos em um mapa.
+- `coord_sf(xlim, ylim)` recorta a **visualização**, sem alterar os dados.
+- A ordem das camadas é a ordem de desenho: base primeiro, pontos por último.
+
+## Escala, norte e grade de coordenadas
+
+```{r}
+#| label: fig-mapa-ggspatial
+#| fig-cap: "Elementos cartográficos com ggspatial"
+#| fig-height: 5
+litoral <- muni |>
+  filter(name_muni %in% c("Paranaguá", "Antonina", "Morretes", "Guaratuba",
+                          "Matinhos", "Pontal do Paraná", "Guaraqueçaba"))
+
+ggplot(litoral) +
+  geom_sf(aes(fill = name_muni), colour = "white", linewidth = 0.3) +
+  geom_sf(data = portos |> filter(nome %in% c("Paranaguá", "Antonina")),
+          colour = "black", size = 2) +
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.25) +
+  ggspatial::annotation_north_arrow(
+    location = "tr", style = ggspatial::north_arrow_minimal(),
+    height = unit(1, "cm"), width = unit(1, "cm")
+  ) +
+  scale_fill_brewer(palette = "Blues", name = NULL) +
+  labs(title = "Litoral do Paraná",
+       caption = "Fonte: IBGE, malha municipal 2022 (geobr).") +
+  theme_minimal(base_size = 10) +
+  theme(panel.grid = element_line(colour = "grey92", linewidth = 0.2))
+```
+
+Um mapa que vai para documento oficial precisa de: título, fonte, escala gráfica, indicação
+de norte e menção ao sistema de coordenadas. Os dois primeiros vão em `labs()`; os dois
+seguintes, no `ggspatial`; o último, na legenda ou na nota de rodapé do documento.
+
+## Painéis
+
+```{r}
+#| label: fig-mapa-facet
+#| fig-cap: "Um painel por UF, com escala espacial independente"
+#| fig-height: 3.6
+muni |>
+  mutate(area_km2 = as.numeric(units::set_units(st_area(geom), km^2))) |>
+  ggplot() +
+  geom_sf(aes(fill = area_km2), colour = NA) +
+  facet_wrap(~abbrev_state, scales = "free") +
+  scale_fill_viridis_c(option = "mako", direction = -1, transform = "log10", name = "km²") +
+  theme_void(base_size = 9)
+```
+
+## Mapas interativos
+
+### `leaflet` — conferência e publicação simples
+
+```{r}
+#| eval: false
+library(leaflet)
+
+leaflet(portos) |>
+  addProviderTiles("CartoDB.Positron") |>
+  addCircleMarkers(
+    radius = ~sqrt(tku_bi) * 2,
+    color = "#1a5b8a", fillOpacity = 0.6, stroke = FALSE,
+    popup = ~paste0("<b>", nome, "</b><br>TKU: ", tku_bi, " bi t·km")
+  ) |>
+  addPolygons(data = st_transform(litoral, 4326),
+              fillColor = "#e07b39", fillOpacity = 0.2,
+              color = "white", weight = 1, label = ~name_muni) |>
+  addScaleBar(position = "bottomleft")
+```
+
+O `leaflet` exige **coordenadas geográficas** (`EPSG:4326`): se o dado estiver em UTM, ele
+reclama ou desenha errado. `st_transform(x, 4326)` antes de plotar resolve.
+
+::: {.callout-tip}
+## O uso mais valioso do `leaflet` não é publicar — é conferir
+
+Antes de acreditar em qualquer resultado espacial, jogue a camada em um `leaflet` sobre imagem
+de satélite e olhe: o *buffer* cobre o que deveria? Os pontos caíram na estrada ou no mato?
+O recorte pegou o município certo? Cinco segundos de conferência visual evitam um relatório
+errado.
+
+```{r}
+#| eval: false
+leaflet() |> addProviderTiles("Esri.WorldImagery") |>
+  addPolygons(data = st_transform(area_analise, 4326))
+```
+:::
+
+### `mapgl` — mapas vetoriais modernos
+
+`mapgl` expõe o MapLibre/Mapbox GL, com renderização vetorial, extrusão 3D e transições
+suaves. É a melhor opção quando o mapa interativo é o produto final — um painel para a
+Subsecretaria, por exemplo.
+
+```{r}
+#| eval: false
+library(mapgl)
+
+maplibre(bounds = portos) |>
+  add_circle_layer(
+    id = "portos",
+    source = portos,
+    circle_color = "#1a5b8a",
+    circle_radius = 8,
+    circle_opacity = 0.7,
+    tooltip = "nome"
+  )
+```
+
+No módulo 5 retomamos os mapas interativos dentro de relatórios Quarto, onde eles convivem com
+o texto e as tabelas.
+
+## Salvar mapas
+
+```{r}
+#| eval: false
+mapa <- ggplot(litoral) + geom_sf()
+
+ggsave("resultados/mapa_litoral.png", mapa,
+       width = 18, height = 14, units = "cm", dpi = 300)
+ggsave("resultados/mapa_litoral.pdf", mapa,
+       width = 18, height = 14, units = "cm")        # vetorial, para impressão
+```
+
+Para mapas, prefira PDF ou SVG: linhas e rótulos continuam nítidos em qualquer ampliação, o
+que importa quando o documento é impresso em A3 ou projetado.

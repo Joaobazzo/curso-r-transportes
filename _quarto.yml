@@ -39,6 +39,14 @@ book:
     - part: "Módulo 2 — Objetos espaciais: vetores e rasters"
       chapters:
         - m2-00-visao-geral.qmd
+        - m2-01-sf.qmd
+        - m2-02-crs.qmd
+        - m2-03-geometrias.qmd
+        - m2-04-raster.qmd
+        - m2-05-mapas.qmd
+        - m2-06-bases.qmd
+        - m2-07-estudo-de-caso.qmd
+        - m2-08-exercicios.qmd
     - part: "Módulo 3 — Integração de bases, roteamento e matrizes OD"
       chapters:
         - m3-00-visao-geral.qmd

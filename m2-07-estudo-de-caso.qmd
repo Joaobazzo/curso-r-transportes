@@ -1,0 +1,296 @@
+# Estudo de caso: faixa de influência da BR-116 {#sec-m2-estudo-de-caso}
+
+A pergunta deste capítulo é um pedido recorrente em qualquer área de planejamento de
+transportes:
+
+> *Quanta população vive na faixa de influência de um trecho de rodovia federal, como ela se
+> distribui entre municípios, e quanto disso está a menos de 5 km do eixo?*
+
+É a tarefa que normalmente se resolve no QGIS com *buffer* + interseção + soma de atributos.
+Vamos fazer o mesmo em código, com dados oficiais, e com as armadilhas explicadas.
+
+O trecho escolhido é a **BR-116 na travessia da Serra do Mar**, entre a Região Metropolitana
+de Curitiba e o litoral — relevo acentuado, ocupação concentrada e um corredor logístico que
+liga o Porto de Paranaguá ao interior.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+crs_trabalho <- 31982    # SIRGAS 2000 / UTM 22S — metros, para medir e fazer buffer
+```
+
+## Passo 1 — O eixo viário
+
+```{r}
+arquivo_br116 <- "dados/brutos/br116_serra.gpkg"
+
+if (!file.exists(arquivo_br116)) {
+  consulta <- osmdata::opq(bbox = c(-49.40, -25.75, -48.40, -25.15), timeout = 120) |>
+    osmdata::add_osm_feature(key = "ref", value = "BR-116") |>
+    osmdata::osmdata_sf()
+
+  st_write(
+    consulta$osm_lines |>
+      select(any_of(c("osm_id", "name", "ref", "highway", "lanes", "maxspeed"))) |>
+      st_transform(4674),
+    arquivo_br116, quiet = TRUE
+  )
+}
+
+br116 <- st_read(arquivo_br116, quiet = TRUE) |> st_transform(crs_trabalho)
+
+c(trechos = nrow(br116),
+  extensao_km = round(as.numeric(sum(st_length(br116))) / 1000, 1))
+```
+
+Repare que a extensão somada é maior que a extensão real do corredor: o OSM traz pistas
+separadas, alças de acesso e vias marginais como feições distintas. Para medir extensão de
+corredor isso precisaria ser tratado; para definir uma **faixa de influência**, não atrapalha,
+porque o `st_union()` dissolve a sobreposição.
+
+```{r}
+eixo <- st_union(br116)
+```
+
+::: {.callout-note}
+## A versão oficial deste passo
+
+Em um produto para publicação, o eixo não vem do OSM, e sim do **SNV do DNIT** — que traz
+código da BR, trecho, jurisdição e situação da pista:
+
+```{r}
+#| eval: false
+snv <- st_read("dados/brutos/snv/SNV_202601A.shp", quiet = TRUE) |>
+  st_transform(crs_trabalho)
+
+eixo <- snv |>
+  filter(vl_br == "116", sg_uf %in% c("PR", "SC")) |>
+  st_union()
+```
+
+O resto do capítulo é idêntico — o que muda é a citação da fonte no relatório. Os nomes das
+colunas do SNV mudam entre versões; rode `names(snv)` antes.
+:::
+
+## Passo 2 — A faixa de influência
+
+```{r}
+faixas <- c(2000, 5000, 10000)
+
+influencia <- lapply(faixas, \(d) {
+  st_buffer(eixo, dist = d) |>
+    st_as_sf() |>
+    mutate(faixa_m = d)
+}) |>
+  bind_rows() |>
+  rename(geom = x) |>
+  arrange(desc(faixa_m))     # do maior para o menor, para desenhar em camadas
+
+influencia |>
+  mutate(area_km2 = round(as.numeric(units::set_units(st_area(geom), km^2)), 1)) |>
+  st_drop_geometry() |>
+  knitr::kable()
+```
+
+Três faixas, e não uma, porque a pergunta "quem é afetado" raramente tem uma resposta única:
+2 km é a vizinhança imediata, 5 km é a área de acesso direto, 10 km é a área de influência
+econômica. Apresentar as três deixa a decisão com quem lê o relatório.
+
+## Passo 3 — População: a grade estatística do IBGE
+
+Para somar população dentro de um polígono irregular, o dado ideal é o de **menor unidade
+possível**. Usaremos a grade estatística do IBGE, em que cada célula traz a população
+residente — assim a soma dentro da faixa é direta, sem precisar repartir setores censitários.
+
+```{r}
+arquivo_grade <- "dados/brutos/grade_pr.gpkg"
+
+if (!file.exists(arquivo_grade)) {
+  grade_pr <- geobr::read_statistical_grid(code_grid = "PR", showProgress = FALSE)
+  st_write(grade_pr, arquivo_grade, quiet = TRUE)
+}
+
+grade <- st_read(arquivo_grade, quiet = TRUE) |> st_transform(crs_trabalho)
+
+dim(grade)
+names(grade)
+```
+
+```{r}
+# recorte espacial pela maior faixa, feito antes de qualquer conta:
+# reduz de centenas de milhares de células para o que interessa
+maior_faixa <- influencia |> filter(faixa_m == max(faixa_m))
+
+grade_recorte <- grade[st_intersects(grade, maior_faixa, sparse = FALSE)[, 1], ]
+nrow(grade_recorte)
+```
+
+```{r}
+# a coluna de população da grade
+pop_col <- intersect(c("POP", "pop"), names(grade_recorte))[1]
+grade_recorte <- grade_recorte |> mutate(pop = as.numeric(.data[[pop_col]]))
+
+c(celulas = nrow(grade_recorte), populacao_total = sum(grade_recorte$pop, na.rm = TRUE))
+```
+
+::: {.callout-important}
+## Por que não usar o setor censitário direto
+
+Setores censitários são maiores que as células da grade, e a faixa de influência corta a
+maioria deles pelo meio. Somar a população dos setores **tocados** superestima; somar só os
+setores **inteiramente contidos** subestima. A saída correta, quando se usa setor, é a
+**ponderação por área** — supor que a população se distribui uniformemente dentro do setor:
+
+```{r}
+#| eval: false
+setores <- geobr::read_census_tract(code_tract = "PR", year = 2010,
+                                    simplified = FALSE, showProgress = FALSE) |>
+  st_transform(crs_trabalho) |>
+  left_join(pop_por_setor, by = "code_tract")     # população vinda do censobr
+
+ponderado <- setores |>
+  mutate(area_total = st_area(geom)) |>
+  st_intersection(maior_faixa) |>
+  mutate(
+    fracao = as.numeric(st_area(geom) / area_total),
+    pop_na_faixa = pop * fracao
+  )
+
+sum(ponderado$pop_na_faixa)
+```
+
+Essa suposição é frágil em setores rurais grandes — é justamente por isso que a grade
+estatística, com células muito menores, dá um resultado melhor para faixas de domínio e áreas
+de influência. Registre no relatório qual método foi usado.
+:::
+
+## Passo 4 — População por faixa
+
+```{r}
+pop_por_faixa <- lapply(sort(faixas), \(d) {
+  f <- influencia |> filter(faixa_m == d)
+  dentro <- grade_recorte[st_intersects(grade_recorte, f, sparse = FALSE)[, 1], ]
+  tibble::tibble(
+    faixa_m   = d,
+    celulas   = nrow(dentro),
+    populacao = sum(dentro$pop, na.rm = TRUE)
+  )
+}) |>
+  bind_rows() |>
+  mutate(
+    area_km2 = as.numeric(units::set_units(
+      st_area(influencia$geom[match(faixa_m, influencia$faixa_m)]), km^2)),
+    densidade = populacao / area_km2
+  )
+
+pop_por_faixa |>
+  transmute(
+    `Faixa (km)` = faixa_m / 1000,
+    `Área (km²)` = round(area_km2, 1),
+    `População`  = scales::comma(populacao, big.mark = "."),
+    `Hab./km²`   = round(densidade, 1)
+  ) |>
+  knitr::kable(align = "rrrr")
+```
+
+A densidade cair conforme a faixa aumenta é o resultado esperado e informativo: a ocupação se
+concentra junto ao eixo.
+
+## Passo 5 — Distribuição por município
+
+```{r}
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+if (!file.exists(arquivo)) {
+  muni <- dplyr::bind_rows(
+    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
+    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  )
+  st_write(muni, arquivo, quiet = TRUE)
+}
+muni <- st_read(arquivo, quiet = TRUE) |> st_transform(crs_trabalho)
+
+faixa5 <- influencia |> filter(faixa_m == 5000)
+
+pop_muni <- grade_recorte[st_intersects(grade_recorte, faixa5, sparse = FALSE)[, 1], ] |>
+  # o join usa o CENTRO de cada célula: com st_intersects, células sobre a divisa
+  # seriam contadas em dois municípios e a população total dobraria
+  st_point_on_surface() |>
+  st_join(muni |> select(code_muni, name_muni, abbrev_state)) |>
+  st_drop_geometry() |>
+  summarise(populacao = sum(pop, na.rm = TRUE),
+            celulas = n(),
+            .by = c(code_muni, name_muni, abbrev_state)) |>
+  filter(!is.na(code_muni)) |>
+  arrange(desc(populacao))
+
+pop_muni |>
+  mutate(part = populacao / sum(populacao)) |>
+  transmute(Município = name_muni, UF = abbrev_state,
+            `População na faixa de 5 km` = scales::comma(populacao, big.mark = "."),
+            `Part. (%)` = scales::percent(part, accuracy = 0.1)) |>
+  knitr::kable(align = "llrr")
+```
+
+Note o `join = st_within` e o código IBGE preservado: é o que permite levar esse resultado
+para qualquer outra base municipal — PIB, frota, arrecadação — com o `left_join` do módulo 1.
+
+## Passo 6 — O mapa
+
+```{r}
+#| label: fig-caso-faixa
+#| fig-cap: "Faixas de influência da BR-116 na Serra do Mar e população residente por célula"
+#| fig-height: 5.6
+recorte_vis <- st_bbox(influencia |> filter(faixa_m == 10000))
+
+ggplot() +
+  geom_sf(data = muni, fill = "grey98", colour = "grey80", linewidth = 0.2) +
+  geom_sf(data = grade_recorte |> filter(pop > 0),
+          aes(fill = pop), colour = NA) +
+  geom_sf(data = influencia, fill = NA, colour = "#1a5b8a",
+          linewidth = 0.4, linetype = "dashed") +
+  geom_sf(data = br116, colour = "#b3402a", linewidth = 0.8) +
+  scale_fill_viridis_c(option = "rocket", direction = -1, transform = "log10",
+                       name = "População\npor célula") +
+  coord_sf(xlim = recorte_vis[c("xmin", "xmax")],
+           ylim = recorte_vis[c("ymin", "ymax")], expand = FALSE) +
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.25) +
+  labs(
+    title = "BR-116 / Serra do Mar: faixas de influência de 2, 5 e 10 km",
+    caption = paste("Fontes: eixo viário OpenStreetMap; população IBGE, grade estatística.",
+                    "Elaboração própria.")
+  ) +
+  theme_void(base_size = 10) +
+  theme(plot.title = element_text(face = "bold", size = 11))
+```
+
+## Passo 7 — Exportar
+
+```{r}
+#| eval: false
+dir.create("resultados", showWarnings = FALSE)
+
+# camadas espaciais, em um único GeoPackage, no CRS oficial
+st_write(st_transform(influencia, 4674),  "resultados/br116_faixas.gpkg",
+         layer = "faixas_influencia", delete_dsn = TRUE)
+st_write(st_transform(br116, 4674),       "resultados/br116_faixas.gpkg",
+         layer = "eixo_br116", append = TRUE)
+
+# tabelas para o relatório
+writexl::write_xlsx(
+  list("Por faixa" = pop_por_faixa, "Por município" = pop_muni),
+  "resultados/br116_populacao.xlsx"
+)
+```
+
+## O que este estudo de caso mostrou
+
+1. O fluxo *buffer* → recorte → soma, que no SIG é uma sequência de cliques, aqui são 15
+   linhas — e essas 15 linhas podem ser reexecutadas para outra BR trocando um filtro.
+2. A escolha do CRS não é detalhe: o *buffer* em metros exige projeção métrica, e a conferência
+   da área (π r²) é o teste de sanidade.
+3. A unidade do dado de população determina o método: grade estatística permite soma direta;
+   setor censitário exige ponderação por área, e isso precisa estar escrito no relatório.
+4. O código IBGE, preservado pela junção espacial, é a ponte para qualquer outra base
+   municipal — que é exatamente o que faremos no módulo 3.

@@ -18,3 +18,6 @@
 # sistema
 .DS_Store
 Thumbs.db
+
+# saidas do Quarto na raiz
+/*.html
