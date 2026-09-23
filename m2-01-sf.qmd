@@ -29,13 +29,11 @@ reais como exemplo.
 porto <- sf::st_point(c(-48.5, -25.5))
 class(porto)
 
-# a partir de uma tabela de coordenadas: o caso mais comum no dia a dia
-portos_tab <- data.frame(
-  nome = c("Paranaguá", "Itajaí", "Santos", "Pecém"),
-  uf   = c("PR", "SC", "SP", "CE"),
-  lon  = c(-48.5119, -48.6486, -46.3336, -38.8000),
-  lat  = c(-25.5016, -26.9077, -23.9619, -3.5500)
-)
+# a partir de uma tabela de coordenadas: o caso mais comum no dia a dia.
+# em vez de digitar as coordenadas na mão, lemos de um arquivo real, com
+# a localização de instalações portuárias do cadastro da ANTAQ
+portos_tab <- readr::read_csv("dados/portos_antaq.csv", show_col_types = FALSE)
+portos_tab
 
 portos <- sf::st_as_sf(portos_tab, coords = c("lon", "lat"), crs = 4326)
 portos
@@ -44,6 +42,20 @@ portos
 Leia com atenção o cabeçalho que o `sf` imprime: número de feições, tipo de geometria,
 dimensão, `bbox` (retângulo envolvente) e o **CRS**. É a primeira coisa a conferir em qualquer
 dado espacial.
+
+::: {.callout-tip}
+## Antes do primeiro mapa: escolha um mapa-base que não peça chave de API
+
+Algumas opções na lista padrão do `mapview` (como as da Stadia Maps) hoje exigem cadastro e
+chave de API. Para evitar isso, defina uma vez, no início da sessão, uma lista de mapas-base
+gratuitos e sem cadastro:
+
+```{r}
+mapview::mapviewOptions(basemaps = c("CartoDB.Positron", "OpenStreetMap", "Esri.WorldImagery"))
+```
+
+Essa opção vale para todos os `mapview()` da sessão, inclusive os deste capítulo.
+:::
 
 ```{r}
 mapview::mapview(portos)
@@ -106,6 +118,11 @@ quadra <- sf::st_polygon(list(rbind(
 sf::st_sfc(trecho, quadra, crs = 4326) |> sf::st_geometry_type()
 sf::st_length(sf::st_sfc(trecho, crs = 4326))
 sf::st_area(sf::st_sfc(quadra, crs = 4326))
+```
+
+```{r}
+mapview::mapview(sf::st_sfc(trecho, crs = 4326), color = "#1a5b8a") +
+  mapview::mapview(sf::st_sfc(quadra, crs = 4326), col.regions = "#e07b39")
 ```
 
 Repare que `st_length()` e `st_area()` devolvem o resultado **com unidade** (metros, metros
@@ -233,11 +250,12 @@ portos |> sf::st_drop_geometry() |> dplyr::count(uf)
 
 ## Inspeção rápida de um dado espacial novo
 
-O roteiro de cinco linhas que vale rodar sempre que abrir um arquivo desconhecido:
+O roteiro que vale rodar sempre que abrir um arquivo desconhecido. Para não ficar abstrato,
+aplicamos direto no `portos` que já temos: no seu caso, comece trocando a primeira linha por
+`x <- sf::st_read("arquivo.gpkg", quiet = TRUE)`.
 
 ```{r}
-#| eval: false
-x <- sf::st_read("arquivo.gpkg", quiet = TRUE)
+x <- portos
 
 nrow(x)                          # quantas feições
 sf::st_geometry_type(x, by_geometry = FALSE)  # que tipo de geometria
@@ -245,7 +263,7 @@ sf::st_crs(x)$input                  # qual sistema de coordenadas
 sf::st_bbox(x)                       # onde fica (confere com o esperado?)
 names(x)                         # quais atributos
 all(sf::st_is_valid(x))              # a geometria é válida?
-plot(sf::st_geometry(x))             # o desenho faz sentido?
+mapview::mapview(x)                  # o desenho faz sentido?
 ```
 
 `st_is_valid()` merece atenção: geometrias inválidas (auto-interseções, anéis invertidos) são

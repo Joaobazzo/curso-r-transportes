@@ -18,6 +18,7 @@ guardar e trocar dados; ruim para medir.
 áreas e fazer *buffers*; introduz distorção que cresce com a extensão da área.
 
 ```{r}
+#| echo: false
 crs_relevantes <- data.frame(
   epsg = c(4326, 4674, 31982, 31983, 31984, 5880),
   nome = c("WGS 84", "SIRGAS 2000", "SIRGAS 2000 / UTM 22S", "SIRGAS 2000 / UTM 23S",
@@ -42,6 +43,20 @@ knitr::kable(crs_relevantes)
 - Para **medir** em escala local ou regional: a zona UTM correspondente.
 - Para **mapas nacionais**: Policônica do Brasil (`EPSG:5880`) ou uma projeção de áreas
   iguais (Albers), definida adiante.
+:::
+
+::: {.callout-tip}
+## Onde consultar um EPSG que não está nessa tabela
+
+<https://epsg.io/> aceita busca por nome de lugar, código ou palavra-chave, e mostra a área de
+uso, a unidade e o código pronto para colar (`EPSG:xxxx`). O `sf` também expõe a mesma base
+localmente, sem depender de internet:
+
+```{r}
+#| eval: false
+sf::st_crs("EPSG:31982")            # detalhes completos de um código conhecido
+sf::st_crs(32722)                   # aceita o número puro também
+```
 :::
 
 ## Consultar, definir e transformar

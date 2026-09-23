@@ -12,18 +12,25 @@ library(ggplot2)
 
 ## Obter um modelo digital de elevação
 
-Para os exemplos usaremos a altimetria da Serra do Mar, entre Curitiba e o litoral. É a mesma
-área do estudo de caso do módulo e do cruzamento com declividade do módulo 4. O pacote
-`elevatr` baixa o MDE automaticamente para o recorte pedido.
+Em vez de digitar as coordenadas de um retângulo na mão, delimitamos a área a partir de um
+**município real**, com o `geobr`, e deixamos o `elevatr` baixar o MDE para essa área. Usamos
+**Morretes (PR)**, pela variação de altitude entre o litoral e a Serra do Mar (é a mesma área
+do estudo de caso do módulo e do cruzamento com declividade do módulo 4), mas o código
+funciona para qualquer município: basta trocar `municipio_dem`/`uf_dem`.
 
 ```{r}
-arquivo_dem <- "dados/brutos/dem_serra.tif"
+municipio_dem <- "Morretes"
+uf_dem        <- "PR"
+
+arquivo_dem <- "dados/brutos/dem_morretes.tif"
 
 if (!file.exists(arquivo_dem)) {
-  area <- sf::st_bbox(c(xmin = -49.40, ymin = -25.75, xmax = -48.40, ymax = -25.15),
-                  crs = sf::st_crs(4326)) |>
-    sf::st_as_sfc() |>
-    sf::st_as_sf()
+  area_muni <- geobr::read_municipality(code_muni = uf_dem, year = 2022, showProgress = FALSE) |>
+    dplyr::filter(name_muni == municipio_dem)
+
+  # margem de 5 km em volta do município, para o MDE ter contexto
+  # e não cortar exatamente na fronteira administrativa
+  area <- area_muni |> sf::st_buffer(dist = 5000) |> sf::st_transform(4326)
 
   dem_raw <- elevatr::get_elev_raster(locations = area, z = 10, clip = "bbox")
   terra::writeRaster(terra::rast(dem_raw), arquivo_dem, overwrite = TRUE)
@@ -86,10 +93,14 @@ if (!file.exists(arquivo)) {
 }
 muni <- sf::st_read(arquivo, quiet = TRUE)
 
+# limites da visualização a partir da extensão do próprio raster, não digitados na mão:
+# assim o mapa se ajusta sozinho se você trocar municipio_dem por outro lugar
+zoom_dem <- sf::st_bbox(dem)
+
 ggplot() +
   tidyterra::geom_spatraster(data = dem) +
   geom_sf(data = muni, fill = NA, colour = "white", linewidth = 0.3) +
-  coord_sf(xlim = c(-49.40, -48.40), ylim = c(-25.75, -25.15), expand = FALSE) +
+  coord_sf(xlim = zoom_dem[c("xmin", "xmax")], ylim = zoom_dem[c("ymin", "ymax")], expand = FALSE) +
   scale_fill_viridis_c(option = "turbo", na.value = NA, name = "Altitude (m)") +
   theme_void(base_size = 10)
 ```
@@ -208,17 +219,14 @@ No módulo 4 esse raster é cruzado com traçados viários para comparar alterna
 Esta é a operação que conecta raster e vetor. É provavelmente a mais útil do capítulo.
 
 ```{r}
-# por ponto: a altitude de cada porto/cidade
-pontos <- data.frame(
-  local = c("Curitiba", "Morretes", "Paranaguá"),
-  lon   = c(-49.2733, -48.8342, -48.5119),
-  lat   = c(-25.4284, -25.4772, -25.5016)
-) |>
-  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+# por ponto: a altitude da sede de cada município, vinda do geobr
+# (em vez de digitar longitude/latitude na mão)
+sedes <- geobr::read_municipal_seat(year = 2022, showProgress = FALSE) |>
+  dplyr::filter(name_muni %in% c("Curitiba", "Morretes", "Paranaguá")) |>
   sf::st_transform(terra::crs(dem_utm))
 
-terra::extract(dem_utm, terra::vect(pontos), ID = FALSE) |>
-  dplyr::bind_cols(local = pontos$local) |>
+terra::extract(dem_utm, terra::vect(sedes), ID = FALSE) |>
+  dplyr::bind_cols(local = sedes$name_muni) |>
   dplyr::rename(altitude_m = 1) |>
   dplyr::mutate(altitude_m = round(altitude_m)) |>
   knitr::kable()

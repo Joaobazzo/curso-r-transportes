@@ -136,9 +136,6 @@ muni |>
 ### `leaflet`: mapas interativos de publicação
 
 ```{r}
-#| eval: false
-library(leaflet)
-
 leaflet::leaflet(portos) |>
   leaflet::addProviderTiles("CartoDB.Positron") |>
   leaflet::addCircleMarkers(

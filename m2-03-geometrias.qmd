@@ -18,10 +18,13 @@ Vamos trabalhar com dados reais: os municípios do litoral do Paraná e de Santa
 arquivo <- "dados/brutos/muni_pr_sc.gpkg"
 
 if (!file.exists(arquivo)) {
-  muni <- dplyr::bind_rows(
-    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
-    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
-  )
+  # uma UF de cada vez, para deixar claro o que cada chamada devolve
+  muni_pr <- geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE)
+  muni_sc <- geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+
+  # empilha as duas: mesmas colunas, uma UF embaixo da outra
+  muni <- dplyr::bind_rows(muni_pr, muni_sc)
+
   sf::st_write(muni, arquivo, quiet = TRUE)
 }
 
@@ -48,12 +51,16 @@ portos <- data.frame(
 ## Medidas: área, comprimento, perímetro, centroide
 
 ```{r}
+# perímetro: converte o polígono em linha, mede o comprimento, passa para km.
+# em etapas separadas para deixar claro o que cada função devolve
+muni_linhas    <- sf::st_cast(muni$geom, "MULTILINESTRING")  # polígono -> contorno
+perimetro_m    <- sf::st_length(muni_linhas)                 # comprimento, em metros
+perimetro_km   <- units::set_units(perimetro_m, km)          # metros -> km
+
 muni_area <- muni |>
   dplyr::mutate(
     area_km2 = as.numeric(units::set_units(sf::st_area(geom), km^2)),
-    # perímetro: converter o polígono em linha e medir o comprimento
-    perim_km = as.numeric(units::set_units(
-      sf::st_length(sf::st_cast(geom, "MULTILINESTRING")), km))
+    perim_km = as.numeric(perimetro_km)
   )
 
 muni_area |>
@@ -86,16 +93,43 @@ Conferência visual antes de seguir: o *buffer* cobre a área esperada ao redor 
 mapview::mapview(buffer_portos) + mapview::mapview(portos)
 ```
 
+O uso prático de uma área de influência raramente para no desenho: o objetivo costuma ser
+"quais municípios são afetados por ela". Isso se responde comparando o *buffer* com a malha
+municipal do `geobr`, usando os mesmos predicados espaciais que detalhamos na próxima seção.
+Adiantamos aqui o uso mais comum:
+
+```{r}
+buffer_uniao <- sf::st_union(buffer_portos)   # os 5 buffers como uma única geometria
+
+municipios_intersecta <- muni[sf::st_intersects(muni, buffer_uniao, sparse = FALSE)[, 1], ]
+municipios_toca       <- muni[sf::st_touches(muni, buffer_uniao, sparse = FALSE)[, 1], ]
+
+c(intersecta = nrow(municipios_intersecta), toca_so_pela_borda = nrow(municipios_toca))
+```
+
+`st_intersects()` pega qualquer sobreposição, inclusive um município parcialmente coberto pela
+área de influência. `st_touches()` é mais estrito: só conta quem encosta exatamente na borda,
+sem sobrepor. Para "quem é afetado pela área de influência", `st_intersects()` é o predicado
+certo, e é ele que usamos daqui em diante.
+
 ```{r}
 #| label: fig-buffer
-#| fig-cap: "Áreas de influência de 15 km em torno dos portos"
+#| fig-cap: "Municípios que intersectam a área de influência de 15 km de cada porto"
 #| fig-height: 5
 ggplot() +
-  geom_sf(data = muni, fill = "grey97", colour = "grey80", linewidth = 0.2) +
-  geom_sf(data = buffer_portos, fill = "#1a5b8a", alpha = 0.25, colour = "#1a5b8a") +
+  geom_sf(data = muni, fill = "grey97", colour = "grey85", linewidth = 0.2) +
+  geom_sf(data = municipios_intersecta, fill = "#cfe0ee", colour = "#1a5b8a", linewidth = 0.3) +
+  geom_sf(data = buffer_portos, fill = "#1a5b8a", alpha = 0.3, colour = "#1a5b8a") +
   geom_sf(data = portos, size = 1.8, colour = "#0d3b5c") +
   geom_sf_text(data = portos, aes(label = nome), size = 2.6, nudge_y = 12000) +
   theme_void(base_size = 10)
+```
+
+```{r}
+mapview::mapview(municipios_intersecta, col.regions = "#1a5b8a", alpha.regions = 0.3,
+                  layer.name = "Municípios afetados") +
+  mapview::mapview(buffer_portos, col.regions = "#e07b39", layer.name = "Área de influência") +
+  mapview::mapview(portos, layer.name = "Portos")
 ```
 
 Variações úteis:
@@ -116,14 +150,21 @@ As funções `st_*` de predicado respondem perguntas de pertencimento. Todas ret
 de índices por padrão, ou uma matriz lógica com `sparse = FALSE`.
 
 ```{r}
-# quais municípios contêm um porto?
-com_porto <- muni[sf::st_intersects(muni, portos, sparse = FALSE) |> apply(1, any), ]
+# quais municípios contêm um porto? em etapas: a matriz de comparação,
+# depois "algum TRUE na linha", depois o filtro
+matriz_intersecta <- sf::st_intersects(muni, portos, sparse = FALSE)  # matriz municípios x portos
+tem_porto         <- apply(matriz_intersecta, 1, any)                 # TRUE se a linha tem algum TRUE
+com_porto         <- muni[tem_porto, ]
+
 com_porto |> sf::st_drop_geometry() |> dplyr::select(name_muni, abbrev_state)
 ```
 
 ```{r}
 # quantos portos por município (contagem)
-sf::st_intersects(muni, portos) |> lengths() |> table()
+lista_intersecoes <- sf::st_intersects(muni, portos)   # forma "sparse": uma lista de índices
+n_portos_por_muni  <- lengths(lista_intersecoes)        # tamanho de cada elemento da lista
+
+table(n_portos_por_muni)
 ```
 
 | Predicado | Pergunta |
@@ -136,17 +177,31 @@ sf::st_intersects(muni, portos) |> lengths() |> table()
 | `st_disjoint()` | não se tocam? |
 | `st_is_within_distance()` | estão a menos de X metros? |
 
+::: {.callout-tip}
+## Veja os predicados desenhados, não só descritos
+
+O [cheatsheet do `sf`](https://rstudio.github.io/cheatsheets/sf.pdf) (RStudio/Posit) traz
+`st_intersects()`, `st_within()`, `st_contains()` e os demais predicados como pares de formas
+desenhadas lado a lado, com o resultado `TRUE`/`FALSE` de cada combinação. Para quem está
+começando, a versão visual fixa mais rápido do que a descrição em texto.
+:::
+
 ```{r}
-# municípios vizinhos de Paranaguá (compartilham fronteira)
-pgua <- muni |> dplyr::filter(name_muni == "Paranaguá")
-vizinhos <- muni[sf::st_touches(muni, pgua, sparse = FALSE), ]
+# municípios vizinhos de Paranaguá (compartilham fronteira). em etapas:
+pgua         <- muni |> dplyr::filter(name_muni == "Paranaguá")
+matriz_toca  <- sf::st_touches(muni, pgua, sparse = FALSE)  # matriz municípios x 1 (Paranaguá)
+eh_vizinho   <- matriz_toca[, 1]                              # única coluna, vira vetor lógico
+vizinhos     <- muni[eh_vizinho, ]
+
 vizinhos |> sf::st_drop_geometry() |> dplyr::pull(name_muni)
 ```
 
 ```{r}
-# municípios a menos de 50 km de um porto
-proximos <- muni[sf::st_is_within_distance(muni, portos, dist = 50000, sparse = FALSE) |>
-                   apply(1, any), ]
+# municípios a menos de 50 km de um porto. em etapas:
+matriz_proximo <- sf::st_is_within_distance(muni, portos, dist = 50000, sparse = FALSE)
+esta_proximo   <- apply(matriz_proximo, 1, any)
+proximos       <- muni[esta_proximo, ]
+
 nrow(proximos)
 ```
 
@@ -191,10 +246,15 @@ nrow(recorte)     # só os municípios tocados, e só a parte dentro do buffer
 #| label: fig-intersecao
 #| fig-cap: "Interseção entre municípios e as áreas de influência dos portos"
 #| fig-height: 4.5
+# recorta a VISUALIZAÇÃO para a vizinhança do resultado, com uma margem de 20 km:
+# sem isso, o mapa mostra o litoral inteiro de PR/SC, quase todo vazio
+zoom <- sf::st_bbox(sf::st_buffer(sf::st_union(buffer_portos), 20000))
+
 ggplot() +
   geom_sf(data = muni, fill = "grey97", colour = "grey85", linewidth = 0.2) +
   geom_sf(data = recorte, aes(fill = abbrev_state), colour = "white", linewidth = 0.2) +
   scale_fill_manual(values = c(PR = "#1a5b8a", SC = "#e07b39"), name = "UF") +
+  coord_sf(xlim = zoom[c("xmin", "xmax")], ylim = zoom[c("ymin", "ymax")], expand = FALSE) +
   theme_void(base_size = 10)
 ```
 
@@ -267,6 +327,21 @@ muni_simples <- sf::st_simplify(muni, dTolerance = 200, preserveTopology = TRUE)
 # o geobr já oferece a versão simplificada, que é a melhor opção
 geobr::read_municipality(code_muni = "PR", year = 2022, simplified = TRUE)
 ```
+
+O ganho de desempenho é real, mas tem preço: a borda perde detalhe. Compare visualmente antes
+de decidir a tolerância, sobrepondo o contorno original e o simplificado num só `mapview`:
+
+```{r}
+pgua_simples <- sf::st_simplify(pgua, dTolerance = 200, preserveTopology = TRUE)
+
+mapview::mapview(pgua, color = "#1a5b8a", col.regions = NA, lwd = 3,
+                  layer.name = "Original") +
+  mapview::mapview(pgua_simples, color = "#e07b39", col.regions = NA, lwd = 2,
+                    layer.name = "Simplificado (200 m)")
+```
+
+Dê zoom numa reentrância da costa: com `dTolerance = 200` a diferença já é visível a olho nu,
+sobretudo nos trechos mais recortados do litoral.
 
 Três hábitos que resolvem quase todo problema de lentidão:
 

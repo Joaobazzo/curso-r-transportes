@@ -11,7 +11,32 @@ Vamos fazer o mesmo em código, com dados oficiais, e com as armadilhas explicad
 
 O trecho escolhido é a **BR-116 na travessia da Serra do Mar**, entre a Região Metropolitana
 de Curitiba e o litoral: relevo acentuado, ocupação concentrada e um corredor logístico que
-liga o Porto de Paranaguá ao interior.
+liga o Porto de Paranaguá ao interior. Mas o roteiro deste capítulo funciona para qualquer
+rodovia bem mapeada no OSM: só muda o valor de `ref` na consulta e a caixa delimitadora
+(`bbox`) do trecho. Algumas opções para refazer o exercício com outra rodovia:
+
+```{r}
+rodovias_sugeridas <- data.frame(
+  br     = c("BR-116", "BR-101", "BR-153", "BR-262", "BR-381"),
+  trecho = c("Serra do Mar, Curitiba-litoral",
+             "Litoral catarinense, Florianópolis-Joinville",
+             "Transbrasiliana, trecho em Goiás",
+             "Serra do Espinhaço, Vitória-Belo Horizonte",
+             "Fernão Dias, São Paulo-Belo Horizonte"),
+  uf     = c("PR/SC", "SC", "GO", "ES/MG", "SP/MG"),
+  motivo = c("relevo acentuado, corredor até o Porto de Paranaguá (o exemplo deste capítulo)",
+             "eixo costeiro, ocupação urbana praticamente contínua",
+             "rodovia longa e de baixa densidade, contraste com um trecho urbano",
+             "corredor de minério, relevo montanhoso",
+             "um dos corredores rodoviários mais movimentados do país")
+)
+
+knitr::kable(rodovias_sugeridas)
+```
+
+Escolha uma rodovia da tabela (ou pesquise o código BR- da rodovia da sua região) e refaça o
+capítulo trocando `value = "BR-116"` pelo código escolhido e ajustando o `bbox` para a área de
+interesse. Seguimos aqui com a BR-116.
 
 ```{r}
 library(sf)
