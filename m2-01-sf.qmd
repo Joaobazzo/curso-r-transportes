@@ -49,6 +49,26 @@ dado espacial.
 mapview::mapview(portos)
 ```
 
+O `mapview()` é o jeito mais rápido de conferir se um dado espacial está onde deveria: um mapa
+interativo, com zoom e popup dos atributos, a partir de qualquer objeto `sf`. Voltamos a ele
+em todos os capítulos deste módulo, sempre que houver um resultado espacial para checar.
+
+::: {.callout-tip}
+## Bases grandes deixam o `mapview()` lento
+
+Com muitas feições (uma malha municipal inteira, uma rede viária), o `mapview()` padrão pode
+travar o navegador. O pacote `leafgl` renderiza a mesma coisa por WebGL, muito mais rápido.
+Basta instalar `leafgl` e trocar a plataforma de desenho uma vez, no início da sessão:
+
+```{r}
+#| eval: false
+install.packages("leafgl")
+mapview::mapviewOptions(platform = "leafgl")
+```
+
+Depois disso, todo `mapview::mapview(objeto_sf)` na sessão usa o `leafgl` automaticamente.
+:::
+
 ```{r}
 class(portos)
 sf::st_geometry_type(portos, by_geometry = FALSE)

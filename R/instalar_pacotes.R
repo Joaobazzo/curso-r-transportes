@@ -20,9 +20,10 @@ pacotes_modulo1 <- c(
   "knitr", "rmarkdown"
 )
 
-# Usados apenas em exemplos não executados (eval: false) do módulo 1.
-# Instale quando quiser reproduzir as comparações de desempenho.
-pacotes_opcionais <- c("data.table", "duckplyr", "duckdb", "arrow", "skimr")
+# Usados apenas em exemplos não executados (eval: false) dos módulos 1 e 2.
+# Instale quando quiser reproduzir as comparações de desempenho ou o mapview
+# com renderização WebGL em bases espaciais grandes.
+pacotes_opcionais <- c("data.table", "duckplyr", "duckdb", "arrow", "skimr", "leafgl")
 
 pacotes_espaciais <- c(
   "sf", "terra", "tidyterra", "leaflet", "mapview", "mapgl", "duckspatial",

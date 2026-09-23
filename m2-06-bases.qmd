@@ -52,6 +52,20 @@ Argumentos que importam:
 - `simplified = TRUE` (padrão): geometria leve, para mapas. Use `FALSE` para medir área.
 - `cache = TRUE` (padrão): o arquivo fica guardado localmente após o primeiro *download*.
 
+::: {.callout-tip}
+## Não decorou o código IBGE do município? `lookup_muni()` resolve
+
+```{r}
+geobr::lookup_muni(name_muni = "fortaleza", year = 2022)
+```
+
+Funciona também no sentido inverso, do código para o nome:
+
+```{r}
+geobr::lookup_muni(code_muni = 4106902, year = 2022)
+```
+:::
+
 ::: {.callout-warning}
 ## A malha certa para cada uso
 

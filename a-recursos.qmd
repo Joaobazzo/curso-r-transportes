@@ -19,6 +19,7 @@
 - `terra`: manipulação de dados raster e vetoriais. <https://rspatial.github.io/terra/>
 - `leaflet`: mapas interativos baseados em Leaflet.js. <https://rstudio.github.io/leaflet/>
 - `mapview`: conferência visual rápida de objetos espaciais, em uma linha. <https://r-spatial.github.io/mapview/>
+- `leafgl`: renderização por WebGL para o `mapview`, para bases espaciais grandes. <https://github.com/r-spatial/leafgl>
 - `mapgl`: mapas interativos baseados em Mapbox GL / MapLibre. <https://walker-data.com/mapgl/>
 
 **Bases públicas brasileiras**
