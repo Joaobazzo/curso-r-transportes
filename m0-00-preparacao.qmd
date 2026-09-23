@@ -1,0 +1,84 @@
+# Preparação {#sec-m0-preparacao}
+
+Esta é uma sessão preparatória, para resolver antes do primeiro encontro do Módulo 1. O
+objetivo é simples: instalar o que falta e criar as contas necessárias **antes** da aula, para
+que o tempo de aula seja gasto com R, não com instalação.
+
+::: {.callout-tip}
+## Checklist rápido
+
+1. R e RStudio instalados (@sec-m1-ambiente).
+2. Conta no GitHub criada, Git instalado.
+3. Decidido qual editor você vai usar (RStudio é o padrão do curso; veja as alternativas
+   abaixo se tiver curiosidade).
+4. Ciente da regra de ouro sobre IA: **não cole dado que você não publicaria**.
+:::
+
+## R e RStudio
+
+A instalação do R, do RStudio, do Rtools (Windows) e dos pacotes do Módulo 1 está detalhada em
+@sec-m1-ambiente. Faça isso agora, e confira no console:
+
+```{r}
+R.version.string
+```
+
+## Editores além do RStudio
+
+O RStudio é o editor que este curso usa nas capturas de tela e nos exemplos, e é o mais
+indicado para quem está começando em R. Mas não é a única opção, e vale saber que as outras
+existem, principalmente se você também programa em outra linguagem.
+
+| Editor | O que é | Quando vale considerar |
+|:--|:--|:--|
+| **RStudio** | O ambiente de desenvolvimento dedicado ao R, da Posit. | Padrão do curso. A melhor escolha para quem programa só em R. |
+| **VS Code** | Editor genérico da Microsoft, popular em várias linguagens. Precisa da extensão R e do pacote `languageserver` para funcionar bem com R. | Quem já usa VS Code para Python, SQL ou outra linguagem, e não quer alternar entre editores. |
+| **Positron** | Editor novo da Posit, baseado no mesmo motor do VS Code, com suporte nativo a R **e** Python no mesmo lugar. | Quem trabalha com R e Python no mesmo projeto. Ainda está amadurecendo. |
+
+::: {.callout-note}
+## Nenhuma dessas escolhas é definitiva
+
+Trocar de editor é só trocar de janela: o código R é o mesmo, os pacotes são os mesmos, o
+projeto no disco é o mesmo. Comece pelo RStudio, que é o que este material assume, e migre
+depois se sentir necessidade.
+:::
+
+## Controle de versão: crie a conta agora
+
+O Git e o GitHub são ensinados em detalhe no Módulo 5, mas as duas coisas mais demoradas
+(instalar o Git e criar a conta) não dependem de nada do curso e valem fazer com antecedência:
+
+1. Instale o Git: <https://git-scm.com/downloads>.
+2. Crie uma conta gratuita no GitHub: <https://github.com/>.
+
+O resto (configurar o RStudio para usar o Git, fazer o primeiro *commit*, publicar um
+repositório) fica para o Módulo 5, quando já há um projeto de verdade para versionar.
+
+## IA no desenvolvimento
+
+Assistentes de IA (GitHub Copilot, Claude, ChatGPT, e pacotes como `ellmer` e `gander` dentro
+do R) aceleram bastante o trabalho em R, e voltamos a esse assunto com mais detalhe em
+@sec-m1-ambiente. A regra que importa reter desde já, porque vale para qualquer ferramenta:
+
+::: {.callout-important}
+## A regra de ouro
+
+**Se você não publicaria o conteúdo no site do Ministério, não cole num assistente de IA
+hospedado fora do órgão.** Isso inclui dado pessoal, exportação de modelo contratado,
+planilha de estudo em andamento e qualquer senha ou *token*.
+:::
+
+## R comparado a outras ferramentas
+
+Uma dúvida comum de quem vem de planilha ou de SIG de interface gráfica: por que trocar uma
+ferramenta que já funciona por uma que exige escrever código?
+
+| Ferramenta | Onde o R ajuda |
+|:--|:--|
+| Excel / planilhas | Uma planilha não audita a si mesma: um clique errado numa fórmula não deixa rastro. Código sim, e roda de novo sozinho quando o dado é atualizado. |
+| QGIS / ArcGIS (menu e clique) | As mesmas bibliotecas por baixo (GDAL, GEOS, PROJ) — @sec-m2-sf. A diferença é que a sequência de cliques não fica registrada; o script fica. |
+| Python | Comparável em capacidade para este tipo de análise. A escolha aqui é o ecossistema: `sf`, `geobr`, `r5r`, `aopdata` e os demais pacotes deste curso são específicos do R e do contexto brasileiro. |
+| Stata / SPSS | Fortes em estatística clássica. O R cobre o mesmo terreno e, além disso, tem o ecossistema espacial e de dados públicos brasileiros que este curso usa. |
+
+Nenhuma dessas ferramentas desaparece: a proposta do curso é reduzir o retrabalho manual nas
+partes em que ele mais pesa, não substituir tudo por código.

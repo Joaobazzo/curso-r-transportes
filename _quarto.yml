@@ -16,14 +16,15 @@ book:
   sidebar:
     style: docked
     collapse-level: 1
-    tools:
-      - icon: github
-        href: https://github.com/Joaobazzo/curso-r-transportes
   page-footer:
-    left: "Curso de R aplicado ao planejamento de transportes"
+    left: "Curso de R aplicado ao planejamento de transportes · Texto [CC BY-SA 4.0](https://github.com/Joaobazzo/curso-r-transportes/blob/main/LICENSE.md), código MIT"
     right: "Feito com [Quarto](https://quarto.org)"
   chapters:
     - index.qmd
+    - anedota.qmd
+    - part: "Preparação"
+      chapters:
+        - m0-00-preparacao.qmd
     - part: "Módulo 1 — Fundamentos de R e manipulação de dados"
       chapters:
         - m1-00-visao-geral.qmd
@@ -35,6 +36,7 @@ book:
         - m1-06-joins.qmd
         - m1-07-ggplot2.qmd
         - m1-08-estudo-de-caso.qmd
+        - m1-08b-modelo4etapas.qmd
         - m1-09-exercicios.qmd
     - part: "Módulo 2 — Objetos espaciais: vetores e rasters"
       chapters:
@@ -47,33 +49,6 @@ book:
         - m2-06-bases.qmd
         - m2-07-estudo-de-caso.qmd
         - m2-08-exercicios.qmd
-    - part: "Módulo 3 — Integração de bases, roteamento e matrizes OD"
-      chapters:
-        - m3-00-visao-geral.qmd
-        - m3-01-osm.qmd
-        - m3-02-duckdb.qmd
-        - m3-03-geocodificacao.qmd
-        - m3-04-roteamento.qmd
-        - m3-05-matrizes.qmd
-        - m3-06-estudo-de-caso.qmd
-        - m3-07-exercicios.qmd
-    - part: "Módulo 4 — Geoestatística, sensoriamento remoto e acessibilidade"
-      chapters:
-        - m4-00-visao-geral.qmd
-        - m4-01-autocorrelacao.qmd
-        - m4-02-interpolacao.qmd
-        - m4-03-declividade.qmd
-        - m4-04-acessibilidade.qmd
-        - m4-05-r5r.qmd
-        - m4-06-exercicios.qmd
-    - part: "Módulo 5 — Mapas temáticos, relatórios reproduzíveis e projeto final"
-      chapters:
-        - m5-00-visao-geral.qmd
-        - m5-01-mapas-tematicos.qmd
-        - m5-02-quarto.qmd
-        - m5-03-parametrizados.qmd
-        - m5-04-projeto.qmd
-        - m5-05-proximos-passos.qmd
   appendices:
     - a-dados.qmd
     - a-slides.qmd

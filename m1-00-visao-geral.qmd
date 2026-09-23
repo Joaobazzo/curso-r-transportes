@@ -1,9 +1,9 @@
 # Visão geral do módulo {#sec-m1-visao-geral}
 
 ::: {.modulo-meta}
-**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
-**Datas (Opção A):** aulas em 28/09 e 30/09; material assíncrono liberado em 01/10
-**Dados utilizados:** cabotagem ANTAQ (TKU 2025) e Comex Stat
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
+**Datas:** a definir\
+**Dados utilizados:** cabotagem ANTAQ (TKU 2025), Comex Stat e exportação do modelo quatro etapas da RMC (PTV VISUM)
 :::
 
 ## O que você vai conseguir fazer no fim do módulo
@@ -15,6 +15,8 @@
 - Diagnosticar problemas de qualidade: *encoding*, duplicados, faltantes, *outliers* e
   valores impossíveis.
 - Cruzar bases diferentes com `join` e saber **por que** algumas linhas não casam.
+- Ler a exportação de um modelo de simulação e conferir unidades, sentinelas e totais antes de
+  publicar qualquer indicador.
 - Produzir gráficos de qualidade de publicação com `ggplot2`.
 
 ## Roteiro
@@ -36,6 +38,7 @@
 | 6 | `join`/`merge` e ajuste de chaves para mesclar bases | @sec-m1-joins |
 | 7 | Visualização com `ggplot2`: geometrias, escalas, temas, anotações, paletas, Jenks | @sec-m1-ggplot2 |
 | 8 | Estudo de caso guiado: TKU da cabotagem e exportações do Comex Stat | @sec-m1-estudo-de-caso |
+| 8b | Estudo de caso: a saída de um modelo quatro etapas (unidades, sentinelas e totais-âncora) | @sec-m1-modelo4etapas |
 | 9 | Exercícios com soluções comentadas | @sec-m1-exercicios |
 
 ## Pacotes do módulo
@@ -52,8 +55,8 @@ pacotes <- c(
   "dplyr", "tidyr", "stringr", "lubridate", "forcats", "janitor",
   # visualização
   "ggplot2", "scales", "patchwork", "classInt", "ggrepel",
-  # relatórios
-  "knitr", "rmarkdown"
+  # relatórios e reprodutibilidade
+  "knitr", "rmarkdown", "renv", "reprex"
 )
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))

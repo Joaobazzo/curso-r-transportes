@@ -8,7 +8,7 @@ resultado exportado. A pergunta é a de um pedido típico de área técnica:
 > da federação?*
 
 Os dados são do **Estatístico Aquaviário da ANTAQ** (tabela TB6.1, TKU de 2025), em
-`dados/cabotagem_tku_2025.xlsx` — veja [Dados de exemplo](a-dados.qmd).
+`dados/cabotagem_tku_2025.xlsx`. Veja [Dados de exemplo](a-dados.qmd).
 
 ```{r}
 library(dplyr)
@@ -18,16 +18,16 @@ library(ggplot2)
 library(scales)
 library(readxl)
 
-theme_set(theme_minimal(base_size = 11) +
-            theme(panel.grid.minor = element_blank(),
-                  plot.title = element_text(face = "bold"),
+ggplot2::theme_set(ggplot2::theme_minimal(base_size = 11) +
+            ggplot2::theme(panel.grid.minor = ggplot2::element_blank(),
+                  plot.title = ggplot2::element_text(face = "bold"),
                   legend.position = "bottom"))
 ```
 
-## Passo 1 — Ler e conhecer o dado
+## Passo 1: Ler e conhecer o dado
 
 ```{r}
-bruto <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
 
 colunas <- c("ano", "perfil", "sh2",
              "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
@@ -40,19 +40,19 @@ dim(bruto)
 ```
 
 ```{r}
-bruto |> slice_head(n = 3) |> knitr::kable()
+bruto |> dplyr::slice_head(n = 3) |> knitr::kable()
 ```
 
 Três perguntas antes de qualquer conta.
 
 **1. Qual é a unidade de observação?** A hipótese é "um par de instalações por mercadoria";
-o teste mostra que falta uma dimensão — o perfil da carga:
+o teste mostra que falta uma dimensão: o perfil da carga.
 
 ```{r}
 c(
   linhas        = nrow(bruto),
-  inst_inst_sh2 = nrow(distinct(bruto, instalacao_origem, instalacao_destino, sh2)),
-  mais_perfil   = nrow(distinct(bruto, perfil, sh2,
+  inst_inst_sh2 = nrow(dplyr::distinct(bruto, instalacao_origem, instalacao_destino, sh2)),
+  mais_perfil   = nrow(dplyr::distinct(bruto, perfil, sh2,
                                 instalacao_origem, instalacao_destino))
 )
 ```
@@ -64,11 +64,11 @@ autoriza somar TKU em agregações mais amplas.
 
 ```{r}
 bruto |>
-  summarise(
+  dplyr::summarise(
     ano_min = min(ano), ano_max = max(ano),
-    paises  = n_distinct(c(pais_origem, pais_destino), na.rm = TRUE),
-    ufs_destino = n_distinct(uf_destino, na.rm = TRUE),
-    sh2     = n_distinct(sh2)
+    paises  = dplyr::n_distinct(c(pais_origem, pais_destino), na.rm = TRUE),
+    ufs_destino = dplyr::n_distinct(uf_destino, na.rm = TRUE),
+    sh2     = dplyr::n_distinct(sh2)
   )
 ```
 
@@ -86,41 +86,41 @@ c(
 Os 132 registros com TKU zero e as 120 linhas sem identificação são o assunto de
 @sec-m1-limpeza: são combinações de perfil e mercadoria **sem fluxo** no período.
 
-## Passo 2 — Limpar e padronizar
+## Passo 2: Limpar e padronizar
 
 ```{r}
 cabotagem <- bruto |>
-  mutate(across(where(is.character), str_squish)) |>
-  filter(tku > 0) |>
-  mutate(
-    uf_origem  = str_to_upper(uf_origem),
-    uf_destino = str_to_upper(uf_destino),
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(
+    uf_origem  = stringr::str_to_upper(uf_origem),
+    uf_destino = stringr::str_to_upper(uf_destino),
     tku_bi     = tku / 1e9,
-    tipo_ligacao = case_when(
+    tipo_ligacao = dplyr::case_when(
       uf_origem == "ZEE/PLAT. CONTINENTAL" ~ "offshore",
       uf_origem == "INDETERMINADO"         ~ "indeterminada",
       uf_origem == uf_destino              ~ "intraestadual",
       .default = "interestadual"
     ),
-    origem = if_else(tipo_ligacao == "offshore",
+    origem = dplyr::if_else(tipo_ligacao == "offshore",
                      "ZEE/Plataforma Continental",
-                     str_c(cidade_origem, " (", uf_origem, ")")),
-    destino = str_c(cidade_destino, " (", uf_destino, ")")
+                     stringr::str_c(cidade_origem, " (", uf_origem, ")")),
+    destino = stringr::str_c(cidade_destino, " (", uf_destino, ")")
   )
 
 stopifnot(nrow(cabotagem) == 600, all(cabotagem$tku > 0))
-glimpse(cabotagem)
+dplyr::glimpse(cabotagem)
 ```
 
-## Passo 3 — O panorama geral
+## Passo 3: O panorama geral
 
 ```{r}
 panorama <- cabotagem |>
-  summarise(
-    ligacoes       = n(),
-    instalacoes    = n_distinct(c(instalacao_origem, instalacao_destino), na.rm = TRUE),
-    municipios     = n_distinct(c(cidade_origem, cidade_destino), na.rm = TRUE),
-    mercadorias    = n_distinct(sh2),
+  dplyr::summarise(
+    ligacoes       = dplyr::n(),
+    instalacoes    = dplyr::n_distinct(c(instalacao_origem, instalacao_destino), na.rm = TRUE),
+    municipios     = dplyr::n_distinct(c(cidade_origem, cidade_destino), na.rm = TRUE),
+    mercadorias    = dplyr::n_distinct(sh2),
     tku_total_bi   = round(sum(tku_bi), 1),
     tku_mediano_mi = round(median(tku) / 1e6, 1)
   )
@@ -130,44 +130,44 @@ panorama |> t() |> knitr::kable(col.names = "valor")
 
 ```{r}
 por_tipo <- cabotagem |>
-  summarise(ligacoes = n(), tku_bi = sum(tku_bi), .by = tipo_ligacao) |>
-  mutate(part = tku_bi / sum(tku_bi)) |>
-  arrange(desc(tku_bi))
+  dplyr::summarise(ligacoes = dplyr::n(), tku_bi = sum(tku_bi), .by = tipo_ligacao) |>
+  dplyr::mutate(part = tku_bi / sum(tku_bi)) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
 
 por_tipo |>
-  transmute(
+  dplyr::transmute(
     `Tipo de ligação` = tipo_ligacao,
     Ligações = ligacoes,
     `TKU (bi)` = round(tku_bi, 1),
-    `Part. (%)` = percent(part, accuracy = 0.1)
+    `Part. (%)` = scales::percent(part, accuracy = 0.1)
   ) |>
   knitr::kable(align = "lrrr")
 ```
 
 O primeiro resultado relevante aparece já aqui: quase **40% do TKU da cabotagem não se origina
 em um porto em terra**, e sim nas plataformas da Zona Econômica Exclusiva. É petróleo saindo
-das plataformas para os terminais do continente — e, em qualquer análise de rede portuária,
+das plataformas para os terminais do continente. E, em qualquer análise de rede portuária,
 essas ligações precisam ser tratadas separadamente.
 
-## Passo 4 — Concentração: quais ligações importam
+## Passo 4: Quais ligações concentram o fluxo
 
 ```{r}
 top_ligacoes <- cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = c(origem, destino)) |>
-  arrange(desc(tku_bi)) |>
-  mutate(
-    par = str_c(origem, " → ", destino),
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(origem, destino)) |>
+  dplyr::arrange(dplyr::desc(tku_bi)) |>
+  dplyr::mutate(
+    par = stringr::str_c(origem, " → ", destino),
     part = tku_bi / sum(tku_bi),
     part_acum = cumsum(part)
   )
 
 top_ligacoes |>
-  slice_head(n = 10) |>
-  transmute(
+  dplyr::slice_head(n = 10) |>
+  dplyr::transmute(
     par,
     `TKU (bi)` = round(tku_bi, 2),
-    `Part. (%)` = percent(part, accuracy = 0.1),
-    `Acum. (%)` = percent(part_acum, accuracy = 0.1)
+    `Part. (%)` = scales::percent(part, accuracy = 0.1),
+    `Acum. (%)` = scales::percent(part_acum, accuracy = 0.1)
   ) |>
   knitr::kable(align = "lrrr")
 ```
@@ -177,10 +177,10 @@ top_ligacoes |>
 #| fig-cap: "Dez maiores ligações de cabotagem em TKU (2025)"
 #| fig-height: 5.5
 top_ligacoes |>
-  slice_head(n = 10) |>
+  dplyr::slice_head(n = 10) |>
   ggplot(aes(x = tku_bi, y = reorder(par, tku_bi))) +
   geom_col(fill = "#1a5b8a") +
-  geom_text(aes(label = number(tku_bi, accuracy = 0.1, decimal.mark = ",")),
+  geom_text(aes(label = scales::number(tku_bi, accuracy = 0.1, decimal.mark = ",")),
             hjust = -0.15, size = 3) +
   scale_x_continuous(expand = expansion(mult = c(0, 0.18))) +
   labs(x = "TKU (bi t·km)", y = NULL,
@@ -202,33 +202,33 @@ c(ligacoes_ate_80pct = n80,
 #| label: fig-caso-concentracao
 #| fig-cap: "Concentração do TKU: participação acumulada por ligação ordenada"
 top_ligacoes |>
-  mutate(i = row_number() / n()) |>
+  dplyr::mutate(i = dplyr::row_number() / dplyr::n()) |>
   ggplot(aes(x = i, y = part_acum)) +
   geom_line(linewidth = 0.9, colour = "#1a5b8a") +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
   geom_hline(yintercept = 0.8, linetype = "dotted", colour = "#e07b39") +
-  scale_x_continuous(labels = percent_format()) +
-  scale_y_continuous(labels = percent_format()) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  scale_y_continuous(labels = scales::percent_format()) +
   labs(x = "Ligações OD (ordenadas por TKU)", y = "TKU acumulado")
 ```
 
 Essa curva é o argumento técnico mais forte que se extrai da base: **cerca de 13% dos pares
-municipais concentram 80% do TKU**. A linha tracejada é a diagonal de igualdade — se todos os
+municipais concentram 80% do TKU**. A linha tracejada é a diagonal de igualdade. Se todos os
 pares tivessem o mesmo TKU, a curva coincidiria com ela.
 
-## Passo 5 — Perfil de carga
+## Passo 5: Perfil de carga
 
 ```{r}
 por_perfil <- cabotagem |>
-  summarise(tku_bi = sum(tku_bi), ligacoes = n(), .by = perfil) |>
-  mutate(part = tku_bi / sum(tku_bi)) |>
-  arrange(desc(tku_bi))
+  dplyr::summarise(tku_bi = sum(tku_bi), ligacoes = dplyr::n(), .by = perfil) |>
+  dplyr::mutate(part = tku_bi / sum(tku_bi)) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
 
 por_perfil |>
-  transmute(
+  dplyr::transmute(
     Perfil = perfil,
     `TKU (bi)` = round(tku_bi, 1),
-    `Part. (%)` = percent(part, accuracy = 0.1),
+    `Part. (%)` = scales::percent(part, accuracy = 0.1),
     `Ligações` = ligacoes
   ) |>
   knitr::kable(align = "lrrr")
@@ -238,10 +238,10 @@ por_perfil |>
 #| label: fig-caso-perfil
 #| fig-cap: "TKU por perfil de carga, com as cinco principais UFs de destino"
 cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
-  mutate(uf_destino = forcats::fct_lump_n(uf_destino, n = 5, w = tku_bi,
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  dplyr::mutate(uf_destino = forcats::fct_lump_n(uf_destino, n = 5, w = tku_bi,
                                           other_level = "Outras")) |>
-  summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
   ggplot(aes(x = tku_bi, y = reorder(perfil, tku_bi), fill = uf_destino)) +
   geom_col() +
   scale_fill_brewer(palette = "Blues", direction = -1) +
@@ -252,36 +252,36 @@ A composição confirma a leitura do passo 3: o granel líquido e gasoso respond
 parte do TKU, com destino concentrado no Sudeste, enquanto a carga conteinerizada tem um
 perfil de destinos muito mais distribuído.
 
-## Passo 6 — A matriz origem–destino entre UFs
+## Passo 6: A matriz origem–destino entre UFs
 
 ```{r}
 od <- cabotagem |>
-  filter(tipo_ligacao %in% c("interestadual", "offshore")) |>
-  mutate(uf_origem = if_else(tipo_ligacao == "offshore", "ZEE", uf_origem)) |>
-  summarise(tku_bi = sum(tku_bi), .by = c(uf_origem, uf_destino))
+  dplyr::filter(tipo_ligacao %in% c("interestadual", "offshore")) |>
+  dplyr::mutate(uf_origem = dplyr::if_else(tipo_ligacao == "offshore", "ZEE", uf_origem)) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(uf_origem, uf_destino))
 
 matriz <- od |>
-  pivot_wider(names_from = uf_destino, values_from = tku_bi, values_fill = 0) |>
-  arrange(uf_origem)
+  tidyr::pivot_wider(names_from = uf_destino, values_from = tku_bi, values_fill = 0) |>
+  dplyr::arrange(uf_origem)
 
 matriz |>
-  mutate(across(where(is.numeric), \(x) round(x, 1))) |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) round(x, 1))) |>
   knitr::kable()
 ```
 
-Totais emitidos e atraídos por UF — as margens da matriz:
+Totais emitidos e atraídos por UF: as margens da matriz.
 
 ```{r}
-margens <- full_join(
-  od |> summarise(emitido = sum(tku_bi), .by = uf_origem) |> rename(uf = uf_origem),
-  od |> summarise(atraido = sum(tku_bi), .by = uf_destino) |> rename(uf = uf_destino),
+margens <- dplyr::full_join(
+  od |> dplyr::summarise(emitido = sum(tku_bi), .by = uf_origem) |> dplyr::rename(uf = uf_origem),
+  od |> dplyr::summarise(atraido = sum(tku_bi), .by = uf_destino) |> dplyr::rename(uf = uf_destino),
   by = "uf"
 ) |>
-  mutate(across(c(emitido, atraido), \(x) replace_na(x, 0)),
+  dplyr::mutate(dplyr::across(c(emitido, atraido), \(x) tidyr::replace_na(x, 0)),
          saldo = atraido - emitido) |>
-  arrange(desc(saldo))
+  dplyr::arrange(dplyr::desc(saldo))
 
-margens |> mutate(across(where(is.numeric), \(x) round(x, 1))) |> knitr::kable()
+margens |> dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) round(x, 1))) |> knitr::kable()
 ```
 
 ```{r}
@@ -291,7 +291,7 @@ od |>
   ggplot(aes(x = uf_destino, y = reorder(uf_origem, tku_bi), fill = tku_bi)) +
   geom_tile(colour = "white") +
   scale_fill_viridis_c(option = "mako", direction = -1, transform = "log10",
-                       labels = label_number(accuracy = 0.01)) +
+                       labels = scales::label_number(accuracy = 0.01)) +
   labs(x = "UF de destino", y = "Origem", fill = "TKU (bi)") +
   theme(panel.grid = element_blank())
 ```
@@ -312,7 +312,7 @@ No módulo 3 esta mesma matriz será convertida em **fluxos espaciais**, desenha
 do Brasil como linhas de desejo entre os portos; no módulo 4, os totais por UF alimentarão uma
 análise de rede.
 
-## Passo 7 — Exportar os resultados
+## Passo 7: Exportar os resultados
 
 ```{r}
 #| eval: false
@@ -322,7 +322,7 @@ writexl::write_xlsx(
   list(
     "Panorama"     = panorama,
     "Por tipo"     = por_tipo,
-    "Top ligações" = top_ligacoes |> select(par, tku_bi, part, part_acum),
+    "Top ligações" = top_ligacoes |> dplyr::select(par, tku_bi, part, part_acum),
     "Por perfil"   = por_perfil,
     "Matriz OD"    = matriz,
     "Margens"      = margens
@@ -335,13 +335,13 @@ saveRDS(cabotagem, "dados/cabotagem_limpa.rds")
 ```
 
 O script inteiro deste capítulo tem menos de 80 linhas úteis e pode ser reexecutado sobre o
-arquivo do ano seguinte sem alteração — que é exatamente o ganho que justifica trocar a
+arquivo do ano seguinte sem alteração. Esse é exatamente o ganho que justifica trocar a
 planilha pelo código.
 
 ## O que este estudo de caso mostrou
 
 1. A base tem 732 registros, dos quais **600 com fluxo**; os outros 132 são zeros estruturais.
-2. A chave da tabela inclui o **perfil da carga** — descobri-lo evitou contagem dupla.
+2. A chave da tabela inclui o **perfil da carga**. Descobri-lo evitou contagem dupla.
 3. **38% do TKU é offshore**, e essa categoria só apareceu porque a checagem de UF inválida
    foi investigada em vez de descartada.
 4. O sistema é **muito concentrado**: ~13% dos pares respondem por 80% do TKU.
@@ -374,28 +374,28 @@ download.file("https://balanca.economia.gov.br/balanca/bd/tabelas/UF_MUN.csv",
 # 2. leitura preguiçosa com duckplyr: só o agregado vem para a memória
 library(duckplyr)
 
-exp_mun <- read_csv_duckdb(
+exp_mun <- duckplyr::read_csv_duckdb(
   "dados/brutos/EXP_2025_MUN.csv",
   options = list(delim = ";", header = TRUE)
 )
 
 por_municipio <- exp_mun |>
-  summarise(
+  dplyr::summarise(
     valor_fob = sum(VL_FOB, na.rm = TRUE),
     peso_kg   = sum(KG_LIQUIDO, na.rm = TRUE),
     .by = c(SH4, CO_MUN)
   ) |>
-  collect()
+  dplyr::collect()
 ```
 
 ```{r}
 #| eval: false
 # 3. comparação de desempenho: duckplyr x data.table x readr
 system.time({
-  a <- read_csv_duckdb("dados/brutos/EXP_2025_MUN.csv",
+  a <- duckplyr::read_csv_duckdb("dados/brutos/EXP_2025_MUN.csv",
                        options = list(delim = ";")) |>
-    summarise(v = sum(VL_FOB), .by = CO_MUN) |>
-    collect()
+    dplyr::summarise(v = sum(VL_FOB), .by = CO_MUN) |>
+    dplyr::collect()
 })
 
 system.time({
@@ -404,7 +404,7 @@ system.time({
 
 system.time({
   d <- readr::read_csv2("dados/brutos/EXP_2025_MUN.csv", show_col_types = FALSE) |>
-    summarise(v = sum(VL_FOB), .by = CO_MUN)
+    dplyr::summarise(v = sum(VL_FOB), .by = CO_MUN)
 })
 ```
 

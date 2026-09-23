@@ -12,15 +12,15 @@ colunas <- c("ano", "perfil", "sh2",
              "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
              "tku")
 
-cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
 stopifnot(ncol(cabotagem) == length(colunas))
 names(cabotagem) <- colunas
 
 cabotagem <- cabotagem |>
-  mutate(across(where(is.character), str_squish)) |>
-  filter(tku > 0) |>
-  mutate(uf_origem  = str_to_upper(uf_origem),
-         uf_destino = str_to_upper(uf_destino),
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(uf_origem  = stringr::str_to_upper(uf_origem),
+         uf_destino = stringr::str_to_upper(uf_destino),
          tku_bi     = tku / 1e9)
 ```
 
@@ -28,16 +28,16 @@ cabotagem <- cabotagem |>
 
 Todo gráfico do `ggplot2` tem três partes obrigatórias:
 
-1. **dados** — um `data.frame`;
-2. **mapeamento estético** (`aes`) — qual coluna vai para o eixo x, y, cor, tamanho;
-3. **geometria** (`geom_*`) — como os dados são desenhados.
+1. **dados**: um `data.frame`;
+2. **mapeamento estético** (`aes`): qual coluna vai para o eixo x, y, cor, tamanho;
+3. **geometria** (`geom_*`): como os dados são desenhados.
 
 ```{r}
 #| label: fig-primeiro
 #| fig-cap: "Estrutura mínima de um gráfico"
 por_uf <- cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = uf_destino) |>
-  arrange(desc(tku_bi))
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = uf_destino) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
 
 ggplot(por_uf, aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
   geom_col()
@@ -54,7 +54,7 @@ As camadas se somam com `+`. A partir daí tudo é refinamento: escalas, rótulo
 #| fig-cap: "TKU de cabotagem por UF de destino (2025)"
 ggplot(por_uf, aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
   geom_col(fill = "#1a5b8a") +
-  geom_text(aes(label = number(tku_bi, accuracy = 0.1, decimal.mark = ",")),
+  geom_text(aes(label = scales::number(tku_bi, accuracy = 0.1, decimal.mark = ",")),
             hjust = -0.15, size = 3) +
   scale_x_continuous(expand = expansion(mult = c(0, 0.12))) +
   labs(
@@ -76,8 +76,8 @@ coluna dos dados, e `geom_bar()` quando quer que o `ggplot2` conte as linhas.
 #| label: fig-barras-perfil
 #| fig-cap: "Composição do TKU por perfil de carga"
 por_perfil <- cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = c(uf_destino, perfil)) |>
-  filter(uf_destino %in% por_uf$uf_destino[1:8])
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(uf_destino, perfil)) |>
+  dplyr::filter(uf_destino %in% por_uf$uf_destino[1:8])
 
 ggplot(por_perfil, aes(x = tku_bi, y = reorder(uf_destino, tku_bi), fill = perfil)) +
   geom_col() +                                 # empilhado (padrão)
@@ -87,14 +87,14 @@ ggplot(por_perfil, aes(x = tku_bi, y = reorder(uf_destino, tku_bi), fill = perfi
   theme(legend.position = "bottom")
 ```
 
-Trocando para proporção — `position = "fill"` — a leitura passa a ser de composição:
+Trocando para proporção, com `position = "fill"`, a leitura passa a ser de composição:
 
 ```{r}
 #| label: fig-barras-fill
 #| fig-cap: "Participação de cada perfil de carga no TKU de destino"
 ggplot(por_perfil, aes(x = tku_bi, y = reorder(uf_destino, tku_bi), fill = perfil)) +
   geom_col(position = "fill") +
-  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
   scale_fill_brewer(palette = "Blues", direction = -1) +
   labs(x = NULL, y = NULL, fill = NULL) +
   theme_minimal(base_size = 11) +
@@ -109,7 +109,7 @@ ggplot(por_perfil, aes(x = tku_bi, y = reorder(uf_destino, tku_bi), fill = perfi
 #| label: fig-scatter
 #| fig-cap: "Relação entre número de ligações e TKU total por UF de destino"
 resumo_uf <- cabotagem |>
-  summarise(ligacoes = n(), tku_bi = sum(tku_bi), .by = uf_destino)
+  dplyr::summarise(ligacoes = dplyr::n(), tku_bi = sum(tku_bi), .by = uf_destino)
 
 ggplot(resumo_uf, aes(x = ligacoes, y = tku_bi)) +
   geom_point(size = 3, alpha = 0.7, colour = "#1a5b8a") +
@@ -130,7 +130,7 @@ gráfico ilegível e um gráfico informativo.
 #| fig-cap: "Distribuição do TKU por ligação OD (escala log)"
 ggplot(cabotagem, aes(x = tku)) +
   geom_histogram(bins = 30, fill = "#1a5b8a", colour = "white") +
-  scale_x_log10(labels = label_log()) +
+  scale_x_log10(labels = scales::label_log()) +
   labs(x = "TKU por ligação (t·km, escala log)", y = "Nº de ligações") +
   theme_minimal(base_size = 11)
 ```
@@ -147,7 +147,7 @@ g1 <- ggplot(cabotagem, aes(x = tku)) +
 g2 <- ggplot(cabotagem, aes(x = tku)) +
   stat_ecdf(geom = "step", linewidth = 0.8, colour = "#1a5b8a") +
   scale_x_log10() +
-  scale_y_continuous(labels = percent_format()) +
+  scale_y_continuous(labels = scales::percent_format()) +
   labs(x = "TKU (log)", y = "Ligações acumuladas") +
   theme_minimal(base_size = 10)
 
@@ -164,12 +164,12 @@ concentram que fração do TKU?*
 #| fig-cap: "TKU por ligação, segundo perfil de carga"
 ggplot(cabotagem, aes(x = tku, y = reorder(perfil, tku, FUN = median))) +
   geom_boxplot(outlier.alpha = 0.4, fill = "grey95") +
-  scale_x_log10(labels = label_log()) +
+  scale_x_log10(labels = scales::label_log()) +
   labs(x = "TKU por ligação (log)", y = NULL) +
   theme_minimal(base_size = 11)
 ```
 
-### Linhas — séries temporais
+### Linhas: séries temporais
 
 ```{r}
 #| label: fig-linha
@@ -192,10 +192,10 @@ ggplot(serie, aes(x = ano, y = tku_bi)) +
 O pacote `scales` resolve a formatação numérica em português:
 
 ```{r}
-number(1234567.891, big.mark = ".", decimal.mark = ",", accuracy = 0.01)
-percent(0.1234, accuracy = 0.1, decimal.mark = ",")
-label_number(scale = 1e-9, suffix = " bi", decimal.mark = ",")(8332538649)
-comma(1234567)
+scales::number(1234567.891, big.mark = ".", decimal.mark = ",", accuracy = 0.01)
+scales::percent(0.1234, accuracy = 0.1, decimal.mark = ",")
+scales::label_number(scale = 1e-9, suffix = " bi", decimal.mark = ",")(8332538649)
+scales::comma(1234567)
 ```
 
 Aplicando ao eixo:
@@ -203,10 +203,10 @@ Aplicando ao eixo:
 ```{r}
 #| label: fig-escalas
 #| fig-cap: "Eixo formatado em padrão brasileiro"
-ggplot(por_uf |> slice_head(n = 8), aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
+ggplot(por_uf |> dplyr::slice_head(n = 8), aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
   geom_col(fill = "#1a5b8a") +
   scale_x_continuous(
-    labels = label_number(big.mark = ".", decimal.mark = ",", accuracy = 0.1)
+    labels = scales::label_number(big.mark = ".", decimal.mark = ",", accuracy = 0.1)
   ) +
   labs(x = "TKU (bi t·km)", y = NULL) +
   theme_minimal(base_size = 11)
@@ -238,8 +238,8 @@ suavizações); `coord_cartesian(xlim = ...)` apenas dá zoom. Para recortar a v
 #| label: fig-forcats
 #| fig-cap: "Ordem explícita das categorias"
 cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = perfil) |>
-  mutate(perfil = forcats::fct_reorder(perfil, tku_bi)) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = perfil) |>
+  dplyr::mutate(perfil = forcats::fct_reorder(perfil, tku_bi)) |>
   ggplot(aes(x = tku_bi, y = perfil)) +
   geom_col(fill = "#1a5b8a") +
   labs(x = "TKU (bi t·km)", y = NULL) +
@@ -252,9 +252,9 @@ pequenas em "Outros") e `fct_relevel()` (ordem manual).
 
 ```{r}
 cabotagem |>
-  mutate(sh2_top = forcats::fct_lump_n(sh2, n = 5, w = tku)) |>
-  summarise(tku_bi = sum(tku_bi), .by = sh2_top) |>
-  arrange(desc(tku_bi))
+  dplyr::mutate(sh2_top = forcats::fct_lump_n(sh2, n = 5, w = tku)) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = sh2_top) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
 ```
 
 ## Painéis (`facet`)
@@ -263,8 +263,8 @@ cabotagem |>
 #| label: fig-facet
 #| fig-cap: "Um painel por perfil de carga"
 cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
-  slice_max(tku_bi, n = 5, by = perfil) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  dplyr::slice_max(tku_bi, n = 5, by = perfil) |>
   ggplot(aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
   geom_col(fill = "#1a5b8a") +
   facet_wrap(~perfil, scales = "free") +
@@ -280,14 +280,14 @@ ruim para comparar **magnitude**. Escolha conscientemente.
 ```{r}
 #| label: fig-anotacao
 #| fig-cap: "Destaque de um ponto específico"
-maior <- cabotagem |> slice_max(tku, n = 1)
+maior <- cabotagem |> dplyr::slice_max(tku, n = 1)
 
 ggplot(resumo_uf, aes(x = ligacoes, y = tku_bi)) +
   geom_point(colour = "grey60", size = 2.5) +
-  geom_point(data = resumo_uf |> filter(uf_destino == maior$uf_destino),
+  geom_point(data = resumo_uf |> dplyr::filter(uf_destino == maior$uf_destino),
              colour = "#e07b39", size = 4) +
   annotate("text", x = 30, y = max(resumo_uf$tku_bi) * 0.95,
-           label = str_glue("Maior ligação: {maior$cidade_origem} > {maior$cidade_destino}"),
+           label = stringr::str_glue("Maior ligação: {maior$cidade_origem} > {maior$cidade_destino}"),
            hjust = 0, size = 3.2) +
   geom_hline(yintercept = mean(resumo_uf$tku_bi), linetype = "dashed", colour = "grey50") +
   labs(x = "Ligações OD", y = "TKU (bi t·km)") +
@@ -322,14 +322,14 @@ Daqui para frente, todo gráfico do documento herda esse tema.
 
 ## Mapas 2D de frequência
 
-Quando há muitos pontos sobrepostos — típico de coordenadas de GPS ou de pares OD —
+Quando há muitos pontos sobrepostos (típico de coordenadas de GPS ou de pares OD),
 histogramas bidimensionais mostram densidade em vez de pontos empilhados.
 
 ```{r}
 #| label: fig-bin2d
 #| fig-cap: "Densidade de ligações por faixa de TKU e número de ligações da UF"
 cabotagem |>
-  left_join(resumo_uf |> select(uf_destino, ligacoes), by = "uf_destino") |>
+  dplyr::left_join(resumo_uf |> dplyr::select(uf_destino, ligacoes), by = "uf_destino") |>
   ggplot(aes(x = ligacoes, y = tku)) +
   geom_bin2d(bins = 20) +
   scale_y_log10() +
@@ -343,7 +343,7 @@ mesma lógica aparece sobre o espaço geográfico, com grades de hexágonos.
 
 ## Quebras de classe: Jenks e alternativas
 
-Ao classificar valores em faixas — o passo obrigatório de qualquer mapa temático — o método
+Ao classificar valores em faixas (o passo obrigatório de qualquer mapa temático), o método
 de quebra muda completamente a leitura do resultado.
 
 ```{r}
@@ -351,9 +351,9 @@ library(classInt)
 
 valores <- resumo_uf$tku_bi
 
-quebras_jenks  <- classIntervals(valores, n = 5, style = "jenks")
-quebras_quant  <- classIntervals(valores, n = 5, style = "quantile")
-quebras_iguais <- classIntervals(valores, n = 5, style = "equal")
+quebras_jenks  <- classInt::classIntervals(valores, n = 5, style = "jenks")
+quebras_quant  <- classInt::classIntervals(valores, n = 5, style = "quantile")
+quebras_iguais <- classInt::classIntervals(valores, n = 5, style = "equal")
 
 round(quebras_jenks$brks, 2)
 round(quebras_quant$brks, 2)
@@ -364,12 +364,12 @@ round(quebras_iguais$brks, 2)
 #| label: fig-jenks
 #| fig-cap: "As mesmas UFs classificadas por três métodos de quebra"
 classificar <- function(x, estilo) {
-  q <- classIntervals(x, n = 5, style = estilo)
+  q <- classInt::classIntervals(x, n = 5, style = estilo)
   cut(x, breaks = q$brks, include.lowest = TRUE, dig.lab = 2)
 }
 
 resumo_uf |>
-  mutate(
+  dplyr::mutate(
     Jenks      = classificar(tku_bi, "jenks"),
     Quantil    = classificar(tku_bi, "quantile"),
     `Interv. iguais` = classificar(tku_bi, "equal")

@@ -12,7 +12,7 @@ library(ggplot2)
 
 ## Obter um modelo digital de elevação
 
-Para os exemplos usaremos a altimetria da Serra do Mar, entre Curitiba e o litoral — a mesma
+Para os exemplos usaremos a altimetria da Serra do Mar, entre Curitiba e o litoral. É a mesma
 área do estudo de caso do módulo e do cruzamento com declividade do módulo 4. O pacote
 `elevatr` baixa o MDE automaticamente para o recorte pedido.
 
@@ -20,16 +20,16 @@ Para os exemplos usaremos a altimetria da Serra do Mar, entre Curitiba e o litor
 arquivo_dem <- "dados/brutos/dem_serra.tif"
 
 if (!file.exists(arquivo_dem)) {
-  area <- st_bbox(c(xmin = -49.40, ymin = -25.75, xmax = -48.40, ymax = -25.15),
-                  crs = st_crs(4326)) |>
-    st_as_sfc() |>
-    st_as_sf()
+  area <- sf::st_bbox(c(xmin = -49.40, ymin = -25.75, xmax = -48.40, ymax = -25.15),
+                  crs = sf::st_crs(4326)) |>
+    sf::st_as_sfc() |>
+    sf::st_as_sf()
 
   dem_raw <- elevatr::get_elev_raster(locations = area, z = 10, clip = "bbox")
   terra::writeRaster(terra::rast(dem_raw), arquivo_dem, overwrite = TRUE)
 }
 
-dem <- rast(arquivo_dem)
+dem <- terra::rast(arquivo_dem)
 dem
 ```
 
@@ -40,24 +40,24 @@ extensão, CRS e nome da camada.
 c(
   colunas    = ncol(dem),
   linhas     = nrow(dem),
-  celulas    = ncell(dem),
-  camadas    = nlyr(dem)
+  celulas    = terra::ncell(dem),
+  camadas    = terra::nlyr(dem)
 )
-res(dem)              # tamanho da célula, na unidade do CRS
-crs(dem, describe = TRUE)$name
-global(dem, c("min", "max", "mean"), na.rm = TRUE)
+terra::res(dem)              # tamanho da célula, na unidade do CRS
+terra::crs(dem, describe = TRUE)$name
+terra::global(dem, c("min", "max", "mean"), na.rm = TRUE)
 ```
 
 ::: {.callout-note}
 ## Fontes de MDE para uso oficial
 
-O `elevatr` usa *tiles* de terreno da AWS, derivados de SRTM/Copernicus — ótimos para
+O `elevatr` usa *tiles* de terreno da AWS, derivados de SRTM/Copernicus. São ótimos para
 análise exploratória e ensino, sem cadastro. Para um documento oficial, prefira uma fonte
 citável:
 
-- **TOPODATA/INPE** — <http://www.dsr.inpe.br/topodata/> — SRTM refinado para 30 m, folhas
+- **TOPODATA/INPE**: <http://www.dsr.inpe.br/topodata/>. SRTM refinado para 30 m, folhas
   por quadrícula, sem cadastro. É a referência mais usada em estudos brasileiros.
-- **Copernicus DEM GLO-30** — 30 m, cobertura global, via OpenTopography.
+- **Copernicus DEM GLO-30**: 30 m, cobertura global, via OpenTopography.
 - O procedimento do capítulo é idêntico: `rast("caminho/do/arquivo.tif")`.
 :::
 
@@ -82,9 +82,9 @@ if (!file.exists(arquivo)) {
     geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
     geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
   )
-  st_write(muni, arquivo, quiet = TRUE)
+  sf::st_write(muni, arquivo, quiet = TRUE)
 }
-muni <- st_read(arquivo, quiet = TRUE)
+muni <- sf::st_read(arquivo, quiet = TRUE)
 
 ggplot() +
   tidyterra::geom_spatraster(data = dem) +
@@ -105,15 +105,22 @@ São duas operações diferentes e quase sempre usadas juntas:
 #| label: fig-crop-mask
 #| fig-cap: "crop (esquerda) e crop + mask (direita) pelo município de Morretes"
 #| fig-height: 3.6
-morretes <- muni |> filter(name_muni == "Morretes") |> st_transform(crs(dem))
+morretes <- muni |> dplyr::filter(name_muni == "Morretes") |> sf::st_transform(terra::crs(dem))
 
-dem_crop <- crop(dem, vect(morretes))
-dem_mask <- mask(dem_crop, vect(morretes))
+dem_crop <- terra::crop(dem, terra::vect(morretes))
+dem_mask <- terra::mask(dem_crop, terra::vect(morretes))
 
 par(mfrow = c(1, 2), mar = c(2, 2, 2, 4))
 plot(dem_crop, main = "crop")
 plot(dem_mask, main = "crop + mask")
 par(mfrow = c(1, 1))
+```
+
+Para conferir o recorte sobre um mapa-base real (satélite, ruas), o `mapview` também aceita
+raster diretamente:
+
+```{r}
+mapview::mapview(dem_mask) + mapview::mapview(morretes, alpha.regions = 0)
 ```
 
 `vect()` converte um objeto `sf` no formato vetorial do `terra` (`SpatVector`). É a ponte
@@ -123,20 +130,20 @@ entre os dois pacotes; no sentido inverso, `st_as_sf()`.
 
 ```{r}
 # reprojetar: note o method - "bilinear" para contínuo, "near" para categórico
-dem_utm <- project(dem, "EPSG:31982", method = "bilinear")
-res(dem_utm)     # agora em metros
+dem_utm <- terra::project(dem, "EPSG:31982", method = "bilinear")
+terra::res(dem_utm)     # agora em metros
 ```
 
 ```{r}
 # agregar: reduz a resolução (útil para acelerar análises exploratórias)
 dem_500 <- aggregate(dem_utm, fact = 5, fun = "mean")
-c(original_m = res(dem_utm)[1], agregado_m = res(dem_500)[1])
+c(original_m = terra::res(dem_utm)[1], agregado_m = terra::res(dem_500)[1])
 ```
 
 ```{r}
 #| eval: false
-resample(a, b, method = "bilinear")   # coloca `a` na grade de `b` (essencial p/ álgebra)
-disagg(x, fact = 2)                   # aumenta a resolução (interpola)
+terra::resample(a, b, method = "bilinear")   # coloca `a` na grade de `b` (essencial p/ álgebra)
+terra::disagg(x, fact = 2)                   # aumenta a resolução (interpola)
 ```
 
 ::: {.callout-important}
@@ -150,7 +157,7 @@ do not match".
 ```{r}
 # operações aritméticas e lógicas são vetorizadas, célula a célula
 acima_800 <- dem_utm > 800
-freq(acima_800)
+terra::freq(acima_800)
 ```
 
 ```{r}
@@ -162,24 +169,24 @@ faixas <- matrix(c(
    800, Inf, 4     # planalto
 ), ncol = 3, byrow = TRUE)
 
-dem_classes <- classify(dem_utm, faixas)
-freq(dem_classes) |> mutate(pct = round(100 * count / sum(count), 1))
+dem_classes <- terra::classify(dem_utm, faixas)
+terra::freq(dem_classes) |> dplyr::mutate(pct = round(100 * count / sum(count), 1))
 ```
 
 ```{r}
 #| eval: false
-app(x, fun = mean)                 # aplica função por célula entre camadas
-ifel(dem > 800, 1, 0)              # if-else raster
-focal(dem, w = 3, fun = "mean")    # janela móvel (suavização, detecção de borda)
+terra::app(x, fun = mean)                 # aplica função por célula entre camadas
+terra::ifel(dem > 800, 1, 0)              # if-else raster
+terra::focal(dem, w = 3, fun = "mean")    # janela móvel (suavização, detecção de borda)
 ```
 
 ## Declividade e terreno
 
-O `terra` calcula os derivados de terreno em uma função. **Reprojete para metros antes** — em
+O `terra` calcula os derivados de terreno em uma função. **Reprojete para metros antes**. Em
 graus, a declividade sai errada.
 
 ```{r}
-terreno <- terrain(dem_utm, v = c("slope", "aspect"), unit = "degrees")
+terreno <- terra::terrain(dem_utm, v = c("slope", "aspect"), unit = "degrees")
 terreno
 ```
 
@@ -191,14 +198,14 @@ plot(terreno$slope, main = "Declividade (graus)")
 ```
 
 ```{r}
-global(terreno$slope, c("mean", "max"), na.rm = TRUE) |> round(1)
+terra::global(terreno$slope, c("mean", "max"), na.rm = TRUE) |> round(1)
 ```
 
 No módulo 4 esse raster é cruzado com traçados viários para comparar alternativas de projeto.
 
 ## Extrair valores por geometria
 
-Esta é a operação que conecta raster e vetor — e provavelmente a mais útil do capítulo.
+Esta é a operação que conecta raster e vetor. É provavelmente a mais útil do capítulo.
 
 ```{r}
 # por ponto: a altitude de cada porto/cidade
@@ -207,65 +214,65 @@ pontos <- data.frame(
   lon   = c(-49.2733, -48.8342, -48.5119),
   lat   = c(-25.4284, -25.4772, -25.5016)
 ) |>
-  st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
-  st_transform(crs(dem_utm))
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  sf::st_transform(terra::crs(dem_utm))
 
-extract(dem_utm, vect(pontos), ID = FALSE) |>
-  bind_cols(local = pontos$local) |>
-  rename(altitude_m = 1) |>
-  mutate(altitude_m = round(altitude_m)) |>
+terra::extract(dem_utm, terra::vect(pontos), ID = FALSE) |>
+  dplyr::bind_cols(local = pontos$local) |>
+  dplyr::rename(altitude_m = 1) |>
+  dplyr::mutate(altitude_m = round(altitude_m)) |>
   knitr::kable()
 ```
 
 ```{r}
-# por polígono: estatística zonal — altitude média e máxima por município
+# por polígono: estatística zonal, altitude média e máxima por município
 muni_serra <- muni |>
-  filter(name_muni %in% c("Morretes", "Antonina", "Paranaguá", "Piraquara", "Curitiba")) |>
-  st_transform(crs(dem_utm))
+  dplyr::filter(name_muni %in% c("Morretes", "Antonina", "Paranaguá", "Piraquara", "Curitiba")) |>
+  sf::st_transform(terra::crs(dem_utm))
 
-zonal_alt <- extract(dem_utm, vect(muni_serra),
+zonal_alt <- terra::extract(dem_utm, terra::vect(muni_serra),
                      fun = mean, na.rm = TRUE, ID = FALSE)
 
 muni_serra |>
-  st_drop_geometry() |>
-  transmute(municipio = name_muni,
+  sf::st_drop_geometry() |>
+  dplyr::transmute(municipio = name_muni,
             altitude_media_m = round(zonal_alt[[1]])) |>
-  arrange(desc(altitude_media_m)) |>
+  dplyr::arrange(dplyr::desc(altitude_media_m)) |>
   knitr::kable()
 ```
 
 ```{r}
 #| eval: false
-extract(r, v, fun = "max")                  # outra estatística
-extract(r, v, fun = mean, weights = TRUE)   # pondera pela fração da célula na geometria
-extract(r, v, exact = TRUE)                 # fração exata (mais lento, mais preciso)
-zonal(r, rasterize(v, r, "id"), fun = "mean")  # muito mais rápido em bases grandes
+terra::extract(r, v, fun = "max")                  # outra estatística
+terra::extract(r, v, fun = mean, weights = TRUE)   # pondera pela fração da célula na geometria
+terra::extract(r, v, exact = TRUE)                 # fração exata (mais lento, mais preciso)
+terra::zonal(r, terra::rasterize(v, r, "id"), fun = "mean")  # muito mais rápido em bases grandes
 ```
 
 ## Escrever e converter formatos
 
 ```{r}
 #| eval: false
-writeRaster(dem_utm, "resultados/dem_utm.tif", overwrite = TRUE)
+terra::writeRaster(dem_utm, "resultados/dem_utm.tif", overwrite = TRUE)
 
 # GeoTIFF comprimido, que é o que se entrega
-writeRaster(terreno$slope, "resultados/declividade.tif",
+terra::writeRaster(terreno$slope, "resultados/declividade.tif",
             overwrite = TRUE,
             gdal = c("COMPRESS=DEFLATE", "TILED=YES"))
 
 # raster -> vetor (contornos, polígonos de classe)
-contornos <- as.contour(dem_utm, levels = seq(0, 1600, by = 200)) |> st_as_sf()
-poligonos <- as.polygons(dem_classes) |> st_as_sf()
+contornos <- terra::as.contour(dem_utm, levels = seq(0, 1600, by = 200)) |> sf::st_as_sf()
+poligonos <- terra::as.polygons(dem_classes) |> sf::st_as_sf()
 
 # vetor -> raster
-grade <- rasterize(vect(muni_serra), dem_utm, field = "code_muni")
+grade <- terra::rasterize(terra::vect(muni_serra), dem_utm, field = "code_muni")
 
 # raster -> tabela (para análise em dplyr)
 tabela <- as.data.frame(dem_utm, xy = TRUE, na.rm = TRUE)
 ```
 
 A conversão para tabela merece destaque: com `as.data.frame(r, xy = TRUE)` o raster vira um
-`data.frame` com colunas `x`, `y` e valor — e aí tudo do módulo 1 se aplica. É a maneira mais
+`data.frame` com colunas `x`, `y` e valor. Daí tudo do módulo 1 se aplica. É a maneira mais
 simples de responder perguntas como "qual a distribuição de altitude na faixa de domínio",
 com `summarise` e `ggplot2`.
 

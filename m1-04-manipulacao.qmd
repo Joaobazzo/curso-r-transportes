@@ -16,7 +16,7 @@ library(stringr)
 ### Planilhas
 
 ```{r}
-bruto <- read_excel("dados/cabotagem_tku_2025.xlsx")
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx")
 dim(bruto)
 names(bruto)
 ```
@@ -31,7 +31,7 @@ bruto |> janitor::clean_names() |> names()
 
 `janitor::clean_names()` passa tudo para minúsculas, troca espaços e pontuação por `_` e
 remove acentos. Os nomes ficam utilizáveis, mas ainda longos. Como conhecemos a estrutura do
-arquivo, vamos fixar nomes curtos **por posição**, protegidos por uma checagem — se a ANTAQ
+arquivo, vamos fixar nomes curtos **por posição**, protegidos por uma checagem. Se a ANTAQ
 mudar o número de colunas na próxima publicação, o script para em vez de renomear errado:
 
 ```{r}
@@ -44,18 +44,18 @@ base <- bruto
 stopifnot(ncol(base) == length(colunas))
 names(base) <- colunas
 
-glimpse(base)
+dplyr::glimpse(base)
 ```
 
 Ainda nesta etapa, um filtro que vale explicar: **132 dos 732 registros têm TKU igual a
-zero** — são combinações de mercadoria e perfil de carga sem fluxo no período, publicadas
+zero**. São combinações de mercadoria e perfil de carga sem fluxo no período, publicadas
 como linhas vazias com `-` nos campos de identificação. Elas serão analisadas em detalhe em
 @sec-m1-limpeza; aqui apenas as separamos.
 
 ```{r}
-base |> count(tem_fluxo = tku > 0)
+base |> dplyr::count(tem_fluxo = tku > 0)
 
-base <- base |> filter(tku > 0)
+base <- base |> dplyr::filter(tku > 0)
 nrow(base)
 ```
 
@@ -64,7 +64,7 @@ Se preferir renomear pelo nome de origem, explicitamente:
 ```{r}
 #| eval: false
 base <- bruto |>
-  rename(
+  dplyr::rename(
     ano           = Ano,
     perfil        = `Perfil da Carga`,
     sh2           = `Grupo de Mercadoria (SH2)`,
@@ -78,11 +78,11 @@ Outros argumentos úteis de `read_excel()`:
 
 ```{r}
 #| eval: false
-read_excel("arquivo.xlsx", sheet = "Dados")        # aba pelo nome
-read_excel("arquivo.xlsx", skip = 3)               # pula linhas de cabeçalho decorativo
-read_excel("arquivo.xlsx", n_max = 1000)           # só as primeiras linhas (para inspeção)
-read_excel("arquivo.xlsx", col_types = "text")     # lê tudo como texto (evita coerção)
-read_excel("arquivo.xlsx", na = c("", "-", "n/d")) # o que deve virar NA
+readxl::read_excel("arquivo.xlsx", sheet = "Dados")        # aba pelo nome
+readxl::read_excel("arquivo.xlsx", skip = 3)               # pula linhas de cabeçalho decorativo
+readxl::read_excel("arquivo.xlsx", n_max = 1000)           # só as primeiras linhas (para inspeção)
+readxl::read_excel("arquivo.xlsx", col_types = "text")     # lê tudo como texto (evita coerção)
+readxl::read_excel("arquivo.xlsx", na = c("", "-", "n/d")) # o que deve virar NA
 ```
 
 ### Arquivos de texto
@@ -93,8 +93,8 @@ dim(csv)
 names(csv) |> head(4)
 ```
 
-Para arquivos em padrão brasileiro — separador `;` e vírgula decimal — use `read_csv2()`, e
-informe o *encoding* quando o arquivo vier de sistema legado:
+Para arquivos em padrão brasileiro, com separador `;` e vírgula decimal, use `read_csv2()`.
+Informe o *encoding* quando o arquivo vier de sistema legado:
 
 ```{r}
 #| eval: false
@@ -103,8 +103,8 @@ readr::read_csv2("arquivo.csv", locale = readr::locale(encoding = "latin1"))
 
 ### Arquivos grandes: `duckplyr`
 
-`readr` e `read_excel` carregam tudo na memória. Quando o arquivo tem milhões de linhas —
-GTFS, dados de GPS, registros de pedágio, matrizes de roteamento — vale usar `duckplyr`, que
+`readr` e `read_excel` carregam tudo na memória. Quando o arquivo tem milhões de linhas
+(GTFS, dados de GPS, registros de pedágio, matrizes de roteamento), vale usar `duckplyr`, que
 executa a consulta no **DuckDB** e traz para a memória apenas o resultado.
 
 ```{r}
@@ -112,12 +112,12 @@ executa a consulta no **DuckDB** e traz para a memória apenas o resultado.
 library(duckplyr)
 
 # a leitura é "preguiçosa": nada é carregado ainda
-grande <- read_csv_duckdb("dados/roteamento_milhoes.csv")
+grande <- duckplyr::read_csv_duckdb("dados/roteamento_milhoes.csv")
 
 resultado <- grande |>
-  filter(uf_destino == "PR") |>
-  summarise(tku = sum(tku, na.rm = TRUE), .by = uf_origem) |>
-  collect()          # só aqui a consulta é executada
+  dplyr::filter(uf_destino == "PR") |>
+  dplyr::summarise(tku = sum(tku, na.rm = TRUE), .by = uf_origem) |>
+  dplyr::collect()          # só aqui a consulta é executada
 ```
 
 A sintaxe é a mesma do `dplyr`; a diferença é `collect()` no fim, que materializa o
@@ -139,73 +139,73 @@ em `dplyr`.
 
 ## Os verbos do `dplyr`
 
-### `select()` — escolher colunas
+### `select()`: escolher colunas
 
 ```{r}
 base |>
-  select(uf_origem, uf_destino, tku) |>
+  dplyr::select(uf_origem, uf_destino, tku) |>
   head(3)
 ```
 
 ```{r}
 #| eval: false
-select(base, starts_with("uf"))          # por prefixo
-select(base, contains("cidade"))         # por conteúdo do nome
-select(base, -pais_origem, -pais_destino)  # remover
-select(base, carga = perfil)    # selecionar e renomear
-select(base, where(is.numeric))          # por tipo
+dplyr::select(base, tidyr::starts_with("uf"))          # por prefixo
+dplyr::select(base, tidyr::contains("cidade"))         # por conteúdo do nome
+dplyr::select(base, -pais_origem, -pais_destino)  # remover
+dplyr::select(base, carga = perfil)    # selecionar e renomear
+dplyr::select(base, dplyr::where(is.numeric))          # por tipo
 ```
 
-### `filter()` — escolher linhas
+### `filter()`: escolher linhas
 
 ```{r}
 base |>
-  filter(uf_destino == "PR") |>
+  dplyr::filter(uf_destino == "PR") |>
   nrow()
 
 base |>
-  filter(uf_origem == "AM", tku > 1e9) |>          # a vírgula é "e"
-  select(cidade_origem, uf_destino, tku)
+  dplyr::filter(uf_origem == "AM", tku > 1e9) |>          # a vírgula é "e"
+  dplyr::select(cidade_origem, uf_destino, tku)
 
 base |>
-  filter(uf_destino %in% c("PR", "SC", "RS")) |>   # Região Sul
+  dplyr::filter(uf_destino %in% c("PR", "SC", "RS")) |>   # Região Sul
   nrow()
 
 base |>
-  filter(str_detect(perfil, "Granel")) |>
-  count(perfil)
+  dplyr::filter(stringr::str_detect(perfil, "Granel")) |>
+  dplyr::count(perfil)
 ```
 
 ```{r}
 base |>
-  filter(uf_origem != uf_destino) |>               # exclui fluxos intraestaduais
+  dplyr::filter(uf_origem != uf_destino) |>               # exclui fluxos intraestaduais
   nrow()
 ```
 
-### `mutate()` — criar e alterar colunas
+### `mutate()`: criar e alterar colunas
 
 ```{r}
 base <- base |>
-  mutate(
+  dplyr::mutate(
     tku_bi   = tku / 1e9,
-    ligacao  = str_c(uf_origem, " > ", uf_destino),
+    ligacao  = stringr::str_c(uf_origem, " > ", uf_destino),
     interestadual = uf_origem != uf_destino,
-    faixa = case_when(
+    faixa = dplyr::case_when(
       tku >= 1e9 ~ "alto",
       tku >= 1e6 ~ "médio",
       .default   = "baixo"
     )
   )
 
-base |> select(ligacao, tku_bi, faixa) |> head(4)
+base |> dplyr::select(ligacao, tku_bi, faixa) |> head(4)
 ```
 
-### `arrange()` — ordenar
+### `arrange()`: ordenar
 
 ```{r}
 base |>
-  arrange(desc(tku)) |>
-  select(ligacao, cidade_origem, cidade_destino, tku_bi) |>
+  dplyr::arrange(dplyr::desc(tku)) |>
+  dplyr::select(ligacao, cidade_origem, cidade_destino, tku_bi) |>
   head(5)
 ```
 
@@ -213,24 +213,24 @@ base |>
 
 ```{r}
 base |>
-  summarise(
-    ligacoes = n(),
+  dplyr::summarise(
+    ligacoes = dplyr::n(),
     tku_total = sum(tku, na.rm = TRUE),
     tku_medio = mean(tku, na.rm = TRUE),
     tku_max   = max(tku, na.rm = TRUE)
   )
 ```
 
-Agrupando — a operação mais usada de todas. A sintaxe moderna usa o argumento `.by`:
+Agrupar é a operação mais usada de todas. A sintaxe moderna usa o argumento `.by`:
 
 ```{r}
 por_uf_destino <- base |>
-  summarise(
-    ligacoes  = n(),
+  dplyr::summarise(
+    ligacoes  = dplyr::n(),
     tku_bi    = sum(tku, na.rm = TRUE) / 1e9,
     .by = uf_destino
   ) |>
-  arrange(desc(tku_bi))
+  dplyr::arrange(dplyr::desc(tku_bi))
 
 por_uf_destino |> head(10)
 ```
@@ -240,31 +240,31 @@ O equivalente com `group_by()`, que você verá em materiais mais antigos:
 ```{r}
 #| eval: false
 base |>
-  group_by(uf_destino) |>
-  summarise(tku_bi = sum(tku, na.rm = TRUE) / 1e9) |>
-  ungroup()
+  dplyr::group_by(uf_destino) |>
+  dplyr::summarise(tku_bi = sum(tku, na.rm = TRUE) / 1e9) |>
+  dplyr::ungroup()
 ```
 
 Agrupamento por mais de uma variável, com participação percentual:
 
 ```{r}
 base |>
-  summarise(tku = sum(tku, na.rm = TRUE), .by = c(perfil, uf_destino)) |>
-  mutate(part = tku / sum(tku), .by = perfil) |>
-  filter(part > 0.10) |>
-  arrange(perfil, desc(part))
+  dplyr::summarise(tku = sum(tku, na.rm = TRUE), .by = c(perfil, uf_destino)) |>
+  dplyr::mutate(part = tku / sum(tku), .by = perfil) |>
+  dplyr::filter(part > 0.10) |>
+  dplyr::arrange(perfil, dplyr::desc(part))
 ```
 
-Repare que `mutate(..., .by = ...)` calcula **dentro do grupo sem colapsar a tabela** — é
+Repare que `mutate(..., .by = ...)` calcula **dentro do grupo sem colapsar a tabela**. É
 como se fosse uma coluna calculada de planilha dinâmica.
 
 ### `count()`, `distinct()`, `slice_max()`
 
 ```{r}
-base |> count(perfil, sort = TRUE)
-base |> distinct(uf_origem) |> nrow()
-base |> slice_max(tku, n = 3) |> select(ligacao, tku_bi)
-base |> slice_max(tku, n = 1, by = uf_destino) |> select(uf_destino, ligacao, tku_bi) |> head(5)
+base |> dplyr::count(perfil, sort = TRUE)
+base |> dplyr::distinct(uf_origem) |> nrow()
+base |> dplyr::slice_max(tku, n = 3) |> dplyr::select(ligacao, tku_bi)
+base |> dplyr::slice_max(tku, n = 1, by = uf_destino) |> dplyr::select(uf_destino, ligacao, tku_bi) |> head(5)
 ```
 
 ## Reformatar: *long* ↔ *wide*
@@ -276,18 +276,18 @@ gráficos são **longas** (uma linha por observação). `tidyr` converte entre a
 
 ```{r}
 od_longo <- base |>
-  filter(uf_origem != uf_destino) |>
-  summarise(tku_bi = sum(tku, na.rm = TRUE) / 1e9, .by = c(uf_origem, uf_destino))
+  dplyr::filter(uf_origem != uf_destino) |>
+  dplyr::summarise(tku_bi = sum(tku, na.rm = TRUE) / 1e9, .by = c(uf_origem, uf_destino))
 
 head(od_longo, 4)
 
 od_largo <- od_longo |>
-  pivot_wider(
+  tidyr::pivot_wider(
     names_from  = uf_destino,
     values_from = tku_bi,
     values_fill = 0
   ) |>
-  arrange(uf_origem)
+  dplyr::arrange(uf_origem)
 
 od_largo
 ```
@@ -305,13 +305,13 @@ round(m[1:5, 1:5], 2)
 
 ```{r}
 od_largo |>
-  pivot_longer(
+  tidyr::pivot_longer(
     cols = -uf_origem,
     names_to  = "uf_destino",
     values_to = "tku_bi"
   ) |>
-  filter(tku_bi > 0) |>
-  arrange(desc(tku_bi)) |>
+  dplyr::filter(tku_bi > 0) |>
+  dplyr::arrange(dplyr::desc(tku_bi)) |>
   head(5)
 ```
 
@@ -326,8 +326,8 @@ pop <- data.frame(
 )
 
 pop |>
-  pivot_longer(
-    cols = starts_with("pop_"),
+  tidyr::pivot_longer(
+    cols = tidyr::starts_with("pop_"),
     names_to = "ano",
     names_prefix = "pop_",
     names_transform = list(ano = as.integer),

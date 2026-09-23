@@ -2,8 +2,8 @@
 
 `sf` (*simple features*) é o padrão para dados vetoriais em R. A ideia central é simples e
 resolve metade dos problemas de geoprocessamento: **um objeto `sf` é um `data.frame` com uma
-coluna de geometria**. Tudo que você aprendeu no módulo 1 — `filter`, `mutate`, `summarise`,
-`join` — continua valendo, e a geometria acompanha as operações.
+coluna de geometria**. Tudo que você aprendeu no módulo 1 (`filter`, `mutate`, `summarise`,
+`join`) continua valendo, e a geometria acompanha as operações.
 
 ```{r}
 library(sf)
@@ -16,8 +16,8 @@ sf::sf_extSoftVersion()
 ```
 
 Essas são as bibliotecas que fazem o trabalho pesado: GDAL (leitura/escrita de formatos),
-PROJ (projeções) e GEOS (operações geométricas). São as mesmas que o QGIS usa por baixo — o R
-não é uma alternativa "mais fraca", é a mesma máquina com outra interface.
+PROJ (projeções) e GEOS (operações geométricas). São as mesmas que o QGIS usa por baixo. O R
+não é uma alternativa "mais fraca": é a mesma máquina com outra interface.
 
 ## Criando geometrias na mão
 
@@ -26,10 +26,10 @@ reais como exemplo.
 
 ```{r}
 # ponto
-porto <- st_point(c(-48.5, -25.5))
+porto <- sf::st_point(c(-48.5, -25.5))
 class(porto)
 
-# a partir de uma tabela de coordenadas — o caso mais comum no dia a dia
+# a partir de uma tabela de coordenadas: o caso mais comum no dia a dia
 portos_tab <- data.frame(
   nome = c("Paranaguá", "Itajaí", "Santos", "Pecém"),
   uf   = c("PR", "SC", "SP", "CE"),
@@ -37,7 +37,7 @@ portos_tab <- data.frame(
   lat  = c(-25.5016, -26.9077, -23.9619, -3.5500)
 )
 
-portos <- st_as_sf(portos_tab, coords = c("lon", "lat"), crs = 4326)
+portos <- sf::st_as_sf(portos_tab, coords = c("lon", "lat"), crs = 4326)
 portos
 ```
 
@@ -46,10 +46,14 @@ dimensão, `bbox` (retângulo envolvente) e o **CRS**. É a primeira coisa a con
 dado espacial.
 
 ```{r}
+mapview::mapview(portos)
+```
+
+```{r}
 class(portos)
-st_geometry_type(portos, by_geometry = FALSE)
-st_bbox(portos)
-st_crs(portos)$input
+sf::st_geometry_type(portos, by_geometry = FALSE)
+sf::st_bbox(portos)
+sf::st_crs(portos)$input
 ```
 
 `st_as_sf()` com `coords =` é provavelmente a função que você mais vai usar: ela transforma
@@ -58,7 +62,7 @@ qualquer planilha com latitude e longitude em dado espacial.
 ::: {.callout-warning}
 ## A ordem é longitude, latitude
 
-`coords = c("lon", "lat")` — **x primeiro**. Invertido, seus pontos caem no oceano Índico ou
+`coords = c("lon", "lat")`: **x primeiro**. Invertido, seus pontos caem no oceano Índico ou
 na Antártida. Quando o mapa sai vazio ou com pontos absurdos, esse é o primeiro suspeito.
 :::
 
@@ -66,30 +70,30 @@ na Antártida. Quando o mapa sai vazio ou com pontos absurdos, esse é o primeir
 
 ```{r}
 # linha: uma sequência de pontos
-trecho <- st_linestring(rbind(
+trecho <- sf::st_linestring(rbind(
   c(-48.51, -25.50),
   c(-48.80, -25.42),
   c(-49.27, -25.43)
 ))
 
 # polígono: anel fechado (primeiro ponto = último)
-quadra <- st_polygon(list(rbind(
+quadra <- sf::st_polygon(list(rbind(
   c(-48.6, -25.6), c(-48.4, -25.6),
   c(-48.4, -25.4), c(-48.6, -25.4),
   c(-48.6, -25.6)
 )))
 
-st_sfc(trecho, quadra, crs = 4326) |> st_geometry_type()
-st_length(st_sfc(trecho, crs = 4326))
-st_area(st_sfc(quadra, crs = 4326))
+sf::st_sfc(trecho, quadra, crs = 4326) |> sf::st_geometry_type()
+sf::st_length(sf::st_sfc(trecho, crs = 4326))
+sf::st_area(sf::st_sfc(quadra, crs = 4326))
 ```
 
 Repare que `st_length()` e `st_area()` devolvem o resultado **com unidade** (metros, metros
-quadrados) — o `sf` usa o pacote `units`. Isso evita o erro clássico de reportar área em
+quadrados). O `sf` usa o pacote `units`. Isso evita o erro clássico de reportar área em
 graus decimais:
 
 ```{r}
-area <- st_area(st_sfc(quadra, crs = 4326))
+area <- sf::st_area(sf::st_sfc(quadra, crs = 4326))
 units::set_units(area, km^2)
 as.numeric(units::set_units(area, km^2))   # para usar em conta ou gráfico
 ```
@@ -112,33 +116,33 @@ exige um tipo específico, converta:
 
 ```{r}
 #| eval: false
-st_cast(x, "POLYGON")        # separa cada parte em uma linha da tabela
-st_cast(x, "MULTIPOLYGON")   # agrupa
-st_collection_extract(x, "POLYGON")   # descarta o que não é polígono
+sf::st_cast(x, "POLYGON")        # separa cada parte em uma linha da tabela
+sf::st_cast(x, "MULTIPOLYGON")   # agrupa
+sf::st_collection_extract(x, "POLYGON")   # descarta o que não é polígono
 ```
 
 ## Leitura de arquivos
 
-`st_read()` lê praticamente qualquer formato vetorial — o GDAL decide pelo que reconhece na
+`st_read()` lê praticamente qualquer formato vetorial. O GDAL decide pelo que reconhece na
 extensão.
 
 ```{r}
 #| eval: false
-st_read("dados/brutos/snv/SNV_202601A.shp")      # Shapefile
-st_read("dados/brutos/base.gpkg", layer = "rodovias")  # GeoPackage (várias camadas)
-st_read("dados/brutos/limites.geojson")
-st_read("dados/brutos/base.sqlite", layer = "portos")  # SQLite/Spatialite
-st_layers("dados/brutos/base.gpkg")              # quais camadas existem no arquivo
+sf::st_read("dados/brutos/snv/SNV_202601A.shp")      # Shapefile
+sf::st_read("dados/brutos/base.gpkg", layer = "rodovias")  # GeoPackage (várias camadas)
+sf::st_read("dados/brutos/limites.geojson")
+sf::st_read("dados/brutos/base.sqlite", layer = "portos")  # SQLite/Spatialite
+sf::st_layers("dados/brutos/base.gpkg")              # quais camadas existem no arquivo
 ```
 
 Argumentos que resolvem os problemas mais frequentes:
 
 ```{r}
 #| eval: false
-st_read("arquivo.shp", quiet = TRUE)                 # sem a mensagem de leitura
-st_read("arquivo.shp", options = "ENCODING=LATIN1")  # acentuação de shapefile antigo
-st_read("arquivo.shp", query = "SELECT * FROM arquivo WHERE sg_uf = 'PR'")  # filtra na leitura
-st_read("arquivo.gpkg", wkt_filter = st_as_text(st_geometry(area)))         # recorte espacial
+sf::st_read("arquivo.shp", quiet = TRUE)                 # sem a mensagem de leitura
+sf::st_read("arquivo.shp", options = "ENCODING=LATIN1")  # acentuação de shapefile antigo
+sf::st_read("arquivo.shp", query = "SELECT * FROM arquivo WHERE sg_uf = 'PR'")  # filtra na leitura
+sf::st_read("arquivo.gpkg", wkt_filter = sf::st_as_text(sf::st_geometry(area)))         # recorte espacial
 ```
 
 Os dois últimos importam com bases grandes: em vez de carregar 500 MB de malha nacional para
@@ -160,51 +164,51 @@ quando o destinatário exigir.
 #| eval: false
 dir.create("resultados", showWarnings = FALSE)
 
-st_write(portos, "resultados/portos.gpkg", delete_dsn = TRUE)   # sobrescreve o arquivo
-st_write(portos, "resultados/portos.shp")
-st_write(portos, "resultados/portos.geojson")
+sf::st_write(portos, "resultados/portos.gpkg", delete_dsn = TRUE)   # sobrescreve o arquivo
+sf::st_write(portos, "resultados/portos.shp")
+sf::st_write(portos, "resultados/portos.geojson")
 
 # várias camadas no mesmo GeoPackage
-st_write(portos,  "resultados/analise.gpkg", layer = "portos")
-st_write(trechos, "resultados/analise.gpkg", layer = "trechos", append = TRUE)
+sf::st_write(portos,  "resultados/analise.gpkg", layer = "portos")
+sf::st_write(trechos, "resultados/analise.gpkg", layer = "trechos", append = TRUE)
 
 # tabela sem geometria, para Excel
-portos |> st_drop_geometry() |> writexl::write_xlsx("resultados/portos.xlsx")
+portos |> sf::st_drop_geometry() |> writexl::write_xlsx("resultados/portos.xlsx")
 
 # coordenadas como colunas
-portos |> mutate(lon = st_coordinates(geometry)[, 1],
-                 lat = st_coordinates(geometry)[, 2]) |>
-  st_drop_geometry() |>
+portos |> dplyr::mutate(lon = sf::st_coordinates(geometry)[, 1],
+                 lat = sf::st_coordinates(geometry)[, 2]) |>
+  sf::st_drop_geometry() |>
   readr::write_csv("resultados/portos.csv")
 ```
 
-`st_drop_geometry()` é o atalho para voltar a um `data.frame` comum — útil quando a geometria
+`st_drop_geometry()` é o atalho para voltar a um `data.frame` comum. É útil quando a geometria
 já cumpriu seu papel e você quer só a tabela.
 
 ## Verbos do `dplyr` em objetos `sf`
 
 ```{r}
 portos |>
-  filter(uf %in% c("PR", "SC")) |>
-  mutate(regiao = "Sul") |>
-  select(nome, uf, regiao)
+  dplyr::filter(uf %in% c("PR", "SC")) |>
+  dplyr::mutate(regiao = "Sul") |>
+  dplyr::select(nome, uf, regiao)
 ```
 
 A geometria é "colante": ela sobrevive a `filter`, `mutate`, `select` e `arrange` sem você
-pedir. Duas exceções que vale conhecer — e note que, em objetos `sf`, o agrupamento se faz
+pedir. Duas exceções que vale conhecer. Note que, em objetos `sf`, o agrupamento se faz
 com `group_by()`, não com o argumento `.by` do módulo 1, que o método do `sf` não implementa:
 
 ```{r}
 # summarise agrega as geometrias (union) dentro de cada grupo
 portos |>
-  group_by(uf) |>
-  summarise(n = n()) |>
-  st_geometry_type()
+  dplyr::group_by(uf) |>
+  dplyr::summarise(n = dplyr::n()) |>
+  sf::st_geometry_type()
 ```
 
 ```{r}
 # para agregar SÓ os atributos, remova a geometria antes
-portos |> st_drop_geometry() |> count(uf)
+portos |> sf::st_drop_geometry() |> dplyr::count(uf)
 ```
 
 ## Inspeção rápida de um dado espacial novo
@@ -213,15 +217,15 @@ O roteiro de cinco linhas que vale rodar sempre que abrir um arquivo desconhecid
 
 ```{r}
 #| eval: false
-x <- st_read("arquivo.gpkg", quiet = TRUE)
+x <- sf::st_read("arquivo.gpkg", quiet = TRUE)
 
 nrow(x)                          # quantas feições
-st_geometry_type(x, by_geometry = FALSE)  # que tipo de geometria
-st_crs(x)$input                  # qual sistema de coordenadas
-st_bbox(x)                       # onde fica (confere com o esperado?)
+sf::st_geometry_type(x, by_geometry = FALSE)  # que tipo de geometria
+sf::st_crs(x)$input                  # qual sistema de coordenadas
+sf::st_bbox(x)                       # onde fica (confere com o esperado?)
 names(x)                         # quais atributos
-all(st_is_valid(x))              # a geometria é válida?
-plot(st_geometry(x))             # o desenho faz sentido?
+all(sf::st_is_valid(x))              # a geometria é válida?
+plot(sf::st_geometry(x))             # o desenho faz sentido?
 ```
 
 `st_is_valid()` merece atenção: geometrias inválidas (auto-interseções, anéis invertidos) são
@@ -230,5 +234,5 @@ A correção é uma linha:
 
 ```{r}
 #| eval: false
-x <- st_make_valid(x)
+x <- sf::st_make_valid(x)
 ```

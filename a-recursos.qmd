@@ -4,52 +4,60 @@
 
 **Manipulação e visualização**
 
-- `dplyr` — <https://dplyr.tidyverse.org/>
-- `tidyr` — <https://tidyr.tidyverse.org/>
-- `duckplyr` — <https://duckplyr.tidyverse.org/>
-- `data.table` — <https://rdatatable.gitlab.io/data.table/>
-- `stringr` — <https://stringr.tidyverse.org/>
-- `lubridate` — <https://lubridate.tidyverse.org/>
-- `ggplot2` — <https://ggplot2.tidyverse.org/>
-- `patchwork` — <https://patchwork.data-imaginist.com/>
+- `dplyr`: manipulação de dados (filter, mutate, summarise etc.). <https://dplyr.tidyverse.org/>
+- `tidyr`: organização e reformatação de dados (formato longo/largo). <https://tidyr.tidyverse.org/>
+- `duckplyr`: backend DuckDB para dplyr, mais rápido em bases grandes. <https://duckplyr.tidyverse.org/>
+- `data.table`: manipulação de dados de alta performance. <https://rdatatable.gitlab.io/data.table/>
+- `stringr`: manipulação de strings e texto. <https://stringr.tidyverse.org/>
+- `lubridate`: manipulação de datas e horários. <https://lubridate.tidyverse.org/>
+- `ggplot2`: visualização de dados baseada em gramática de gráficos. <https://ggplot2.tidyverse.org/>
+- `patchwork`: combinação de múltiplos gráficos ggplot2 em um só layout. <https://patchwork.data-imaginist.com/>
 
 **Espacial**
 
-- `sf` — <https://r-spatial.github.io/sf/>
-- `terra` — <https://rspatial.github.io/terra/>
-- `leaflet` — <https://rstudio.github.io/leaflet/>
-- `mapgl` — <https://walker-data.com/mapgl/>
+- `sf`: manipulação de dados espaciais vetoriais (simple features). <https://r-spatial.github.io/sf/>
+- `terra`: manipulação de dados raster e vetoriais. <https://rspatial.github.io/terra/>
+- `leaflet`: mapas interativos baseados em Leaflet.js. <https://rstudio.github.io/leaflet/>
+- `mapview`: conferência visual rápida de objetos espaciais, em uma linha. <https://r-spatial.github.io/mapview/>
+- `mapgl`: mapas interativos baseados em Mapbox GL / MapLibre. <https://walker-data.com/mapgl/>
 
 **Bases públicas brasileiras**
 
-- `geobr` — <https://ipeagit.github.io/geobr/>
-- `censobr` — <https://ipeagit.github.io/censobr/>
-- `sidrar` — <https://cran.r-project.org/package=sidrar>
-- `geocodebr` — <https://github.com/ipeaGIT/geocodebr>
-- `osmdata` — <https://docs.ropensci.org/osmdata/>
-- `osmextract` — <https://docs.ropensci.org/osmextract/>
+- `geobr`: download de bases espaciais oficiais do Brasil. <https://ipeagit.github.io/geobr/>
+- `censobr`: download e leitura de dados do Censo Demográfico. <https://ipeagit.github.io/censobr/>
+- `sidrar`: interface para a API SIDRA do IBGE. <https://cran.r-project.org/package=sidrar>
+- `geocodebr`: geolocalização de endereços brasileiros. <https://github.com/ipeaGIT/geocodebr>
+- `enderecobr`: padronização de endereços brasileiros. <https://ipeagit.github.io/enderecobr>
+- `cepR`: busca de CEPs brasileiros. <https://cran.r-project.org/package=cepR>
+- `osmdata`: download de dados do OpenStreetMap. <https://docs.ropensci.org/osmdata/>
+- `osmextract`: download e leitura de extratos do OpenStreetMap (Geofabrik etc.). <https://docs.ropensci.org/osmextract/>
+- `PNADcIBGE`: download, leitura e análise de microdados da PNAD Contínua. <https://cran.r-project.org/package=PNADcIBGE>
+- `PNADCperiods`: identificação dos períodos de referência da PNAD Contínua. <https://cran.r-project.org/package=PNADCperiods>
+- `PNSIBGE`: download, leitura e análise de microdados da PNS. <https://cran.r-project.org/package=PNSIBGE>
 
 **Transportes e acessibilidade**
 
-- `r5r` — <https://ipeagit.github.io/r5r/>
-- `dodgr` — <https://urbananalyst.github.io/dodgr/>
-- `accessibility` — <https://ipeagit.github.io/accessibility/>
-- `aopdata` — <https://ipeagit.github.io/aopdata/>
-- `gtfstools` — <https://ipeagit.github.io/gtfstools/>
-- `gtfs2gps` — <https://github.com/ipeaGIT/gtfs2gps>
-- `stplanr` — <https://docs.ropensci.org/stplanr/>
-- `flownet` — <https://github.com/SebKrantz/flownet>
+- `r5r`: roteamento multimodal rápido (baseado no R5). <https://ipeagit.github.io/r5r/>
+- `dodgr`: roteamento em grafos (bom para automóvel). <https://urbananalyst.github.io/dodgr/>
+- `accessibility`: cálculo de métricas de acessibilidade a partir de matrizes de custo. <https://ipeagit.github.io/accessibility/>
+- `aopdata`: dados de acesso a empregos, saúde, educação e assistência social. <https://ipeagit.github.io/aopdata/>
+- `gtfstools`: manipulação de dados GTFS de transporte público. <https://ipeagit.github.io/gtfstools/>
+- `gtfs2gps`: conversão de dados GTFS em trajetórias GPS simuladas. <https://github.com/ipeaGIT/gtfs2gps>
+- `stplanr`: ferramentas para planejamento de transportes. <https://docs.ropensci.org/stplanr/>
+- `flownet`: análise e visualização de redes de fluxo (origem-destino). <https://github.com/SebKrantz/flownet>
+- `flightsbr`: download de dados de voos e aeroportos do Brasil. <https://ipeagit.github.io/flightsbr>
+- `odbr`: download de dados de pesquisas Origem-Destino do Brasil. <https://hsvab.github.io/odbr/>
 
 ## Livros e cursos abertos
 
-- **Introduction to urban accessibility with R** — <https://ipeagit.github.io/intro_access_book/>
-- **Geocomputation with R** — <https://r.geocompx.org/>
-- **R for Data Science (2ª ed.)** — <https://r4ds.hadley.nz/>
-- **Spatial Data Science with R and terra** — <https://rspatial.org/>
-- **Curso-R — material de estudo** — <https://curso-r.com/material/>
-- **Workshop de acessibilidade (ipeaGIT, Bogotá 2024)** —
+- **Introduction to urban accessibility with R**. <https://ipeagit.github.io/intro_access_book/>
+- **Geocomputation with R**. <https://r.geocompx.org/>
+- **R for Data Science (2ª ed.)**. <https://r4ds.hadley.nz/>
+- **Spatial Data Science with R and terra**. <https://rspatial.org/>
+- **Curso-R: material de estudo**. <https://curso-r.com/material/>
+- **Workshop de acessibilidade (ipeaGIT, Bogotá 2024)**.
   <https://ipeagit.github.io/access_workshop_bogota_2024/>
-- **Hillshade effect** (relevo sombreado em R) —
+- **Hillshade effect** (relevo sombreado em R).
   <https://dominicroye.github.io/blog/hillshade-effect/>
 
 ## Folhas de referência
@@ -59,7 +67,7 @@ e Quarto: <https://posit.co/resources/cheatsheets/>.
 
 ## Ferramentas
 
-- **Quarto** — <https://quarto.org/>
-- **RStudio** — <https://posit.co/downloads/>
-- **DuckDB** — <https://duckdb.org/>
-- **Git e GitHub** — <https://happygitwithr.com/> (uso de Git a partir do R)
+- **Quarto**. <https://quarto.org/>
+- **RStudio**. <https://posit.co/downloads/>
+- **DuckDB**. <https://duckdb.org/>
+- **Git e GitHub**. <https://happygitwithr.com/> (uso de Git a partir do R)

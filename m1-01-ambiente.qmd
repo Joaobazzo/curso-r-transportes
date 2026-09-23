@@ -4,10 +4,10 @@
 
 São três componentes, nesta ordem:
 
-1. **R** — a linguagem em si: <https://cran.r-project.org/>. Instale a versão mais recente
+1. **R**: a linguagem em si. <https://cran.r-project.org/>. Instale a versão mais recente
    (4.4 ou superior).
-2. **RStudio Desktop** — o ambiente de desenvolvimento: <https://posit.co/downloads/>.
-3. **Rtools** (apenas Windows) — ferramentas de compilação, necessárias para instalar
+2. **RStudio Desktop**: o ambiente de desenvolvimento. <https://posit.co/downloads/>.
+3. **Rtools** (apenas Windows): ferramentas de compilação, necessárias para instalar
    pacotes que precisam ser compilados do código-fonte, como `sf` e `terra`:
    <https://cran.r-project.org/bin/windows/Rtools/>. Escolha a versão compatível com a sua
    versão do R.
@@ -75,8 +75,8 @@ packageVersion("dplyr")        # versão instalada
 update.packages(ask = FALSE)   # atualiza tudo
 ```
 
-Pacotes do CRAN se instalam com `install.packages()`. Versões de desenvolvimento no GitHub —
-caso comum em pacotes de transportes, como `flownet` — se instalam com:
+Pacotes do CRAN se instalam com `install.packages()`. Versões de desenvolvimento no GitHub se
+instalam de outro jeito. É o caso comum em pacotes de transportes, como `flownet`:
 
 ```{r}
 #| eval: false
@@ -90,6 +90,46 @@ remotes::install_github("SebKrantz/flownet")
 Ao final de um script ou relatório, `sessionInfo()` (ou `sessioninfo::session_info()`)
 imprime a versão do R e de todos os pacotes carregados. Colar essa saída no anexo de um
 relatório técnico é o que permite reproduzir o resultado meses depois.
+:::
+
+## Trave as versões com `renv`
+
+O `sessionInfo()` **registra** as versões. O `renv` vai além: ele **reproduz** o ambiente.
+Cada projeto passa a ter a sua própria biblioteca de pacotes, isolada das outras, e um
+arquivo `renv.lock` que lista a versão exata de cada pacote usado.
+
+O problema que ele resolve é concreto. Você entrega uma nota técnica em 2026 com um script
+que roda. Em 2028 alguém precisa atualizar os números, abre o script, e ele falha: o `sf`
+mudou um argumento, o `dplyr` descontinuou uma função. Sem o `renv`, ninguém sabe mais com
+quais versões aquele resultado foi produzido.
+
+```{r}
+#| eval: false
+install.packages("renv")
+
+renv::init()       # uma vez, no início do projeto: cria a biblioteca e o renv.lock
+renv::snapshot()   # depois de instalar ou atualizar pacotes: grava as versões no lock
+renv::status()     # o lock está coerente com o que o código usa?
+renv::restore()    # na máquina de outra pessoa (ou na sua, daqui a dois anos)
+```
+
+O fluxo, na prática:
+
+1. Crie o projeto e rode `renv::init()`.
+2. Instale pacotes normalmente, com `install.packages()`.
+3. Quando o script estiver funcionando, `renv::snapshot()`.
+4. Versione o `renv.lock` junto com o código (Git e GitHub, no Módulo 5). **Não** versione a pasta
+   `renv/library/`, que é grande e o próprio `renv` já coloca no `.gitignore`.
+
+Quem recebe o projeto roda um único comando, `renv::restore()`, e obtém exatamente as mesmas
+versões.
+
+::: {.callout-note}
+## `renv` em máquina institucional
+
+O `renv` mantém um *cache* global de pacotes, então a mesma versão do `sf` não é baixada de
+novo a cada projeto. Em computadores com proxy, o `restore()` depende do mesmo acesso ao CRAN
+que o `install.packages()`; se um falha, o outro também. Resolva o acesso primeiro.
 :::
 
 ## Onde procurar ajuda
@@ -125,14 +165,72 @@ Formas de usar dentro do RStudio ou do VS Code:
 | Pacote `ellmer` | Chamar modelos de dentro do R, dentro de um script |
 | `chattr`, `gander` | Interface de *chat* acoplada ao RStudio |
 
-::: {.callout-warning}
-## Cuidados no uso institucional
+### O que você **não** pode colar
 
-1. **Não cole dados sensíveis ou não públicos** em serviços externos. Prefira descrever o
-   formato ("uma tabela com colunas UF, município, TKU") a colar o conteúdo.
-2. **Verifique o que foi gerado.** É comum a IA inventar argumentos ou funções que não
-   existem, ou usar pacotes desatualizados. Rode o código e confira o resultado em um
-   subconjunto pequeno, onde você sabe qual deveria ser a resposta.
+Todo texto colado num assistente de IA hospedado fora do órgão sai da rede do Ministério. Em
+serviços de uso pessoal, ele pode ainda ser usado para treinar modelos futuros. A regra é
+simples: **se você não publicaria o conteúdo no site do Ministério, não cole.**
+
+Isso inclui, no nosso contexto:
+
+- **Exportações de modelos de transporte** contratados, como a saída do VISUM que usamos no
+  @sec-m1-modelo4etapas. É produto de contrato, não dado público.
+- Planilhas de estudos em andamento, minutas de notas técnicas, termos de referência.
+- Qualquer dado pessoal (nome, CPF, placa, endereço de pessoa física), que além de tudo está
+  sob a LGPD.
+- Credenciais: senhas, *tokens* de API, *strings* de conexão com banco de dados. Um *token*
+  colado uma vez precisa ser considerado vazado.
+
+### Como pedir ajuda sem colar o dado
+
+Na maioria das vezes a IA não precisa do seu dado. Ela precisa da **estrutura** dele e do
+**erro**. Três formas seguras, da mais simples para a mais completa:
+
+**1. Descreva o formato.** Em vez de colar a tabela:
+
+```{r}
+#| eval: false
+str(links)        # colar a SAÍDA disto: nomes e tipos das colunas, sem o conteúdo
+names(links)
+```
+
+**2. Monte um dado de brinquedo** com a mesma estrutura e valores inventados:
+
+```{r}
+exemplo <- data.frame(
+  no        = c(1, 1, 2),
+  sentido   = c("direto", "inverso", "direto"),
+  volvehprt = c(100, 80, 250),
+  comprimento_km = c(0.5, 0.5, 1.2)
+)
+dput(exemplo)     # cola-se a saída: é texto, recria a tabela na hora
+```
+
+**3. Faça um exemplo reprodutível mínimo com o `reprex`.** Ele roda o seu trecho numa sessão
+limpa e formata código e saída prontos para colar num *chat*, num fórum ou numa *issue*:
+
+```{r}
+#| eval: false
+install.packages("reprex")
+
+reprex::reprex({
+  exemplo <- data.frame(no = c(1, 1, 2), volvehprt = c(100, 80, 250))
+  exemplo |> dplyr::summarise(total = sum(volvehprt), .by = no)
+})
+```
+
+Construir o `reprex` resolve metade dos problemas antes mesmo de você perguntar: ao isolar
+o erro num exemplo de cinco linhas, você frequentemente descobre a causa sozinho.
+
+::: {.callout-warning}
+## Verifique o que foi gerado
+
+1. **A IA inventa.** Argumentos que não existem, funções de pacotes desatualizados, nomes de
+   coluna que não estão no seu dado. Rode e confira num subconjunto pequeno em que você sabe
+   qual é a resposta certa.
+2. **A IA não conhece a sua base.** Ela não sabe que o `VEHKMTRAVPRT` do VISUM vem em metros,
+   nem que o código de município do Comex Stat não é o do IBGE (Módulo 3). Esse
+   conhecimento é seu, e é ele que torna o resultado defensável.
 3. **Peça a explicação, não só o código.** O objetivo do curso é que você consiga ler,
    corrigir e defender tecnicamente o que o script faz.
 :::

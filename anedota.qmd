@@ -1,0 +1,45 @@
+# Anedota {.unnumbered}
+
+Qual foi o mapa que mais tempo te tomou?
+
+![Fonte: Ipea, [repositorio.ipea.gov.br/handle/11058/10713](https://repositorio.ipea.gov.br/handle/11058/10713).](img/map_years_BR21.png)
+
+Essa é a minha resposta. Analisar a evolução da taxa de motorização em todas as cidades brasileiras parece simples. No
+papel, é. São duas fontes: população, do IBGE, e frota de veículos, do Denatran. Duas tabelas,
+uma divisão. Eu imaginava resolver numa tarde.
+
+O primeiro obstáculo foi baixar os dados. O Denatran publica a frota separada por
+ano e por mês, cada recorte num arquivo. Isso significava centenas de downloads manuais.
+Escrevi um código para automatizar. Mas os arquivos não seguiam padrão nenhum: o endereço de
+2001 não era o de 2010, que não era o de 2020. Terminei com uma rotina de download específica
+para cada ano. A automação que eu tinha feito para economizar tempo virou, ela mesma, um
+pequeno projeto.
+
+Depois vieram os dados populacionais, e com eles uma armadilha mais sutil: alguns anos temos dados de contagem, outros de projeção. São números de naturezas diferentes, e juntá-los na mesma
+série exige saber disso. Nada no arquivo avisa.
+
+Mas o que realmente consumiu o tempo foi casar as duas bases. As tabelas antigas do Denatran
+não traziam código de município: só o nome da cidade, digitado, década após década. E nome de
+cidade brasileira não é chave confiável. Padronizei tudo: removi acentos, cedilhas, hífens,
+caixa. Mesmo assim, o pareamento continuava falhando. Paraty aparece com "y" numa base e com
+"i" na outra. Grafias antigas com "ph" que a norma atual já não usa. Conectivos como "de",
+"do" e "da" apareciam num arquivo e faltavam no outro. Municípios que mudaram de nome, se
+emanciparam ou se fundiram no intervalo.
+
+Não havia atalho. Tive que construir à mão um dicionário relacional ligando cada grafia
+histórica ao código atual do IBGE. E o único jeito de saber se ele estava progredindo era
+visual: eu plotava o mapa de cada estado destacando os municípios sem correspondência e ia
+acompanhando os buracos fecharem. O mapa não era meu instrumento de depuração.
+
+Isso levou dias. Produzir o gráfico final em R levou mais um ou dois. Testar paletas de cor e
+tipografia até a figura ficar legível levou o resto da semana.
+
+Conto isso por dois motivos. O primeiro é que o trabalho pesado em análise de dados quase
+nunca está na modelagem. Está em fazer duas bases conversarem. O segundo é o que essa história
+ensina sobre conferência: um `join` mal resolvido não dá erro. Ele roda, devolve uma tabela, e
+você segue em frente sem saber que perdeu trezentos municípios no caminho, ou que duplicou
+linhas e inflou seus totais. O resultado sai bonito e está errado.
+
+Ao longo do curso, sempre que integrarmos bases, vamos repetir a mesma disciplina: conferir a
+contagem antes e depois do `join`, verificar o que ficou de fora, comparar o agregado com a
+fonte oficial.

@@ -18,14 +18,17 @@ guardar e trocar dados; ruim para medir.
 áreas e fazer *buffers*; introduz distorção que cresce com a extensão da área.
 
 ```{r}
-crs_relevantes <- tibble::tribble(
-  ~epsg,   ~nome,                          ~tipo,        ~uso,
-  4326,    "WGS 84",                       "geográfico", "GPS, OSM, GTFS, arquivos internacionais",
-  4674,    "SIRGAS 2000",                  "geográfico", "padrão oficial brasileiro (IBGE, DNIT)",
-  31982,   "SIRGAS 2000 / UTM 22S",        "projetado",  "PR, SC, oeste de SP",
-  31983,   "SIRGAS 2000 / UTM 23S",        "projetado",  "SP, RJ, MG, GO",
-  31984,   "SIRGAS 2000 / UTM 24S",        "projetado",  "CE, BA, PE (Fortaleza)",
-  5880,    "SIRGAS 2000 / Brazil Polyconic","projetado", "mapas do Brasil inteiro"
+crs_relevantes <- data.frame(
+  epsg = c(4326, 4674, 31982, 31983, 31984, 5880),
+  nome = c("WGS 84", "SIRGAS 2000", "SIRGAS 2000 / UTM 22S", "SIRGAS 2000 / UTM 23S",
+           "SIRGAS 2000 / UTM 24S", "SIRGAS 2000 / Brazil Polyconic"),
+  tipo = c("geográfico", "geográfico", "projetado", "projetado", "projetado", "projetado"),
+  uso = c("GPS, OSM, GTFS, arquivos internacionais",
+          "padrão oficial brasileiro (IBGE, DNIT)",
+          "PR, SC, oeste de SP",
+          "SP, RJ, MG, GO",
+          "CE, BA, PE (Fortaleza)",
+          "mapas do Brasil inteiro")
 )
 knitr::kable(crs_relevantes)
 ```
@@ -33,7 +36,7 @@ knitr::kable(crs_relevantes)
 ::: {.callout-note}
 ## Qual usar no Ministério
 
-- Para **guardar e distribuir** dados: SIRGAS 2000 (`EPSG:4674`) — é o sistema geodésico
+- Para **guardar e distribuir** dados: SIRGAS 2000 (`EPSG:4674`). É o sistema geodésico
   oficial do Brasil. Dados vindos de GPS, OSM ou GTFS chegam em WGS 84 (`EPSG:4326`); na
   prática a diferença entre os dois é de poucos centímetros, mas declare o correto.
 - Para **medir** em escala local ou regional: a zona UTM correspondente.
@@ -51,29 +54,29 @@ portos <- data.frame(
   lon  = c(-48.5119, -48.6486),
   lat  = c(-25.5016, -26.9077)
 ) |>
-  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326)
 
 # 1. CONSULTAR: qual é o CRS?
-st_crs(portos)$input
-st_crs(portos)$epsg
+sf::st_crs(portos)$input
+sf::st_crs(portos)$epsg
 ```
 
 ```{r}
 # 2. DEFINIR: informar qual é o CRS de um dado que veio sem essa informação.
-#    NÃO move as coordenadas — apenas rotula.
-sem_crs <- st_set_crs(portos, NA)
-st_crs(sem_crs)$input
+#    NÃO move as coordenadas, apenas rotula.
+sem_crs <- sf::st_set_crs(portos, NA)
+sf::st_crs(sem_crs)$input
 
-corrigido <- st_set_crs(sem_crs, 4326)
-st_crs(corrigido)$epsg
+corrigido <- sf::st_set_crs(sem_crs, 4326)
+sf::st_crs(corrigido)$epsg
 ```
 
 ```{r}
 # 3. TRANSFORMAR: converter as coordenadas para outro sistema.
 #    MOVE as coordenadas, recalculando-as.
-portos_utm <- st_transform(portos, 31982)
-st_crs(portos_utm)$epsg
-st_coordinates(portos_utm)
+portos_utm <- sf::st_transform(portos, 31982)
+sf::st_crs(portos_utm)$epsg
+sf::st_coordinates(portos_utm)
 ```
 
 Compare as coordenadas: em UTM são metros a partir do meridiano central da zona, na casa das
@@ -82,7 +85,7 @@ centenas de milhares. Em graus eram números entre -49 e -25.
 ::: {.callout-important}
 ## `st_set_crs()` nunca conserta uma sobreposição errada
 
-Se duas camadas não se alinham, o reflexo errado é `st_set_crs()` — que só troca o rótulo e
+Se duas camadas não se alinham, o reflexo errado é `st_set_crs()`. Ele só troca o rótulo e
 deixa as coordenadas no lugar errado. O certo é `st_transform()`. Use `st_set_crs()`
 **exclusivamente** quando o dado chegou sem CRS e você sabe, por documentação, qual é.
 :::
@@ -91,39 +94,45 @@ deixa as coordenadas no lugar errado. O certo é `st_transform()`. Use `st_set_c
 
 ```{r}
 # distância entre dois portos, em coordenadas geográficas
-st_distance(portos[1, ], portos[2, ])
+sf::st_distance(portos[1, ], portos[2, ])
 ```
 
 O `sf` moderno usa a biblioteca `s2` e calcula distâncias **geodésicas** corretas mesmo em
-graus — para distância, hoje você não precisa reprojetar.
+graus. Para distância, hoje você não precisa reprojetar.
 
 Com *buffer* a história é mais delicada. Em dados projetados, `dist` está na unidade do CRS
 (metros, em UTM). Em coordenadas geográficas, o `sf` também aceita metros, porque delega ao
-`s2` — mas o resultado é uma **aproximação por células esféricas**, mais lenta e menos
+`s2`. O resultado, porém, é uma **aproximação por células esféricas**, mais lenta e menos
 previsível em bordas:
 
 ```{r}
-b_graus  <- st_buffer(portos[1, ], dist = 10000)                    # via s2, em metros
-b_metros <- portos[1, ] |> st_transform(31982) |> st_buffer(10000)  # plano, em metros
+b_graus  <- sf::st_buffer(portos[1, ], dist = 10000)                    # via s2, em metros
+b_metros <- portos[1, ] |> sf::st_transform(31982) |> sf::st_buffer(10000)  # plano, em metros
 
 c(
-  s2_km2  = as.numeric(units::set_units(st_area(b_graus),  km^2)),
-  utm_km2 = as.numeric(units::set_units(st_area(b_metros), km^2))
+  s2_km2  = as.numeric(units::set_units(sf::st_area(b_graus),  km^2)),
+  utm_km2 = as.numeric(units::set_units(sf::st_area(b_metros), km^2))
 )
 ```
 
 Um *buffer* de 10 km deve ter área próxima de π × 10² ≈ 314 km². Confira sempre por essa conta
-de cabeça: é a verificação mais rápida de que a projeção estava certa.
-
-O problema clássico — o raio ser interpretado **em graus**, gerando um "buffer" de milhares de
-quilômetros — aparece quando o `s2` está desligado, em versões antigas do `sf` e em vários
-outros programas:
+de cabeça: é a verificação mais rápida de que a projeção estava certa. A conferência visual
+ajuda a enxergar a diferença entre as duas abordagens:
 
 ```{r}
-sf_use_s2(FALSE)
-b_errado <- suppressWarnings(st_buffer(portos[1, ], dist = 10000))
-st_bbox(b_errado)          # o retângulo envolvente extrapola o planeta
-sf_use_s2(TRUE)            # religue sempre
+mapview::mapview(b_graus, col.regions = "#1a5b8a") +
+  mapview::mapview(b_metros, col.regions = "#b3402a")
+```
+
+O problema clássico aparece quando o `s2` está desligado, em versões antigas do `sf` e em
+vários outros programas: o raio é interpretado **em graus**, gerando um "buffer" de milhares
+de quilômetros.
+
+```{r}
+sf::sf_use_s2(FALSE)
+b_errado <- suppressWarnings(sf::st_buffer(portos[1, ], dist = 10000))
+sf::st_bbox(b_errado)          # o retângulo envolvente extrapola o planeta
+sf::sf_use_s2(TRUE)            # religue sempre
 ```
 
 Por isso a recomendação para trabalho métrico continua a mesma: **reprojete para UTM, faça as
@@ -135,7 +144,7 @@ A regra prática:
 | Operação | Precisa reprojetar? |
 |:--|:--|
 | `st_distance()` | não (o `s2` resolve em graus) |
-| `st_buffer()` | **sim** — o raio é na unidade do CRS |
+| `st_buffer()` | **sim**: o raio é na unidade do CRS |
 | `st_area()`, `st_length()` | não para valores globais, **sim** para precisão local |
 | `st_intersection()`, `st_join()` | não, mas as camadas devem estar no **mesmo** CRS |
 | grades regulares, *snapping*, roteamento | **sim** |
@@ -145,7 +154,7 @@ A regra prática:
 ```{r}
 #| error: true
 # duas camadas em sistemas diferentes: a operação falha (e é bom que falhe)
-st_intersects(portos, st_transform(portos, 31982))
+sf::st_intersects(portos, sf::st_transform(portos, 31982))
 ```
 
 O padrão para alinhar tudo a um CRS de trabalho:
@@ -162,9 +171,9 @@ Uma função útil para descobrir a zona UTM certa a partir do próprio dado:
 
 ```{r}
 zona_utm <- function(x) {
-  centro <- suppressWarnings(st_centroid(st_as_sfc(st_bbox(st_transform(x, 4326)))))
-  lon <- st_coordinates(centro)[1]
-  lat <- st_coordinates(centro)[2]
+  centro <- suppressWarnings(sf::st_centroid(sf::st_as_sfc(sf::st_bbox(sf::st_transform(x, 4326)))))
+  lon <- sf::st_coordinates(centro)[1]
+  lat <- sf::st_coordinates(centro)[2]
   zona <- floor((lon + 180) / 6) + 1
   # SIRGAS 2000 / UTM: 31978+zona-17 no hemisfério sul (zonas 18S a 25S)
   epsg <- if (lat < 0) 31960 + zona else 31954 + zona
@@ -189,9 +198,9 @@ crs_brasil <- paste("+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22",
 arquivo <- "dados/brutos/pr.gpkg"
 if (!file.exists(arquivo)) {
   pr <- geobr::read_state(code_state = "PR", year = 2020, showProgress = FALSE)
-  st_write(pr, arquivo, quiet = TRUE)
+  sf::st_write(pr, arquivo, quiet = TRUE)
 }
-pr <- st_read(arquivo, quiet = TRUE)
+pr <- sf::st_read(arquivo, quiet = TRUE)
 
 mapa <- function(x, titulo) {
   ggplot(x) + geom_sf(fill = "#d7e3ee", colour = "#1a5b8a", linewidth = 0.3) +
@@ -200,12 +209,12 @@ mapa <- function(x, titulo) {
 }
 
 patchwork::wrap_plots(
-  mapa(st_transform(pr, 4674),       "SIRGAS 2000 (graus)"),
-  mapa(st_transform(pr, 31982),      "UTM 22S (metros)"),
-  mapa(st_transform(pr, crs_brasil), "Albers Brasil"),
+  mapa(sf::st_transform(pr, 4674),       "SIRGAS 2000 (graus)"),
+  mapa(sf::st_transform(pr, 31982),      "UTM 22S (metros)"),
+  mapa(sf::st_transform(pr, crs_brasil), "Albers Brasil"),
   nrow = 1
 )
 ```
 
-As três são a mesma geometria. A diferença de forma é a distorção de cada projeção — e é por
+As três são a mesma geometria. A diferença de forma é a distorção de cada projeção. E é por
 isso que a escolha importa quando o resultado vai ser medido, não apenas olhado.

@@ -1,0 +1,19 @@
+{
+  "hash": "0033303571da021db150752c78a2384b",
+  "result": {
+    "engine": "knitr",
+    "markdown": "# Visão geral do módulo {#sec-m5}\n\n::: {.modulo-meta}\n**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\n**Datas:** a definir\n**Pacotes:** Quarto, `rmarkdown`, `knitr`, `gt`, `ggplot2`, `sf`, `ggspatial`, `patchwork`, `mapgl`\n**Entrega:** projeto final, relatório técnico reproduzível com dados reais\n:::\n\n## O que você vai conseguir fazer no fim do módulo\n\n- Produzir mapas temáticos com padrão de publicação: classificação justificada, paleta\n  adequada ao tipo de variável, elementos cartográficos completos e legendas legíveis.\n- Escrever um documento que **se atualiza sozinho** quando o dado muda: texto, tabelas,\n  gráficos e mapas gerados pelo mesmo código.\n- Gerar o mesmo relatório para vários municípios, trechos ou cenários, em um laço.\n- Exportar para HTML, PDF e Word, sem refazer o trabalho.\n- Registrar o histórico de uma análise com Git e saber o que **não** pode ir para um\n  repositório público.\n- Entregar uma análise que outra pessoa consegue reexecutar. É o objetivo de todo o\n  curso.\n\n## Roteiro\n\n### Aula síncrona (3h)\n\n| Bloco | Conteúdo | Capítulo |\n|:--|:--|:--|\n| 1 | Mapas temáticos: classificação, paletas, elementos, composição | @sec-m5-mapas |\n| 2 | Quarto: estrutura, figuras, tabelas, referências cruzadas, formatos | @sec-m5-quarto |\n| 2b | Controle de versão com Git e GitHub | @sec-m5-git |\n| 3 | Relatórios parametrizados e automação | @sec-m5-parametrizados |\n\n### Conteúdo assíncrono (3h)\n\n| Bloco | Conteúdo | Capítulo |\n|:--|:--|:--|\n| 4 | Projeto final: escolha, roteiro e critérios | @sec-m5-projeto |\n| 5 | Boas práticas e próximos passos | @sec-m5-proximos-passos |\n\n## Pacotes do módulo\n\n\n::: {.cell}\n\n```{.r .cell-code}\npacotes <- c(\"quarto\", \"rmarkdown\", \"knitr\", \"gt\", \"kableExtra\", \"usethis\", \"gitcreds\",\n             \"ggspatial\", \"patchwork\", \"scales\", \"classInt\", \"mapgl\")\n\nfaltando <- setdiff(pacotes, rownames(installed.packages()))\nif (length(faltando) > 0) install.packages(faltando)\n```\n:::\n\n\nPara exportar em PDF, é preciso uma distribuição LaTeX. A mais simples é a que o próprio R\ninstala:\n\n\n::: {.cell}\n\n```{.r .cell-code}\ntinytex::install_tinytex()\n```\n:::\n\n",
+    "supporting": [],
+    "filters": [
+      "rmarkdown/pagebreak.lua"
+    ],
+    "includes": {
+      "include-in-header": [
+        "<link href=\"site_libs/pagedtable-1.1/css/pagedtable.css\" rel=\"stylesheet\" />\n<script src=\"site_libs/pagedtable-1.1/js/pagedtable.js\"></script>\n"
+      ]
+    },
+    "engineDependencies": {},
+    "preserve": {},
+    "postProcess": true
+  }
+}

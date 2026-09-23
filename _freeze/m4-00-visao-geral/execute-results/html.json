@@ -1,0 +1,19 @@
+{
+  "hash": "de5f4a0970978da1b0100b552bc907c6",
+  "result": {
+    "engine": "knitr",
+    "markdown": "# Visão geral do módulo {#sec-m4}\n\n::: {.modulo-meta}\n**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\n**Datas:** a definir\n**Pacotes:** `spdep`, `gstat`, `terra`, `r5r`, `accessibility`, `aopdata`, `gtfstools`, `flownet`\n**Estudos de caso:** declividade × traçado na BR-116 (Serra do Mar) e acessibilidade em Fortaleza\n:::\n\n## O que você vai conseguir fazer no fim do módulo\n\n- Testar se um fenômeno se distribui no espaço de forma aleatória ou concentrada\n  (autocorrelação espacial) e identificar os agrupamentos.\n- Estimar valores onde não há medição, a partir de pontos observados (interpolação), e\n  **avaliar o erro** dessa estimativa.\n- Extrair perfis de terreno e declividade ao longo de traçados, e comparar alternativas de\n  projeto por critérios quantitativos.\n- Calcular matrizes de tempo de viagem multimodais e isócronas.\n- Calcular e interpretar indicadores de acessibilidade a oportunidades, e comparar cenários\n  de rede de transporte público.\n\n## Roteiro\n\n### Aula síncrona (3h)\n\n| Bloco | Conteúdo | Capítulo |\n|:--|:--|:--|\n| 1 | Autocorrelação espacial: vizinhança, I de Moran, LISA | @sec-m4-autocorrelacao |\n| 2 | Interpolação: IDW, variograma e krigagem, com validação | @sec-m4-interpolacao |\n| 3 | Roteamento multimodal e isócronas com `r5r` | @sec-m4-r5r |\n| 4 | Redes de fluxo e alocação (`flownet`, `stplanr`) | @sec-m4-r5r |\n\n### Conteúdo assíncrono (3h)\n\n| Bloco | Conteúdo | Capítulo |\n|:--|:--|:--|\n| 5 | Estudo de caso: declividade × traçado na Serra do Mar | @sec-m4-declividade |\n| 6 | Acessibilidade a oportunidades: medidas e interpretação | @sec-m4-acessibilidade |\n| 7 | Exercícios | @sec-m4-exercicios |\n\n## Pacotes do módulo\n\n\n::: {.cell}\n\n```{.r .cell-code}\npacotes <- c(\"spdep\", \"gstat\", \"sp\", \"terra\", \"tidyterra\",\n             \"r5r\", \"accessibility\", \"aopdata\", \"gtfstools\", \"h3jsr\")\n\nfaltando <- setdiff(pacotes, rownames(installed.packages()))\nif (length(faltando) > 0) install.packages(faltando)\n\n# flownet ainda não está no CRAN\n# remotes::install_github(\"SebKrantz/flownet\")\n```\n:::\n\n\n## Sobre os blocos que este site não executa\n\nOs capítulos deste módulo são executados quando o site é construído, com uma exceção\ndeclarada: os blocos que dependem do **`r5r`** exigem o JDK 21 e uma pasta com o `.pbf` do\nOpenStreetMap e o GTFS da cidade: arquivos que não cabem no repositório. Esses blocos estão\nmarcados como não executados e trazem, no texto, o resultado esperado.\n\nPara rodá-los na sua máquina, monte a pasta uma vez:\n\n\n::: {.cell}\n\n```{.r .cell-code}\ndir.create(\"dados/brutos/fortaleza\", recursive = TRUE, showWarnings = FALSE)\n\n# 1. rede viária (OSM) do recorte da cidade\nosmextract::oe_download(\n  file_url = osmextract::oe_match(\"Ceará\")$url,\n  download_directory = \"dados/brutos/fortaleza\"\n)\n\n# 2. GTFS: baixe de https://dados.fortaleza.ce.gov.br (tag \"gtfs\")\n#    e salve o .zip na mesma pasta, sem descompactar\n```\n:::\n\n\nO resto do módulo (autocorrelação, interpolação, declividade e acessibilidade com `aopdata`)\nroda sem Java e sem *download* manual.\n",
+    "supporting": [],
+    "filters": [
+      "rmarkdown/pagebreak.lua"
+    ],
+    "includes": {
+      "include-in-header": [
+        "<link href=\"site_libs/pagedtable-1.1/css/pagedtable.css\" rel=\"stylesheet\" />\n<script src=\"site_libs/pagedtable-1.1/js/pagedtable.js\"></script>\n"
+      ]
+    },
+    "engineDependencies": {},
+    "preserve": {},
+    "postProcess": true
+  }
+}

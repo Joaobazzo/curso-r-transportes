@@ -2,7 +2,7 @@
 
 Este capítulo é o que torna o R particularmente produtivo para o trabalho do Ministério: em
 vez de navegar por portais, baixar ZIPs e abrir shapefiles um a um, as principais bases
-brasileiras vêm por função — versionadas, documentadas e com o código IBGE como chave.
+brasileiras vêm por função: versionadas, documentadas e com o código IBGE como chave.
 
 ```{r}
 library(sf)
@@ -10,7 +10,7 @@ library(dplyr)
 library(ggplot2)
 ```
 
-## `geobr` — malhas e geometrias oficiais do IBGE
+## `geobr`: malhas e geometrias oficiais do IBGE
 
 ```{r}
 #| eval: false
@@ -37,18 +37,18 @@ arquivo <- "dados/brutos/muni_br.gpkg"
 if (!file.exists(arquivo)) {
   br <- geobr::read_municipality(code_muni = "all", year = 2022,
                                  simplified = TRUE, showProgress = FALSE)
-  st_write(br, arquivo, quiet = TRUE)
+  sf::st_write(br, arquivo, quiet = TRUE)
 }
-br <- st_read(arquivo, quiet = TRUE)
+br <- sf::st_read(arquivo, quiet = TRUE)
 
 nrow(br)
-head(br, 3) |> st_drop_geometry()
+head(br, 3) |> sf::st_drop_geometry()
 ```
 
 Argumentos que importam:
 
 - `code_muni` / `code_state`: aceita código IBGE, sigla da UF (`"PR"`) ou `"all"`.
-- `year`: a malha muda a cada censo e a cada criação de município — **declare sempre**.
+- `year`: a malha muda a cada censo e a cada criação de município. **Declare sempre**.
 - `simplified = TRUE` (padrão): geometria leve, para mapas. Use `FALSE` para medir área.
 - `cache = TRUE` (padrão): o arquivo fica guardado localmente após o primeiro *download*.
 
@@ -57,11 +57,11 @@ Argumentos que importam:
 
 Para **mapas**, `simplified = TRUE` é o que você quer: renderiza rápido e a diferença é
 invisível na escala de impressão. Para **medir área, fazer interseção ou calcular população em
-faixa de influência**, use `simplified = FALSE` — a geometria simplificada corta esquinas e
+faixa de influência**, use `simplified = FALSE`. A geometria simplificada corta esquinas e
 introduz erro de alguns por cento, além de deixar vãos entre polígonos vizinhos.
 :::
 
-## `censobr` — microdados e agregados do Censo
+## `censobr`: microdados e agregados do Censo
 
 O `censobr` distribui o Censo em formato Parquet, com leitura preguiçosa: a função devolve um
 objeto `arrow` que só é materializado no `collect()`. Isso permite trabalhar com o Censo
@@ -74,9 +74,9 @@ setores <- censobr::read_tracts(year = 2022, dataset = "Basico",
                                 as_data_frame = FALSE, showProgress = FALSE)
 
 pop_setor <- setores |>
-  filter(abbrev_state == "PR") |>
-  select(code_tract, code_muni, name_muni, V0001) |>   # V0001 = população residente
-  collect()
+  dplyr::filter(abbrev_state == "PR") |>
+  dplyr::select(code_tract, code_muni, name_muni, V0001) |>   # V0001 = população residente
+  dplyr::collect()
 ```
 
 ```{r}
@@ -85,21 +85,21 @@ pop_setor <- setores |>
 censobr::read_population(year = 2010, columns = c("code_muni", "V0601", "V6036"))
 censobr::read_households(year = 2010, columns = c("code_muni", "V0201"))
 
-# dicionário das variáveis — indispensável, os nomes são códigos
+# dicionário das variáveis: indispensável, os nomes são códigos
 censobr::data_dictionary(year = 2022, dataset = "tracts")
 ```
 
 ::: {.callout-note}
 ## Sobre os anos disponíveis
 
-O `censobr` cobre 2000, 2010 e — nas versões mais recentes — o Censo 2022, cuja divulgação foi
+O `censobr` cobre 2000, 2010 e, nas versões mais recentes, o Censo 2022, cuja divulgação foi
 progressiva. Se `year = 2022` não estiver disponível na sua versão, troque por `2010`: o
 código é idêntico, apenas os nomes das variáveis mudam. Confira com
 `packageVersion("censobr")` e `censobr::data_dictionary()`.
 :::
 
 O casamento entre `censobr` (atributos) e `geobr` (geometria) se faz pelo código do setor ou
-do município — o `join` do módulo 1, agora com geometria de um lado:
+do município: o `join` do módulo 1, agora com geometria de um lado.
 
 ```{r}
 #| eval: false
@@ -107,10 +107,10 @@ setores_geo <- geobr::read_census_tract(code_tract = "PR", year = 2022,
                                         simplified = FALSE, showProgress = FALSE)
 
 setores_pop <- setores_geo |>
-  left_join(pop_setor, by = "code_tract", relationship = "one-to-one")
+  dplyr::left_join(pop_setor, by = "code_tract", relationship = "one-to-one")
 ```
 
-## `sidrar` — tabelas do SIDRA/IBGE
+## `sidrar`: tabelas do SIDRA/IBGE
 
 O SIDRA é onde estão as séries agregadas: população estimada, projeções, PIB municipal, PNAD,
 produção agrícola. O `sidrar` traz qualquer tabela pelo número.
@@ -134,14 +134,14 @@ sidrar::search_sidra("população")
 sidrar::info_sidra(4709)
 ```
 
-A saída vem "larga" e com nomes de coluna longos, em português — é um caso clássico para
+A saída vem "larga" e com nomes de coluna longos, em português. É um caso clássico para
 `janitor::clean_names()` e para o `pivot_longer` do módulo 1.
 
 ```{r}
 #| eval: false
 pop_limpa <- pop |>
   janitor::clean_names() |>
-  transmute(
+  dplyr::transmute(
     code_muni = as.numeric(municipio_codigo),
     municipio = municipio,
     populacao = valor
@@ -150,11 +150,11 @@ pop_limpa <- pop |>
 
 ::: {.callout-tip}
 O SIDRA limita o tamanho da consulta. Para séries longas em todos os municípios do Brasil,
-quebre por UF em um laço (`lapply` por código de UF) e empilhe com `bind_rows()` — o padrão do
+quebre por UF em um laço (`lapply` por código de UF) e empilhe com `bind_rows()`. É o padrão do
 módulo 1.
 :::
 
-## `osmdata` e `osmextract` — OpenStreetMap
+## `osmdata` e `osmextract`: OpenStreetMap
 
 Dois caminhos, para necessidades diferentes:
 
@@ -172,15 +172,22 @@ if (!file.exists(arquivo_br116)) {
     osmdata::osmdata_sf()
 
   br116 <- consulta$osm_lines |>
-    select(any_of(c("osm_id", "name", "ref", "highway", "lanes", "maxspeed"))) |>
-    st_transform(4674)
+    dplyr::select(dplyr::any_of(c("osm_id", "name", "ref", "highway", "lanes", "maxspeed"))) |>
+    sf::st_transform(4674)
 
-  st_write(br116, arquivo_br116, quiet = TRUE)
+  sf::st_write(br116, arquivo_br116, quiet = TRUE)
 }
 
-br116 <- st_read(arquivo_br116, quiet = TRUE)
+br116 <- sf::st_read(arquivo_br116, quiet = TRUE)
 nrow(br116)
-st_geometry_type(br116, by_geometry = FALSE) |> unique()
+sf::st_geometry_type(br116, by_geometry = FALSE) |> unique()
+```
+
+O OSM não recorta a geometria pelo `bbox` da consulta, então vale conferir visualmente se os
+trechos devolvidos realmente ficam na área de interesse:
+
+```{r}
+mapview::mapview(br116)
 ```
 
 ```{r}
@@ -188,7 +195,7 @@ st_geometry_type(br116, by_geometry = FALSE) |> unique()
 #| fig-cap: "Trechos da BR-116 no recorte da Serra do Mar, conforme o OpenStreetMap"
 #| fig-height: 4.4
 arquivo <- "dados/brutos/muni_pr_sc.gpkg"
-muni <- st_read(arquivo, quiet = TRUE)
+muni <- sf::st_read(arquivo, quiet = TRUE)
 
 ggplot() +
   geom_sf(data = muni, fill = "grey97", colour = "grey85", linewidth = 0.2) +
@@ -222,7 +229,7 @@ osmextract::oe_download(
    `surface`) são incompletos e variam por região. Para o traçado oficial das rodovias
    federais, a fonte é o **SNV do DNIT** (<http://servicos.dnit.gov.br/vgeo/>) ou a
    [Base Georreferenciada do MT](https://www.gov.br/transportes/pt-br/assuntos/transporte-terrestre/base-de-dados-georreferenciada).
-2. **Muda todo dia.** Registre a data da extração — `dados/brutos/br116_serra.gpkg` com a data
+2. **Muda todo dia.** Registre a data da extração: `dados/brutos/br116_serra.gpkg` com a data
    no nome é uma prática que salva a reprodutibilidade do relatório.
 :::
 
@@ -230,10 +237,10 @@ osmextract::oe_download(
 
 | Fonte | Como acessar | Uso |
 |:--|:--|:--|
-| SNV — rodovias federais | [VGeo/DNIT](http://servicos.dnit.gov.br/vgeo/), *download* manual | traçado oficial, trechos, jurisdição |
+| SNV: rodovias federais | [VGeo/DNIT](http://servicos.dnit.gov.br/vgeo/), *download* manual | traçado oficial, trechos, jurisdição |
 | Base georreferenciada do MT (BIT) | [portal do MT](https://www.gov.br/transportes/pt-br/assuntos/dados-de-transportes/bit) | rodovias, ferrovias, hidrovias, portos, aeroportos |
-| PNCT — contagem de tráfego | [Dados PNCT](http://servicos.dnit.gov.br/dadospnct) | VMDA por posto, na malha federal |
-| ANTAQ — Estatístico Aquaviário | [download](https://web3.antaq.gov.br/ea/sense/download.html) | cargas, atracações, instalações |
+| PNCT: contagem de tráfego | [Dados PNCT](http://servicos.dnit.gov.br/dadospnct) | VMDA por posto, na malha federal |
+| ANTAQ: Estatístico Aquaviário | [download](https://web3.antaq.gov.br/ea/sense/download.html) | cargas, atracações, instalações |
 | Acesso a Oportunidades (Ipea) | `aopdata` | acessibilidade e oportunidades em 20 cidades |
 | GTFS de transporte público | portais municipais, [Mobility Database](https://mobilitydatabase.org/feeds?q=brazil) | rede de transporte coletivo |
 | Geocodificação de endereços | `geocodebr` | endereço → coordenada (módulo 3) |

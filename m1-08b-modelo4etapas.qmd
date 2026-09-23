@@ -1,0 +1,324 @@
+# Estudo de caso: a saída de um modelo quatro etapas {#sec-m1-modelo4etapas}
+
+::: {.modulo-meta}
+**Dados:** `dados/processados/modelo4etapas/links_rmc_2018_completo.parquet`
+**Origem:** exportação PTV VISUM, hora pico manhã, Região Metropolitana de Curitiba (rede de
+2018, contagens de 2017)
+**Fio condutor:** este mesmo dado reaparece nos módulos 2 a 5
+:::
+
+Os capítulos anteriores trabalharam com uma base pública já tabulada. Este trabalha com o
+outro tipo de arquivo que chega à mesa de quem planeja transporte: a **exportação de um
+modelo de simulação**. O R aqui não é a ferramenta de modelagem, é a ferramenta de
+pós-processamento, que é como a maioria das equipes técnicas efetivamente usa a linguagem.
+
+A pergunta é a de uma nota técnica qualquer:
+
+> *Quanto a rede roda, quanto ela perde em congestionamento, e onde estão os gargalos?*
+
+Parece uma soma. Vamos ver que não é.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+ggplot2::theme_set(
+  ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(panel.grid.minor = ggplot2::element_blank(),
+                   plot.title = ggplot2::element_text(face = "bold"),
+                   legend.position = "bottom")
+)
+```
+
+## Passo 1: Ler o arquivo
+
+O recorte está em Parquet, formato colunar que ocupa uma fração do shapefile original e é
+lido em uma fração do tempo (SQL com DuckDB, no Módulo 3). Leitura direta pelo DuckDB, sem carregar nada
+que não seja necessário:
+
+```{r}
+con <- duckdb::dbConnect(duckdb::duckdb())
+
+links <- DBI::dbGetQuery(con, "
+  SELECT *
+  FROM 'dados/processados/modelo4etapas/links_rmc_2018_completo.parquet'
+")
+
+duckdb::dbDisconnect(con, shutdown = TRUE)
+
+dim(links)
+```
+
+```{r}
+links |>
+  dplyr::select(no, name, sentido, typeno, numlanes, capprt, v0prt, volvehprt, vc) |>
+  dplyr::slice_head(n = 5) |>
+  knitr::kable()
+```
+
+## Passo 2: Três perguntas antes de qualquer conta
+
+**1. Qual é a unidade de observação?** A tentação é dizer "um link". Está errado:
+
+```{r}
+c(
+  linhas        = nrow(links),
+  links_unicos  = dplyr::n_distinct(links$no),
+  link_sentido  = nrow(dplyr::distinct(links, no, sentido))
+)
+```
+
+Cada link físico aparece **duas vezes**, uma por sentido. A chave é `no` + `sentido`.
+Agrupar por `no` sem perceber isso mistura os dois sentidos de cada via.
+
+::: {.callout-warning}
+## A mesma rede, duas convenções
+
+A exportação original traz a mesma rede em **dois formatos diferentes**: um arquivo com uma
+linha por sentido (o que estamos usando) e outro com ida e volta na **mesma linha**, em
+colunas prefixadas por `R_`. É o caso clássico de formato longo contra formato largo
+(@sec-m1-manipulacao). Somar as duas exportações juntas conta tudo duas vezes.
+:::
+
+**2. O dado cobre o que se espera?**
+
+```{r}
+links |>
+  dplyr::summarise(
+    tipos_de_via   = dplyr::n_distinct(typeno),
+    extensao_km    = round(sum(comprimento_km, na.rm = TRUE)),
+    com_volume     = sum(volvehprt > 0, na.rm = TRUE),
+    com_contagem   = sum(tem_contagem, na.rm = TRUE),
+    postos         = dplyr::n_distinct(id_posto[tem_contagem])
+  ) |>
+  knitr::kable()
+```
+
+Vinte e cinco postos de contagem para uma rede de 28 mil quilômetros. É pouco, e é o que
+existe. Saber disso antes de prometer uma validação é parte do trabalho.
+
+**3. Há valores impossíveis ou sentinelas?**
+
+```{r}
+c(
+  sem_acesso      = sum(links$sem_acesso, na.rm = TRUE),
+  tsys_vazio      = sum(is.na(links$tsysset) | links$tsysset == ""),
+  capacidade_zero = sum(links$capprt == 0, na.rm = TRUE)
+)
+```
+
+Os 23.290 links marcados como `sem_acesso` traziam, no arquivo original, tempo de percurso
+igual a **360.000.000**. Não é um tempo: é o sentinela que o VISUM usa para dizer "este
+sistema de transporte não pode usar este link". Quem calcula um tempo médio sem tratar esse
+valor obtém um número sem sentido, e o R não reclama.
+
+## Passo 3: A armadilha das unidades
+
+Esta é a parte que justifica o capítulo. O VISUM exporta campos cujo **nome não corresponde
+à unidade gravada**. Veja o primeiro link do Contorno Leste:
+
+```{r}
+links |>
+  dplyr::filter(no == 2, sentido == "direto") |>
+  dplyr::transmute(
+    name,
+    volume          = volvehprt,
+    comprimento_km,
+    campo_VEHKMTRAVPRT = vehkmtravprt,
+    conferencia     = volvehprt * comprimento_km
+  ) |>
+  knitr::kable(digits = 3)
+```
+
+O campo se chama `VEHKMTRAVPRT`, "veículos-quilômetro percorridos". Deveria valer
+2.179 × 0,135 = **294**. Vale **294.290**. Está em **metros**, não em quilômetros.
+
+O mesmo vale para o tempo: `VEHHOURTRAVTCUR`, "veículos-hora", está em **segundos**. E
+`VOLCAPRATIOPRT` está em **percentual**, não em razão.
+
+O recorte já traz as colunas corrigidas (`veic_km`, `veic_h_livre`, `veic_h_carreg`, `vc`),
+mas o hábito que interessa é o da conferência: **recalcule o indicador por um caminho
+independente e veja se bate.**
+
+```{r}
+links |>
+  dplyr::summarise(
+    soma_do_campo = sum(veic_km, na.rm = TRUE),
+    recalculado   = sum(volvehprt * comprimento_km, na.rm = TRUE),
+    diferenca_pct = round(100 * (recalculado / soma_do_campo - 1), 3)
+  ) |>
+  knitr::kable(digits = 3, format.args = list(big.mark = "."))
+```
+
+::: {.callout-important}
+## O erro que não dá erro
+
+Se você somar `VEHKMTRAVPRT` acreditando no nome, obtém 3,7 **bilhões** de veículos-quilômetro
+numa região metropolitana de 3 milhões de habitantes. O código roda, o gráfico sai bonito, e
+o número está mil vezes errado. Nenhuma mensagem de aviso aparece. A única defesa é a
+conferência por um caminho independente.
+:::
+
+## Passo 4: Os totais da rede
+
+```{r}
+totais <- links |>
+  dplyr::summarise(
+    veic_km         = sum(veic_km, na.rm = TRUE),
+    veic_h_livre    = sum(veic_h_livre, na.rm = TRUE),
+    veic_h_carreg   = sum(veic_h_carreg, na.rm = TRUE),
+    atraso_veic_h   = sum(atraso_veic_h, na.rm = TRUE),
+    vel_media_kmh   = sum(veic_km, na.rm = TRUE) / sum(veic_h_carreg, na.rm = TRUE),
+    vel_livre_kmh   = sum(veic_km, na.rm = TRUE) / sum(veic_h_livre, na.rm = TRUE),
+    links_saturados = sum(vc >= 1, na.rm = TRUE)
+  )
+
+totais |>
+  dplyr::mutate(dplyr::across(dplyr::everything(), ~ round(.x, 1))) |>
+  knitr::kable(format.args = list(big.mark = "."))
+```
+
+Guarde estes números: **3.676.335 veículos-quilômetro** e **108.403 veículos-hora de atraso**
+na hora pico. Depois de qualquer filtro ou `join`, confira contra eles. É o mesmo princípio
+de @sec-m1-joins: o total conhecido é a sua âncora.
+
+## Passo 5: Onde está o atraso (e por que o total engana)
+
+Agora a pergunta que a nota técnica realmente faz. Vamos classificar as vias pela dezena do
+código de tipo do modelo:
+
+```{r}
+classes <- links |>
+  dplyr::mutate(
+    classe = dplyr::case_when(
+      typeno %/% 10 == 1            ~ "1. Rodovia e via expressa",
+      typeno %/% 10 %in% c(2, 3)    ~ "2. Arterial",
+      typeno %/% 10 == 4            ~ "3. Coletora",
+      typeno %/% 10 %in% c(5, 6)    ~ "4. Local",
+      typeno %/% 10 == 7            ~ "5. Acesso local e conector",
+      .default                      = "6. Sem carregamento"
+    )
+  ) |>
+  dplyr::summarise(
+    links       = dplyr::n(),
+    extensao_km = sum(comprimento_km, na.rm = TRUE),
+    veic_km     = sum(veic_km, na.rm = TRUE),
+    atraso_h    = sum(atraso_veic_h, na.rm = TRUE),
+    .by = classe
+  ) |>
+  dplyr::mutate(
+    pct_veic_km = 100 * veic_km / sum(veic_km),
+    pct_atraso  = 100 * atraso_h / sum(atraso_h)
+  ) |>
+  dplyr::arrange(classe)
+
+classes |>
+  knitr::kable(digits = 1, format.args = list(big.mark = "."))
+```
+
+O resultado é desconfortável e é o ponto do capítulo: a categoria **"acesso local e
+conector"** responde por cerca de 11% dos veículos-quilômetro e por **76% de todo o atraso da
+rede**. São links de acesso com relação volume/capacidade de 7, 8, 11 vezes.
+
+Isso não é congestionamento real. É **artefato de modelagem**: o conector é a costura por
+onde a demanda da zona entra na rede, e ele não representa uma via com capacidade física.
+
+```{r}
+links |>
+  dplyr::filter(!is.na(atraso_veic_h)) |>
+  dplyr::slice_max(atraso_veic_h, n = 8) |>
+  dplyr::transmute(no, name, typeno, volvehprt, vc = round(vc, 1),
+                   atraso_h = round(atraso_veic_h)) |>
+  knitr::kable()
+```
+
+Repare que os piores casos não têm nome de via. São exatamente os conectores.
+
+::: {.callout-important}
+## O indicador que você publica muda conforme o que você inclui
+
+Reportar "108 mil horas de atraso na hora pico" sem qualificar é reportar, em três quartos,
+um artefato do modelo. Restringindo à rede real (rodovias, arteriais e coletoras), o atraso
+cai para cerca de **15,6 mil veículos-hora**.
+
+As duas contas estão "certas" no sentido de que o código rodou. Só uma delas você consegue
+defender numa reunião.
+:::
+
+```{r}
+#| fig-height: 4
+#| fig-cap: "Participação de cada classe de via nos veículos-quilômetro e no atraso total."
+classes |>
+  tidyr::pivot_longer(c(pct_veic_km, pct_atraso),
+                      names_to = "indicador", values_to = "pct") |>
+  dplyr::mutate(indicador = dplyr::recode(indicador,
+                                          pct_veic_km = "Veículos-km",
+                                          pct_atraso  = "Atraso")) |>
+  ggplot2::ggplot(ggplot2::aes(x = pct, y = forcats::fct_rev(classe), fill = indicador)) +
+  ggplot2::geom_col(position = "dodge") +
+  ggplot2::scale_x_continuous(labels = scales::label_percent(scale = 1)) +
+  ggplot2::scale_fill_manual(values = c("Veículos-km" = "#1a5b8a", "Atraso" = "#c2542d")) +
+  ggplot2::labs(x = NULL, y = NULL, fill = NULL,
+                title = "Onde a rede roda e onde a rede perde tempo",
+                subtitle = "RMC, hora pico manhã, modelo de 2018")
+```
+
+## Passo 6: O recorte defensável
+
+```{r}
+rede_real <- links |> dplyr::filter(typeno < 50)
+
+rede_real |>
+  dplyr::summarise(
+    links         = dplyr::n(),
+    extensao_km   = round(sum(comprimento_km, na.rm = TRUE)),
+    veic_km       = round(sum(veic_km, na.rm = TRUE)),
+    atraso_veic_h = round(sum(atraso_veic_h, na.rm = TRUE)),
+    vel_media_kmh = round(sum(veic_km, na.rm = TRUE) / sum(veic_h_carreg, na.rm = TRUE), 1),
+    saturados     = sum(vc >= 1, na.rm = TRUE)
+  ) |>
+  knitr::kable(format.args = list(big.mark = "."))
+```
+
+Velocidade média de 45,8 km/h na rede estrutural, contra os 20,9 km/h do total. A diferença
+inteira vem de decidir, conscientemente, o que entra na conta. **Essa decisão é a análise.**
+
+## Checklist de conferência
+
+Este é o hábito que o curso quer instalar, e ele reaparece em todos os módulos:
+
+::: {.callout-tip}
+## Antes de publicar qualquer número saído de um modelo
+
+1. **Unidade de observação.** Quantas linhas por objeto físico? Contar `distinct` na chave
+   que você acredita ser única.
+2. **Unidades de medida.** Recalcular pelo menos um indicador por caminho independente e
+   comparar. Nunca confiar no nome do campo.
+3. **Sentinelas.** Procurar valores absurdos (`360000000`, `-1`, `9999`) antes de calcular
+   médias.
+4. **Totais-âncora.** Registrar os totais da base completa e conferir contra eles depois de
+   cada filtro e cada `join`.
+5. **O que entra na conta.** Separar rede real de artefato de modelagem, e declarar essa
+   escolha no relatório.
+:::
+
+## O que vem a seguir
+
+Este mesmo dado atravessa o resto do curso:
+
+| Módulo | O que faremos com ele |
+|:--|:--|
+| @sec-m2 | Ler a camada espacial, reprojetar, conferir o comprimento calculado contra o gravado, mapear carregamento e saturação |
+| Módulo 3 | Comparar o modelo com as 25 contagens de campo, tratar a rede como grafo |
+| Módulo 4 | Cruzar as paradas e os corredores de BRT com acessibilidade |
+| Módulo 5 | Gerar um relatório parametrizado, um por município da região |
+
+::: {.callout-note}
+## Sobre a origem dos dados
+
+O recorte usado aqui foi processado a partir de uma exportação do PTV VISUM cedida para fins
+didáticos. O script que gera o recorte a partir dos arquivos originais está em
+`scripts/00-gera-recorte-modelo4etapas.R`, e o dicionário de campos em
+`dados/processados/modelo4etapas/`. Ver [Dados de exemplo](a-dados.qmd).
+:::

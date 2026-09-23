@@ -13,19 +13,19 @@ library(stringr)
 
 ### Leitura
 
-As funções do `lubridate` têm o nome da ordem dos componentes: `dmy()` para dia-mês-ano,
-`ymd()` para ano-mês-dia, e assim por diante. Elas toleram separadores diferentes.
+As funções do `lubridate` têm o nome da ordem dos componentes: `lubridate::dmy()` para
+dia-mês-ano, `lubridate::ymd()` para ano-mês-dia, e assim por diante. Elas toleram separadores diferentes.
 
 ```{r}
-dmy("28/09/2026")
-ymd("2026-09-28")
-dmy(c("28/09/2026", "05-10-2026", "3 nov 2026"))
-ymd_hms("2026-09-28 14:00:00")
+lubridate::dmy("28/09/2026")
+lubridate::ymd("2026-09-28")
+lubridate::dmy(c("28/09/2026", "05-10-2026", "3 nov 2026"))
+lubridate::ymd_hms("2026-09-28 14:00:00")
 ```
 
 ```{r}
 #| error: true
-dmy("2026-09-28")   # ordem errada: retorna NA com aviso
+lubridate::dmy("2026-09-28")   # ordem errada: retorna NA com aviso
 ```
 
 Esse é o erro mais frequente: ler uma coluna de datas com a ordem trocada e receber `NA` em
@@ -33,7 +33,7 @@ parte das linhas. Verifique sempre:
 
 ```{r}
 datas_texto <- c("28/09/2026", "30/09/2026", "31/02/2026", "")
-datas <- dmy(datas_texto)
+datas <- lubridate::dmy(datas_texto)
 datas
 sum(is.na(datas))    # quantas falharam?
 datas_texto[is.na(datas)]  # quais?
@@ -42,59 +42,59 @@ datas_texto[is.na(datas)]  # quais?
 ### Componentes e aritmética
 
 ```{r}
-d <- ymd("2026-09-28")
+d <- lubridate::ymd("2026-09-28")
 
-year(d); month(d); day(d)
-wday(d, label = TRUE, abbr = FALSE)   # depende do locale do sistema
-quarter(d)
-yday(d)          # dia do ano
+lubridate::year(d); lubridate::month(d); lubridate::day(d)
+lubridate::wday(d, label = TRUE, abbr = FALSE)   # depende do locale do sistema
+lubridate::quarter(d)
+lubridate::yday(d)          # dia do ano
 
-d + days(15)
+d + lubridate::days(15)
 d + months(1)
-d - years(1)
-floor_date(d, "month")   # primeiro dia do mês
-ceiling_date(d, "month") - days(1)  # último dia do mês
+d - lubridate::years(1)
+lubridate::floor_date(d, "month")   # primeiro dia do mês
+lubridate::ceiling_date(d, "month") - lubridate::days(1)  # último dia do mês
 ```
 
 ### Intervalos e durações
 
 ```{r}
-inicio <- ymd("2026-09-28")
-fim    <- ymd("2026-11-05")
+inicio <- lubridate::ymd("2026-09-28")
+fim    <- lubridate::ymd("2026-11-05")
 
 fim - inicio                                  # difftime, em dias
 as.numeric(fim - inicio, units = "days")
-interval(inicio, fim) / months(1)             # em meses
-time_length(interval(inicio, fim), "weeks")   # em semanas
+lubridate::interval(inicio, fim) / months(1)             # em meses
+lubridate::time_length(lubridate::interval(inicio, fim), "weeks")   # em semanas
 ```
 
-Aplicação típica — duração de viagem a partir de dois carimbos de tempo:
+Aplicação típica: duração de viagem a partir de dois carimbos de tempo.
 
 ```{r}
 viagens <- data.frame(
   navio   = c("Navio A", "Navio B", "Navio C"),
-  partida = ymd_hms(c("2026-03-01 08:30:00", "2026-03-02 22:10:00", "2026-03-04 06:00:00")),
-  chegada = ymd_hms(c("2026-03-04 17:45:00", "2026-03-07 09:05:00", "2026-03-05 23:30:00"))
+  partida = lubridate::ymd_hms(c("2026-03-01 08:30:00", "2026-03-02 22:10:00", "2026-03-04 06:00:00")),
+  chegada = lubridate::ymd_hms(c("2026-03-04 17:45:00", "2026-03-07 09:05:00", "2026-03-05 23:30:00"))
 )
 
 viagens$horas <- as.numeric(difftime(viagens$chegada, viagens$partida, units = "hours"))
-viagens$dia_semana <- wday(viagens$partida, label = TRUE, abbr = TRUE)
+viagens$dia_semana <- lubridate::wday(viagens$partida, label = TRUE, abbr = TRUE)
 viagens
 ```
 
 ### Agregação por período
 
 ```{r}
-viagens$mes <- floor_date(viagens$partida, "month")
+viagens$mes <- lubridate::floor_date(viagens$partida, "month")
 aggregate(horas ~ mes, data = viagens, FUN = mean)
 ```
 
 ::: {.callout-tip}
 ## Fuso horário
 
-`ymd_hms()` assume UTC por padrão. Para dados de GPS ou GTFS brasileiros, informe o fuso:
-`ymd_hms(x, tz = "America/Sao_Paulo")`. Ignorar isso produz erros de três horas em cálculos
-de tempo de viagem — um problema recorrente ao comparar dados de fontes diferentes.
+`lubridate::ymd_hms()` assume UTC por padrão. Para dados de GPS ou GTFS brasileiros, informe
+o fuso: `lubridate::ymd_hms(x, tz = "America/Sao_Paulo")`. Ignorar isso produz erros de três horas em cálculos
+de tempo de viagem. É um problema recorrente ao comparar dados de fontes diferentes.
 :::
 
 ## Textos com `stringr`
@@ -105,12 +105,12 @@ vetorizadas.
 ```{r}
 cidades <- c("  Paranaguá ", "SÃO GONÇALO DO AMARANTE", "Rio Grande", "itajaí")
 
-str_trim(cidades)                    # remove espaços nas pontas
-str_squish("Porto   de    Santos")   # remove espaços duplicados também
-str_to_upper(cidades)
-str_to_lower(cidades)
-str_to_title(str_to_lower(cidades))
-str_length(cidades)
+stringr::str_trim(cidades)                    # remove espaços nas pontas
+stringr::str_squish("Porto   de    Santos")   # remove espaços duplicados também
+stringr::str_to_upper(cidades)
+stringr::str_to_lower(cidades)
+stringr::str_to_title(stringr::str_to_lower(cidades))
+stringr::str_length(cidades)
 ```
 
 ### Buscar, detectar, substituir
@@ -119,12 +119,12 @@ str_length(cidades)
 instalacoes <- c("Terminal Portuário do Pecém", "Porto de Santos",
                  "IP4 Itacoatiara", "Terminais Fluviais do Brasil")
 
-str_detect(instalacoes, "Terminal")          # TRUE/FALSE
-str_subset(instalacoes, "Port")              # retorna os que casam
-str_which(instalacoes, "Port")               # posições
-str_replace(instalacoes, "Terminal", "Term.")    # primeira ocorrência
-str_replace_all(instalacoes, " ", "_")           # todas
-str_remove_all(instalacoes, "^IP\\d+ ")          # prefixo tipo "IP4 "
+stringr::str_detect(instalacoes, "Terminal")          # TRUE/FALSE
+stringr::str_subset(instalacoes, "Port")              # retorna os que casam
+stringr::str_which(instalacoes, "Port")               # posições
+stringr::str_replace(instalacoes, "Terminal", "Term.")    # primeira ocorrência
+stringr::str_replace_all(instalacoes, " ", "_")           # todas
+stringr::str_remove_all(instalacoes, "^IP\\d+ ")          # prefixo tipo "IP4 "
 ```
 
 ### Extrair e dividir
@@ -132,10 +132,10 @@ str_remove_all(instalacoes, "^IP\\d+ ")          # prefixo tipo "IP4 "
 ```{r}
 sh2 <- c("CT-Contêineres", "27-Combustíveis", "10-Cereais")
 
-str_sub(sh2, 1, 2)                       # posição fixa
-str_split(sh2, "-", simplify = TRUE)     # divide em matriz
-str_extract(sh2, "^[A-Z0-9]+")           # antes do hífen
-str_extract(sh2, "(?<=-).*$")            # depois do hífen
+stringr::str_sub(sh2, 1, 2)                       # posição fixa
+stringr::str_split(sh2, "-", simplify = TRUE)     # divide em matriz
+stringr::str_extract(sh2, "^[A-Z0-9]+")           # antes do hífen
+stringr::str_extract(sh2, "(?<=-).*$")            # depois do hífen
 ```
 
 Um caso muito comum: separar município e UF de um campo único.
@@ -144,8 +144,8 @@ Um caso muito comum: separar município e UF de um campo único.
 locais <- c("Paranaguá/PR", "Santos/SP", "São Luís/MA")
 
 data.frame(
-  municipio = str_extract(locais, "^[^/]+"),
-  uf        = str_extract(locais, "[A-Z]{2}$")
+  municipio = stringr::str_extract(locais, "^[^/]+"),
+  uf        = stringr::str_extract(locais, "[A-Z]{2}$")
 )
 ```
 
@@ -167,9 +167,9 @@ Em R, a barra invertida precisa ser duplicada dentro de uma string: `"\\d"` é o
 ```{r}
 rodovias <- c("BR-116/PR", "BR 277", "PR-508", "br-153 km 45")
 
-str_extract(rodovias, "\\d{3}")
-str_detect(str_to_upper(rodovias), "^BR")
-str_extract(rodovias, "(?i)km\\s*\\d+")
+stringr::str_extract(rodovias, "\\d{3}")
+stringr::str_detect(stringr::str_to_upper(rodovias), "^BR")
+stringr::str_extract(rodovias, "(?i)km\\s*\\d+")
 ```
 
 ### Padronização para cruzar bases
@@ -180,10 +180,10 @@ municípios vêm com acentuação, caixa e espaços diferentes em cada base.
 ```{r}
 padronizar <- function(x) {
   x |>
-    str_squish() |>
-    str_to_lower() |>
+    stringr::str_squish() |>
+    stringr::str_to_lower() |>
     stringi::stri_trans_general("Latin-ASCII") |>  # remove acentos
-    str_remove_all("[^a-z ]")                      # remove pontuação
+    stringr::str_remove_all("[^a-z ]")                      # remove pontuação
 }
 
 base_a <- c("São Gonçalo do Amarante", "Paranaguá", " Rio  Grande ")
@@ -208,15 +208,15 @@ leitura humana. Trataremos disso em @sec-m1-joins.
 ```{r}
 uf <- "PR"; tku <- 8.33
 
-str_c("Ligação com destino ", uf, ": ", tku, " bi TKU")
-str_glue("Ligação com destino {uf}: {tku} bi TKU")
+stringr::str_c("Ligação com destino ", uf, ": ", tku, " bi TKU")
+stringr::str_glue("Ligação com destino {uf}: {tku} bi TKU")
 sprintf("Ligação com destino %s: %.2f bi TKU", uf, tku)
-str_pad(c("1", "23", "456"), width = 3, pad = "0")   # códigos com zero à esquerda
+stringr::str_pad(c("1", "23", "456"), width = 3, pad = "0")   # códigos com zero à esquerda
 ```
 
 ::: {.callout-note}
 Usamos `stringi::stri_trans_general()` em vez de `iconv(to = "ASCII//TRANSLIT")` porque o
-resultado do `iconv` varia entre Windows, macOS e Linux — no Windows ele às vezes devolve
+resultado do `iconv` varia entre Windows, macOS e Linux. No Windows, ele às vezes devolve
 `?` no lugar da letra acentuada. O `stringi` já vem instalado junto com o `stringr`.
 :::
 

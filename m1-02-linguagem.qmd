@@ -14,7 +14,7 @@ class(uf)
 ```
 
 Tudo em R é um objeto, e todo objeto tem uma **classe**. Quando algo dá errado, a primeira
-pergunta é sempre `class()` — na maior parte dos casos o problema é que um número está
+pergunta é sempre `class()`. Na maior parte dos casos, o problema é que um número está
 guardado como texto.
 
 ## Vetores
@@ -88,7 +88,7 @@ as.integer(perfil)      # o código interno de cada nível
 
 ## Matrizes
 
-Matriz é um vetor com duas dimensões — a estrutura natural de uma **matriz origem–destino**.
+Matriz é um vetor com duas dimensões. É a estrutura natural de uma **matriz origem–destino**.
 
 ```{r}
 od <- matrix(
@@ -108,7 +108,7 @@ t(od)                   # transposta
 ```
 
 No módulo 3 trocaremos `matrix` por matrizes **esparsas** (`Matrix::sparseMatrix`), que
-guardam apenas os pares com fluxo — essencial quando há milhares de zonas.
+guardam apenas os pares com fluxo. Isso é essencial quando há milhares de zonas.
 
 ## Listas
 
@@ -131,22 +131,33 @@ str(cenario, max.level = 1)
 ## `data.frame`
 
 É a tabela: uma lista de colunas de mesmo comprimento. Praticamente todo o curso gira em
-torno dela.
+torno dela. Daqui em diante, os exemplos usam um recorte real da base de cabotagem da ANTAQ
+que reaparece no resto do módulo, em vez de números inventados.
 
 ```{r}
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx")
+
 fluxos <- data.frame(
-  origem  = c("AM", "AM", "PR", "SP"),
-  destino = c("PR", "SP", "SP", "BA"),
-  tku     = c(4213386.6, 8332538649.4, 1560549752.2, 1600854068.7),
-  stringsAsFactors = FALSE
+  origem  = bruto[["UF de Origem"]],
+  destino = bruto[["UF de Destino"]],
+  tku     = bruto[["TKU\n(t x km)"]]
 )
+
+# um recorte real: uma linha de cada uma destas UFs de origem, mais um
+# frete pequeno, para as três faixas de TKU aparecerem no exemplo
+alvo <- c("AM", "PR", "SP", "BA", "SC", "RS")
+pequeno <- which(fluxos$tku >= 5e5 & fluxos$tku < 1e6)[1]
+
+fluxos <- fluxos[c(match(alvo, fluxos$origem), pequeno), ]
+rownames(fluxos) <- NULL
+
 fluxos
 dim(fluxos)
 names(fluxos)
 str(fluxos)
 ```
 
-Inspeção rápida de qualquer tabela — os quatro comandos que você roda **sempre** ao abrir um
+Inspeção rápida de qualquer tabela: os quatro comandos que você roda **sempre** ao abrir um
 dado novo:
 
 ```{r}
@@ -197,8 +208,8 @@ classificar <- function(tku) {
     "baixo"
   }
 }
-classificar(8332538649)
-classificar(1250)
+classificar(fluxos$tku[3])   # SP -> AM, o maior frete do recorte
+classificar(fluxos$tku[7])   # o frete pequeno que separamos
 ```
 
 `if` funciona com **um** valor. Para vetores, use `ifelse()` ou `dplyr::case_when()`:
@@ -215,7 +226,7 @@ dplyr::case_when(
 
 ## Funções
 
-Escrever funções é o que evita copiar e colar o mesmo trecho cinco vezes — e é onde os erros
+Escrever funções é o que evita copiar e colar o mesmo trecho cinco vezes. E é onde os erros
 se concentram quando não se faz isso.
 
 ```{r}
@@ -310,7 +321,7 @@ library(dplyr)
 library(readxl)
 
 # 2. leitura ----
-bruto <- read_excel("dados/cabotagem_tku_2025.xlsx")
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx")
 
 # 3. padronização ----
 base <- bruto |>

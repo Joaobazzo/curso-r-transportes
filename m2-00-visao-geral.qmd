@@ -1,9 +1,11 @@
 # Visão geral do módulo {#sec-m2}
 
+![Fluxo de atividades de caminhada em vista 3D: cada linha é um dado espacial vetorial, o objeto que este módulo ensina a manipular. Fonte: Strava (2026).](img/bsb_3d.png)
+
 ::: {.modulo-meta}
-**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
-**Datas (Opção A):** aulas em 05/10 e 07/10; material assíncrono liberado em 08/10
-**Pacotes:** `sf`, `terra`, `tidyterra`, `geobr`, `censobr`, `sidrar`, `osmdata`, `elevatr`, `leaflet`, `ggspatial`
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
+**Datas:** a definir\
+**Pacotes:** `sf`, `terra`, `tidyterra`, `geobr`, `censobr`, `sidrar`, `osmdata`, `elevatr`, `leaflet`, `mapview`, `ggspatial`\
 **Estudo de caso:** faixa de influência populacional da BR-116 na Serra do Mar (PR/SC)
 :::
 
@@ -13,8 +15,8 @@
   `.shp`, `.gpkg`, `.geojson`, `.csv` com coordenadas e GeoTIFF.
 - Reconhecer e trocar sistemas de coordenadas sem corromper a geometria, e saber **quando**
   reprojetar é obrigatório.
-- Fazer as operações que hoje você faz por menu no QGIS/ArcGIS — *buffer*, interseção,
-  recorte, junção espacial, cálculo de área e distância — em código reexecutável.
+- Fazer as operações que hoje você faz por menu no QGIS/ArcGIS (*buffer*, interseção,
+  recorte, junção espacial, cálculo de área e distância) em código reexecutável.
 - Ler e processar rasters (altimetria, uso do solo) e extrair valores por geometria.
 - Baixar bases públicas brasileiras direto do R: malhas do IBGE, Censo, SIDRA e
   OpenStreetMap.
@@ -29,7 +31,7 @@
 | 1 | O objeto `sf`: estrutura, leitura, escrita, tipos de geometria | @sec-m2-sf |
 | 2 | Sistemas de coordenadas e projeções: SIRGAS 2000, UTM, quando reprojetar | @sec-m2-crs |
 | 3 | Rasters com `terra`: leitura, recorte, álgebra, extração por geometria | @sec-m2-raster |
-| 4 | Geovisualização: `geom_sf`, `leaflet`, mapas de conferência | @sec-m2-mapas |
+| 4 | Geovisualização: `geom_sf`, `leaflet`, `mapview`, mapas de conferência | @sec-m2-mapas |
 
 ### Conteúdo assíncrono (3h)
 
@@ -45,7 +47,7 @@
 ```{r}
 #| eval: false
 pacotes <- c("sf", "terra", "tidyterra", "geobr", "censobr", "sidrar",
-             "osmdata", "osmextract", "elevatr", "leaflet", "ggspatial", "units")
+             "osmdata", "osmextract", "elevatr", "leaflet", "mapview", "ggspatial", "units")
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))
 if (length(faltando) > 0) install.packages(faltando)
@@ -60,7 +62,7 @@ depois com:
 
 ```{r}
 #| eval: false
-library(sf);    sf_extSoftVersion()
+library(sf);    sf::sf_extSoftVersion()
 library(terra); terra::gdal()
 ```
 :::
@@ -68,7 +70,7 @@ library(terra); terra::gdal()
 ## Sobre os *downloads* deste módulo
 
 Os blocos deste módulo baixam dados públicos na primeira execução e **guardam em disco**, em
-`dados/brutos/`. Nas execuções seguintes, leem do cache — o render fica rápido e funciona sem
+`dados/brutos/`. Nas execuções seguintes, leem do cache. O render fica rápido e funciona sem
 internet. O padrão usado em todo o material é este:
 
 ```{r}

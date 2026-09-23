@@ -1,8 +1,9 @@
 # Dados de exemplo {.unnumbered}
 
-Todos os dados usados no curso são **públicos**. Os arquivos pequenos ficam no próprio
+Quase todos os dados usados no curso são **públicos**. Os arquivos pequenos ficam no próprio
 repositório, na pasta `dados/`; os grandes são baixados por script, para não inflar o
-repositório.
+repositório. A única exceção é a exportação do modelo quatro etapas, descrita mais abaixo,
+cedida para fins didáticos.
 
 ## No repositório
 
@@ -39,6 +40,76 @@ Após a padronização de nomes adotada no curso (@sec-m1-manipulacao):
 - As ligações com origem na ZEE/Plataforma Continental respondem por cerca de 38% do TKU
   total e não devem ser descartadas como "UF inválida".
 
+## Modelo quatro etapas da RMC (exportação PTV VISUM)
+
+Recorte didático da saída de alocação de um modelo quatro etapas da Região Metropolitana de
+Curitiba, hora pico manhã (rede de 2018, contagens de 2017, 18 municípios, 967 zonas de
+tráfego). É o **fio condutor do curso**: aparece no @sec-m1-modelo4etapas e volta nos
+módulos 2 a 5.
+
+| Arquivo | Conteúdo |
+|:--|:--|
+| `dados/processados/modelo4etapas/links_rmc_2018_completo.parquet` | 208.336 links direcionais, sem geometria. É o arquivo para os **totais da rede**. |
+| `dados/processados/modelo4etapas/links_rmc_2018_estrutural.parquet` | 33.198 links da rede estrutural (rodovias, arteriais e coletoras) mais todos os links com contagem. |
+| `dados/processados/modelo4etapas/rede_rmc_2018.gpkg` | Camadas `links` (rede estrutural), `nos` (19.610, com paradas e BRT) e `zonas_centroide` (967). |
+| `dados/processados/modelo4etapas/dicionario_campos_visum.csv` | De-para entre o nome truncado do shapefile e o nome original do VISUM, extraído do arquivo `.CTF`. |
+| `dados/processados/modelo4etapas/README.md` | Unidades, totais de referência e armadilhas documentadas. |
+
+### Correções já aplicadas no recorte
+
+O VISUM exporta campos cujo nome **não corresponde à unidade gravada**:
+
+| Campo original | Unidade real | Coluna corrigida |
+|:--|:--|:--|
+| `VEHKMTRAVPRT` | metros | `veic_km` |
+| `VEHHOURTRAVT0` | segundos | `veic_h_livre` |
+| `VEHHOURTRAVTCUR` | segundos | `veic_h_carreg` |
+| `VOLCAPRATIOPRT` | percentual | `vc` |
+| `T0_PRTSYS = 360000000` | sentinela de "sem acesso" | `NA`, sinalizado em `sem_acesso` |
+
+As colunas originais foram mantidas no Parquet, de propósito, para o exercício de conferência
+do @sec-m1-modelo4etapas.
+
+### Totais de referência
+
+Confira qualquer agregação contra estes números (rede completa, hora pico manhã):
+
+| Indicador | Valor |
+|:--|:--|
+| Veículos-quilômetro | 3.676.335 |
+| Veículos-hora em fluxo livre | 67.755 |
+| Veículos-hora carregado | 176.158 |
+| Atraso | 108.403 veículos-hora |
+| Velocidade média | 20,9 km/h (54,3 km/h em fluxo livre) |
+| Links com V/C ≥ 1 | 3.436 |
+| Links com contagem | 63, em 25 postos do tipo *screenline* |
+
+### Armadilhas mantidas de propósito
+
+1. **Duas linhas por link**, uma por sentido (`isforward`, `sentido`). A exportação original
+   traz a mesma rede na convenção oposta, com ida e volta na mesma linha e colunas
+   prefixadas por `R_`.
+2. **Nome de município corrompido** nas zonas: o DBF de origem não declara página de código.
+   A coluna `code_muni` está vazia **de propósito**. Preenchê-la via `geobr` é o exercício
+   de de-para do módulo 2.
+3. **CRS geográfico** (WGS 84, em graus) com comprimento gravado em metros. Calcular o
+   comprimento pela geometria exige reprojetar para SIRGAS 2000 / UTM 22S (EPSG:31982).
+4. **Falta a legenda** dos códigos de `tsysset` e de `typeno`. Não veio na exportação.
+
+### O que não está no recorte
+
+Matrizes OD (demanda e tempo), polígonos das zonas e os insumos das três primeiras etapas do
+modelo. O recorte cobre apenas o resultado da alocação.
+
+::: {.callout-warning}
+## Origem e redistribuição
+
+Esta base **não é pública**. Foi cedida para fins didáticos e o recorte publicado aqui é
+derivado. Para uso em documento oficial, trabalhe sobre a exportação corrente do órgão
+responsável. O script que gera o recorte a partir dos arquivos originais está em
+`scripts/00-gera-recorte-modelo4etapas.R`.
+:::
+
 ## Baixados pelo próprio código
 
 Os capítulos baixam estes dados na primeira execução e guardam em `dados/brutos/`, que não vai
@@ -47,19 +118,72 @@ para o repositório. Nas execuções seguintes, leem do cache.
 | Arquivo gerado | Origem | Capítulo |
 |:--|:--|:--|
 | `muni_pr_sc.gpkg`, `muni_br.gpkg`, `uf_br.gpkg`, `pr.gpkg` | `geobr` (malhas do IBGE) | módulos 2, 3 e 5 |
-| `grade_pr.gpkg` | `geobr::read_statistical_grid()` — população por célula | @sec-m2-estudo-de-caso, @sec-m4-autocorrelacao |
+| `grade_pr.gpkg` | `geobr::read_statistical_grid()`: população por célula | @sec-m2-estudo-de-caso, Módulo 4 |
 | `br116_serra.gpkg`, `pontes_br116.gpkg`, `portos_osm.gpkg` | OpenStreetMap via `osmdata` | módulos 2, 3 e 4 |
-| `dem_serra.tif` | altimetria via `elevatr` (AWS Terrain Tiles) | @sec-m2-raster, @sec-m4-declividade |
-| `aop_fortaleza.rds` | `aopdata` — acessibilidade em Fortaleza, 2019 | @sec-m4-acessibilidade |
-| `od_sintetica.csv/.parquet` | gerado localmente (2 milhões de linhas) | @sec-m3-duckdb |
+| `dem_serra.tif` | altimetria via `elevatr` (AWS Terrain Tiles) | @sec-m2-raster, Módulo 4 |
+| `aop_fortaleza.rds` | `aopdata`: acessibilidade em Fortaleza, 2019 | Módulo 4 |
+| `od_sintetica.csv/.parquet` | gerado localmente (2 milhões de linhas) | Módulo 3 |
+
+## Comex Stat (MDIC)
+
+Baixado por `scripts/01-baixa-comexstat.R`, com cache em `dados/brutos/comexstat/`. Usado no
+Módulo 3.
+
+**Os arquivos ficam em dois lugares diferentes**, o que é a primeira pegadinha:
+
+| Conteúdo | Endereço |
+|:--|:--|
+| Bases anuais | `https://balanca.economia.gov.br/balanca/bd/comexstat-bd/ncm/EXP_2024.csv` e `.../mun/EXP_2024_MUN.csv` |
+| Tabelas de correspondência | `https://balanca.economia.gov.br/balanca/bd/tabelas/` (**não** sob `comexstat-bd/`): `NCM.csv`, `UF.csv`, `UF_MUN.csv`, `PAIS.csv`, `VIA.csv`, `URF.csv` |
+
+Quando o caminho está errado, o servidor devolve uma página de erro em PHP em vez de um 404,
+e `download.file()` não reclama. O script confere o primeiro byte do arquivo.
+
+### As duas bases não têm a mesma granularidade
+
+| | `ncm/EXP_ANO.csv` | `mun/EXP_ANO_MUN.csv` |
+|:--|:--|:--|
+| Produto | NCM (8 dígitos) | SH4 (4 dígitos) |
+| Território | UF | município |
+| Via de transporte | `CO_VIA` | não tem |
+| URF de embarque | `CO_URF` | não tem |
+| Quantidade estatística | `QT_ESTAT` | não tem |
+
+Ou seja, **município e modo de transporte não coexistem**. Análise de origem de carga por
+modo só por UF, declarando a hipótese.
+
+### Três armadilhas
+
+**1. Todo campo `CO_`, `SG_` ou `SH` é código, não número.** `CO_MES = "02"`,
+`CO_VIA = "04"`, `CO_URF = "0817600"`, `SH4 = "0901"` (café). Deixar o R inferir apaga o zero
+e quebra o `join` em silêncio para todo o capítulo 01 a 09 do Sistema Harmonizado, que é onde
+está o agronegócio.
+
+**2. `CO_MUN_GEO` não é o código do IBGE.** Os cinco últimos dígitos coincidem; o prefixo de
+UF diverge em quatro unidades da federação:
+
+| UF | Comex | IBGE |
+|:--|:--|:--|
+| São Paulo | 34 | 35 |
+| Mato Grosso do Sul | 52 | 50 |
+| Goiás | 53 | 52 |
+| Distrito Federal | 54 | 53 |
+
+Mais `93` (EX, não atribuído a município) e `99` (ND, não declarado), que não são território.
+Como as outras 23 UFs coincidem, o `join` direto casa a maior parte das linhas e some com o
+maior estado exportador do país. A função `co_mun_comex_para_ibge()` está no script.
+
+**3. O município é o do domicílio fiscal da empresa exportadora**, não o da produção. Uma
+trading sediada em São Paulo que exporta soja do Mato Grosso aparece como São Paulo. Isso
+invalida o dado municipal como proxy de origem de carga.
 
 ## Preparo manual (apenas o `r5r`)
 
-Os blocos do `r5r` no @sec-m4-r5r não são executados na construção do site. Para rodá-los:
+Os blocos do `r5r` no Módulo 4 não são executados na construção do site. Para rodá-los:
 
 1. **JDK 21** instalado (`java -version` responde 21).
 2. Pasta `dados/brutos/fortaleza/` com:
-   - o `.pbf` do OpenStreetMap — `osmextract::oe_download(osmextract::oe_match("Ceará")$url, download_directory = "dados/brutos/fortaleza")`;
+   - o `.pbf` do OpenStreetMap, via `osmextract::oe_download(osmextract::oe_match("Ceará")$url, download_directory = "dados/brutos/fortaleza")`;
    - o **GTFS de Fortaleza** em `.zip`, sem descompactar, de
      <https://dados.fortaleza.ce.gov.br/dataset/?tags=gtfs>.
 
@@ -77,11 +201,11 @@ Os blocos do `r5r` no @sec-m4-r5r não são executados na construção do site. 
 
 ## Fontes oficiais
 
-- **ANTAQ — Estatístico Aquaviário**: <https://web3.antaq.gov.br/ea/sense/index.html>
+- **ANTAQ, Estatístico Aquaviário**: <https://web3.antaq.gov.br/ea/sense/index.html>
 - **Comex Stat / MDIC**: <https://comexstat.mdic.gov.br/>
-- **IBGE — SIDRA**: <https://sidra.ibge.gov.br/>
-- **IBGE — malhas territoriais**: <https://www.ibge.gov.br/geociencias/downloads-geociencias.html>
-- **DNIT — bases georreferenciadas**: <https://www.gov.br/dnit/pt-br>
+- **IBGE, SIDRA**: <https://sidra.ibge.gov.br/>
+- **IBGE, malhas territoriais**: <https://www.ibge.gov.br/geociencias/downloads-geociencias.html>
+- **DNIT, bases georreferenciadas**: <https://www.gov.br/dnit/pt-br>
 - **OpenStreetMap**: <https://www.openstreetmap.org/>
 
 ::: {.callout-note}

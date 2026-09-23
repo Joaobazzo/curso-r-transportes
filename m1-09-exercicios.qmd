@@ -16,14 +16,14 @@ colunas <- c("ano", "perfil", "sh2",
              "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
              "tku")
 
-cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
 names(cabotagem) <- colunas
 
 cabotagem <- cabotagem |>
-  mutate(across(where(is.character), str_squish)) |>
-  filter(tku > 0) |>
-  mutate(uf_origem  = str_to_upper(uf_origem),
-         uf_destino = str_to_upper(uf_destino),
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(uf_origem  = stringr::str_to_upper(uf_origem),
+         uf_destino = stringr::str_to_upper(uf_destino),
          tku_bi     = tku / 1e9)
 
 nrow(cabotagem)
@@ -40,7 +40,7 @@ Qual é a mercadoria (`sh2`) com o maior número de registros?
 ```{r}
 table(sapply(cabotagem, class))
 
-cabotagem |> count(sh2, sort = TRUE) |> slice_head(n = 3)
+cabotagem |> dplyr::count(sh2, sort = TRUE) |> dplyr::slice_head(n = 3)
 ```
 :::
 
@@ -56,8 +56,8 @@ TKU total dessas ligações?
 nordeste <- c("AL","BA","CE","MA","PB","PE","PI","RN","SE")
 
 cabotagem |>
-  filter(uf_destino %in% nordeste, perfil == "Carga Conteinerizada") |>
-  summarise(ligacoes = n(), tku_bi = round(sum(tku_bi), 2))
+  dplyr::filter(uf_destino %in% nordeste, perfil == "Carga Conteinerizada") |>
+  dplyr::summarise(ligacoes = dplyr::n(), tku_bi = round(sum(tku_bi), 2))
 ```
 :::
 
@@ -72,14 +72,14 @@ capítulos com maior TKU, com a descrição legível.
 
 ```{r}
 cabotagem |>
-  mutate(
-    capitulo_sh = str_extract(sh2, "^[^-]+"),
-    descricao   = str_remove(sh2, "^[^-]+-") |> str_squish()
+  dplyr::mutate(
+    capitulo_sh = stringr::str_extract(sh2, "^[^-]+"),
+    descricao   = stringr::str_remove(sh2, "^[^-]+-") |> stringr::str_squish()
   ) |>
-  summarise(tku_bi = sum(tku_bi), .by = c(capitulo_sh, descricao)) |>
-  arrange(desc(tku_bi)) |>
-  slice_head(n = 5) |>
-  mutate(descricao = str_trunc(descricao, 45), tku_bi = round(tku_bi, 1))
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(capitulo_sh, descricao)) |>
+  dplyr::arrange(dplyr::desc(tku_bi)) |>
+  dplyr::slice_head(n = 5) |>
+  dplyr::mutate(descricao = stringr::str_trunc(descricao, 45), tku_bi = round(tku_bi, 1))
 ```
 :::
 
@@ -100,13 +100,13 @@ segundos_encontros <- as.Date(c("2026-09-30", "2026-10-07", "2026-10-14",
 ```{r}
 library(lubridate)
 
-liberacao <- segundos_encontros + days(1)
+liberacao <- segundos_encontros + lubridate::days(1)
 
 data.frame(
   modulo = 1:5,
   encontro = format(segundos_encontros, "%d/%m/%Y"),
   liberacao = format(liberacao, "%d/%m/%Y"),
-  dia_semana = wday(liberacao, label = TRUE, abbr = TRUE)
+  dia_semana = lubridate::wday(liberacao, label = TRUE, abbr = TRUE)
 )
 
 as.numeric(max(liberacao) - min(liberacao))
@@ -123,13 +123,13 @@ perfil ela representa?
 
 ```{r}
 cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
-  mutate(part = tku_bi / sum(tku_bi), .by = perfil) |>
-  slice_max(tku_bi, n = 1, by = perfil) |>
-  transmute(perfil, uf_destino,
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  dplyr::mutate(part = tku_bi / sum(tku_bi), .by = perfil) |>
+  dplyr::slice_max(tku_bi, n = 1, by = perfil) |>
+  dplyr::transmute(perfil, uf_destino,
             tku_bi = round(tku_bi, 1),
-            part = percent(part, accuracy = 0.1)) |>
-  arrange(desc(tku_bi))
+            part = scales::percent(part, accuracy = 0.1)) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
 ```
 :::
 
@@ -143,11 +143,11 @@ TKU em bilhões, com uma coluna final de total, ordenada pelo total. Zeros onde 
 
 ```{r}
 cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = c(uf_destino, perfil)) |>
-  pivot_wider(names_from = perfil, values_from = tku_bi, values_fill = 0) |>
-  mutate(total = rowSums(across(where(is.numeric)))) |>
-  arrange(desc(total)) |>
-  mutate(across(where(is.numeric), \(x) round(x, 1))) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(uf_destino, perfil)) |>
+  tidyr::pivot_wider(names_from = perfil, values_from = tku_bi, values_fill = 0) |>
+  dplyr::mutate(total = rowSums(dplyr::across(dplyr::where(is.numeric)))) |>
+  dplyr::arrange(dplyr::desc(total)) |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) round(x, 1))) |>
   knitr::kable()
 ```
 :::
@@ -159,7 +159,7 @@ atraído por município de destino e responda: quais municípios da base de cabo
 estão na tabela de população? Qual é o TKU por habitante dos que casaram?
 
 ```{r}
-populacao <- tibble(
+populacao <- data.frame(
   municipio = c("Santos", "Paranaguá", "Itajaí", "São Luís", "Manaus",
                 "Rio de Janeiro", "Salvador", "Suape", "Angra dos Reis"),
   pop = c(418375, 156174, 223112, 1037775, 2063547, 6211223, 2417678, NA, 182000)
@@ -171,32 +171,32 @@ populacao <- tibble(
 
 ```{r}
 por_municipio <- cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = c(cidade_destino, uf_destino)) |>
-  arrange(desc(tku_bi))
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(cidade_destino, uf_destino)) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
 
 # diagnóstico: o que não casa (top 10 por TKU)
 por_municipio |>
-  anti_join(populacao, by = c("cidade_destino" = "municipio")) |>
-  slice_head(n = 10)
+  dplyr::anti_join(populacao, by = c("cidade_destino" = "municipio")) |>
+  dplyr::slice_head(n = 10)
 
 # o cruzamento, com o cuidado de não perder linhas
 resultado <- por_municipio |>
-  left_join(populacao, by = c("cidade_destino" = "municipio"),
+  dplyr::left_join(populacao, by = c("cidade_destino" = "municipio"),
             relationship = "many-to-one") |>
-  filter(!is.na(pop)) |>
-  mutate(tku_por_hab = tku_bi * 1e9 / pop) |>
-  arrange(desc(tku_por_hab))
+  dplyr::filter(!is.na(pop)) |>
+  dplyr::mutate(tku_por_hab = tku_bi * 1e9 / pop) |>
+  dplyr::arrange(dplyr::desc(tku_por_hab))
 
 resultado |>
-  transmute(cidade_destino, uf_destino,
+  dplyr::transmute(cidade_destino, uf_destino,
             tku_bi = round(tku_bi, 1),
             pop,
-            `t·km por habitante` = comma(round(tku_por_hab)))
+            `t·km por habitante` = scales::comma(round(tku_por_hab)))
 ```
 
 Note que a maior parte dos municípios de destino **não** está na tabela de população: em um
 trabalho real, essa tabela viria do `censobr`/`sidrar` com o código IBGE como chave, e não de
-uma lista digitada — que é exatamente o assunto dos módulos 2 e 3.
+uma lista digitada. É exatamente o assunto dos módulos 2 e 3.
 :::
 
 ## 8. Gráfico completo
@@ -213,15 +213,15 @@ e fonte.
 #| fig-cap: "Doze maiores instalações de destino em TKU de cabotagem"
 #| fig-height: 5.5
 cabotagem |>
-  summarise(tku_bi = sum(tku_bi), .by = c(instalacao_destino, uf_destino)) |>
-  slice_max(tku_bi, n = 12) |>
-  mutate(rotulo = str_c(str_trunc(instalacao_destino, 28), " (", uf_destino, ")")) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(instalacao_destino, uf_destino)) |>
+  dplyr::slice_max(tku_bi, n = 12) |>
+  dplyr::mutate(rotulo = stringr::str_c(stringr::str_trunc(instalacao_destino, 28), " (", uf_destino, ")")) |>
   ggplot(aes(x = tku_bi, y = reorder(rotulo, tku_bi))) +
   geom_col(fill = "#1a5b8a") +
-  geom_text(aes(label = number(tku_bi, accuracy = 0.1, decimal.mark = ",")),
+  geom_text(aes(label = scales::number(tku_bi, accuracy = 0.1, decimal.mark = ",")),
             hjust = -0.15, size = 3) +
   scale_x_continuous(
-    labels = label_number(decimal.mark = ",", big.mark = "."),
+    labels = scales::label_number(decimal.mark = ",", big.mark = "."),
     expand = expansion(mult = c(0, 0.15))
   ) +
   labs(
@@ -247,24 +247,24 @@ coluna, ordenados. Teste com `perfil`, `uf_destino` e `sh2`.
 ```{r}
 resumir_por <- function(dados, coluna) {
   dados |>
-    summarise(
-      ligacoes = n(),
+    dplyr::summarise(
+      ligacoes = dplyr::n(),
       tku_bi   = sum(tku_bi),
       .by = {{ coluna }}
     ) |>
-    mutate(part = tku_bi / sum(tku_bi)) |>
-    arrange(desc(tku_bi)) |>
-    mutate(tku_bi = round(tku_bi, 2),
-           part   = percent(part, accuracy = 0.1))
+    dplyr::mutate(part = tku_bi / sum(tku_bi)) |>
+    dplyr::arrange(dplyr::desc(tku_bi)) |>
+    dplyr::mutate(tku_bi = round(tku_bi, 2),
+           part   = scales::percent(part, accuracy = 0.1))
 }
 
 resumir_por(cabotagem, perfil)
-resumir_por(cabotagem, uf_destino) |> slice_head(n = 5)
+resumir_por(cabotagem, uf_destino) |> dplyr::slice_head(n = 5)
 ```
 
 O `{{ coluna }}` (chamado *embrace*) é o mecanismo do `dplyr` para escrever funções que
 recebem nomes de colunas sem aspas. É o que permite transformar uma análise em ferramenta
-reutilizável — e será usado no módulo 5 para gerar um relatório por município a partir de um
+reutilizável. Será usado no módulo 5 para gerar um relatório por município a partir de um
 único modelo.
 :::
 

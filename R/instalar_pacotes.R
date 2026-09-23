@@ -25,7 +25,7 @@ pacotes_modulo1 <- c(
 pacotes_opcionais <- c("data.table", "duckplyr", "duckdb", "arrow", "skimr")
 
 pacotes_espaciais <- c(
-  "sf", "terra", "tidyterra", "leaflet", "mapgl", "duckspatial",
+  "sf", "terra", "tidyterra", "leaflet", "mapview", "mapgl", "duckspatial",
   "geobr", "censobr", "sidrar", "geocodebr",
   "osmdata", "osmextract", "elevatr", "ggspatial", "units", "RColorBrewer"
 )
