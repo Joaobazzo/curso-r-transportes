@@ -1,3 +1,5 @@
+![Fluxo de atividades de caminhada em vista 3D: cada linha é um dado espacial vetorial, o objeto que este curso ensina a manipular. Fonte: Strava (2026).](img/bsb_3d.png)
+
 # Apresentação {.unnumbered}
 
 Este é o material do **Curso em linguagem de programação para análise de dados através do
