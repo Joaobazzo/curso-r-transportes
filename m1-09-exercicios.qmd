@@ -267,15 +267,3 @@ recebem nomes de colunas sem aspas. É o que permite transformar uma análise em
 reutilizável. Será usado no módulo 5 para gerar um relatório por município a partir de um
 único modelo.
 :::
-
-## 10. Para entregar
-
-Escolha **uma** das perguntas abaixo, responda com um script comentado de até 40 linhas e
-traga o resultado (tabela ou gráfico) para o encontro seguinte:
-
-1. Quais UFs são simultaneamente grandes emissoras e grandes atratoras de TKU? O que isso
-   sugere sobre o papel dos seus portos?
-2. A distribuição do TKU por ligação é diferente entre perfis de carga? Mostre com um gráfico
-   e uma medida de concentração.
-3. Considerando apenas as ligações offshore, quais terminais em terra recebem o petróleo das
-   plataformas, e como esse TKU se distribui entre UFs?

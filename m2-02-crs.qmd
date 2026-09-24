@@ -7,6 +7,9 @@ se sobrepõem", "a área saiu errada" ou "o *buffer* ficou oval" é problema de 
 library(sf)
 library(dplyr)
 library(ggplot2)
+
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
 ```
 
 ## Os dois tipos de sistema

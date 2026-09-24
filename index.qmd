@@ -53,7 +53,13 @@ para até 30 participantes, em formato on-line.
 
 ## Cronograma
 
-A definir.
+| Módulo | Aula síncrona I | Aula síncrona II | Conteúdo assíncrono |
+|:-------|:----------------|:-----------------|:--------------------|
+| 1. Fundamentos de R e manipulação de dados | 28/09 (seg), 14h–15h30 | 01/10 (qui), 14h–15h30 | 02/10 (sex), a partir das 14h |
+| 2. Objetos espaciais: vetores e rasters | 05/10 (seg), 14h–15h30 | 06/10 (ter), 14h–15h30 | 07/10 (qua), a partir das 14h |
+| 3. Integração de bases, roteamento e matrizes OD | 13/10 (ter), 14h–15h30 | 14/10 (qua), 9h30–11h | 16/10 (sex), a partir das 14h |
+| 4. Geoestatística, sensoriamento remoto e acessibilidade | 19/10 (seg), 14h–15h30 | 21/10 (qua), 9h30–11h | 22/10 (qui), a partir das 14h |
+| 5. Mapas temáticos avançados, relatórios reproduzíveis e projeto final | 26/10 (seg), 14h–15h30 | 27/10 (ter), 14h–15h30 | 23/10 (sex), a partir das 14h |
 
 ## Como acompanhar
 

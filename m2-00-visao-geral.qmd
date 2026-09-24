@@ -2,7 +2,7 @@
 
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
-**Datas:** a definir\
+**Datas:** 05/10 e 06/10 (síncronas); 07/10 (assíncrono)\
 **Pacotes:** `sf`, `terra`, `tidyterra`, `geobr`, `censobr`, `sidrar`, `osmdata`, `elevatr`, `leaflet`, `mapview`, `ggspatial`\
 **Estudo de caso:** faixa de influência populacional da BR-116 na Serra do Mar (PR/SC)
 :::

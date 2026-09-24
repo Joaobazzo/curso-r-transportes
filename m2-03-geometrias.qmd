@@ -9,6 +9,9 @@ library(sf)
 library(dplyr)
 library(ggplot2)
 
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
+
 crs_trabalho <- 31982   # SIRGAS 2000 / UTM 22S (PR/SC)
 ```
 

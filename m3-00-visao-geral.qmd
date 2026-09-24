@@ -1,8 +1,10 @@
 # Visão geral do módulo {#sec-m3}
 
+![Crescimento urbano de São Paulo (setembro de 2013). Fonte: [NASA Earth Observatory](https://science.nasa.gov/earth/earth-observatory/growth-of-sao-paulo-brazil-83987/).](img/saopaulo_oli_2013244_swir_lrg.jpg)
+
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
-**Datas:** a definir\
+**Datas:** 13/10 e 14/10 (síncronas); 16/10 (assíncrono)\
 **Pacotes:** `osmdata`, `osmextract`, `duckdb`, `duckplyr`, `geocodebr`, `dodgr`, `r5r`, `Matrix`, `sf`\
 **Estudo de caso:** matriz OD e fluxos espaciais da cabotagem, com cálculo de TKU\
 **Também:** Comex Stat (MDIC), bases por NCM e municipal

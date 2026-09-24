@@ -2,7 +2,7 @@
 
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
-**Datas:** a definir\
+**Datas:** 28/09 e 01/10 (síncronas); 02/10 (assíncrono)\
 **Dados utilizados:** cabotagem ANTAQ (TKU 2025), Comex Stat e exportação do modelo quatro etapas da RMC (PTV VISUM)
 :::
 

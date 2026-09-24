@@ -196,13 +196,3 @@ Os valores são ilustrativos: o exercício é sobre a **estrutura** do cálculo 
 as premissas de forma que outra pessoa possa contestá-las. É o que distingue uma análise
 de uma opinião.
 :::
-
-## 7. Para entregar
-
-Escolha um recorte da sua área de trabalho e produza uma matriz OD com mapa de fluxos:
-
-1. defina as zonas (UF, município ou instalação) e justifique a escolha;
-2. monte a matriz, no formato longo e como `sparseMatrix`;
-3. desenhe as linhas de desejo, com escala de espessura adequada;
-4. calcule TKU, tonelagem e distância média;
-5. escreva um parágrafo sobre o que o mapa mostra e **duas** limitações do que foi feito.

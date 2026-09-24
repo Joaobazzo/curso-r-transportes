@@ -21,3 +21,6 @@ Thumbs.db
 
 # saidas do Quarto na raiz
 /*.html
+
+# scripts de teste gerados por R/gerar_r_teste.R
+/R_teste/

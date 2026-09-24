@@ -8,6 +8,9 @@ library(terra)
 library(sf)
 library(dplyr)
 library(ggplot2)
+
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
 ```
 
 ## Obter um modelo digital de elevação

@@ -18,22 +18,35 @@ Dois pacotes, com perfis distintos:
 library(sf)
 library(dplyr)
 library(ggplot2)
+
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
 ```
 
 ## `dodgr`: roteamento sobre a malha viária
 
 ```{r}
-#| eval: false
 library(dodgr)
 
-# 1. a malha: OSM filtrado para vias trafegáveis por automóvel
-rede <- osmextract::oe_get(
-  place = "Paraná", layer = "lines",
-  query = "SELECT osm_id, highway, name, maxspeed, oneway FROM lines
-           WHERE highway IN ('motorway','motorway_link','trunk','trunk_link',
-                             'primary','primary_link','secondary','tertiary')",
-  download_directory = "dados/brutos/osm"
-)
+# 1. a malha: vias principais do corredor Curitiba–Paranaguá, a mesma do @sec-m3-osm
+#    (para um estado inteiro, troque por osmextract::oe_get(), como lá)
+arquivo_rede <- "dados/brutos/rede_curitiba_paranagua.gpkg"
+
+if (!file.exists(arquivo_rede)) {
+  res <- osmdata::opq(bbox = c(-49.35, -25.62, -48.45, -25.35), timeout = 180) |>
+    osmdata::add_osm_feature(key = "highway", value = c(
+      "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
+      "secondary", "secondary_link", "tertiary")) |>
+    osmdata::osmdata_sf()
+
+  res$osm_lines |>
+    dplyr::select(dplyr::any_of(c("osm_id", "name", "ref", "highway", "maxspeed",
+                                  "oneway", "lanes"))) |>
+    sf::st_write(arquivo_rede, quiet = TRUE)
+}
+
+rede <- sf::st_read(arquivo_rede, quiet = TRUE) |>
+  dplyr::rename(geometry = geom)
 
 # 2. construir o grafo com um perfil de peso
 grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
@@ -41,8 +54,8 @@ grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "high
 # 3. componente conectado principal (descarta trechos isolados)
 grafo <- grafo[grafo$component == 1, ]
 
-# 4. matriz de distâncias entre pontos
-origens  <- cbind(c(-49.2733, -48.5119), c(-25.4284, -25.5016))   # lon, lat
+# 4. matriz de distâncias entre pontos: centro de Curitiba e Porto de Paranaguá
+origens  <- cbind(x = c(-49.2733, -48.5119), y = c(-25.4284, -25.5016))   # lon, lat
 destinos <- origens
 
 dodgr::dodgr_dists(grafo, from = origens, to = destinos)      # metros
@@ -50,7 +63,6 @@ dodgr::dodgr_times(grafo, from = origens, to = destinos)      # segundos
 ```
 
 ```{r}
-#| eval: false
 # o caminho em si, como geometria, para desenhar no mapa
 caminho <- dodgr::dodgr_paths(grafo, from = origens[1, , drop = FALSE],
                        to = origens[2, , drop = FALSE])
@@ -60,6 +72,17 @@ rota <- verts[match(caminho[[1]][[1]], verts$id), c("x", "y")] |>
   as.matrix() |>
   sf::st_linestring() |>
   sf::st_sfc(crs = 4326)
+```
+
+A conferência visual, como sempre: a rota deve seguir a BR-277 descendo a serra.
+
+```{r}
+extremos <- data.frame(nome = c("Curitiba", "Paranaguá"),
+                       lon = origens[, 1], lat = origens[, 2]) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+mapview::mapview(rota, color = "#b3402a", lwd = 5, layer.name = "Rota") +
+  mapview::mapview(extremos, col.regions = "#1a5b8a", layer.name = "Origem e destino")
 ```
 
 Pontos de atenção do `dodgr`:

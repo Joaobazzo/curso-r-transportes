@@ -7,6 +7,9 @@ insumo de qualquer roteamento. Há dois caminhos de acesso, para necessidades di
 library(sf)
 library(dplyr)
 library(ggplot2)
+
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
 ```
 
 | Pacote | Como funciona | Quando usar |
@@ -27,20 +30,29 @@ arquivo <- "dados/brutos/portos_osm.gpkg"
 
 if (!file.exists(arquivo)) {
   res <- osmdata::opq(bbox = c(-48.75, -25.65, -48.35, -25.35), timeout = 120) |>
-    osmdata::add_osm_feature(key = "landuse", value = "port") |>
+    osmdata::add_osm_feature(key = "seamark:type", value = "harbour") |>
     osmdata::osmdata_sf()
 
-  poligonos <- res$osm_polygons
-  if (!is.null(poligonos) && nrow(poligonos) > 0) {
-    st_write(poligonos |> select(any_of(c("osm_id", "name"))), arquivo, quiet = TRUE)
-  }
+  res$osm_points |>
+    filter(!is.na(`seamark:type`)) |>     # descarta os nós que só desenham outras feições
+    select(any_of(c("osm_id", "name", "seamark:harbour:category"))) |>
+    st_write(arquivo, quiet = TRUE)
 }
 
-if (file.exists(arquivo)) {
-  portos_osm <- st_read(arquivo, quiet = TRUE)
-  nrow(portos_osm)
-}
+portos_osm <- st_read(arquivo, quiet = TRUE)
+nrow(portos_osm)
 ```
+
+A consulta pede os pontos marcados como porto na carta náutica (`seamark:type = harbour`) na
+baía de Paranaguá. Uma conferência rápida no mapa:
+
+```{r}
+mapview::mapview(portos_osm, col.regions = "#1a5b8a", layer.name = "Portos e marinas (OSM)")
+```
+
+Repare no que veio: terminais, iates clubes e marinas misturados. No OSM, "porto" é o que o
+mapeador decidiu chamar de porto. Para a lista oficial de instalações portuárias, a fonte é a
+ANTAQ.
 
 O objeto devolvido por `osmdata_sf()` tem vários componentes, porque uma mesma consulta pode
 retornar tipos diferentes de geometria:
@@ -114,6 +126,23 @@ Esse resultado costuma surpreender: a maioria das pontes **não tem** a restriç
 mapeada. É a ilustração concreta do limite do OSM — a geometria é boa, o atributo é parcial.
 Para restrições oficiais, a fonte é o DNIT.
 
+Uma olhada rápida no mapa confirma as duas coisas. Primeiro, onde estão as pontes, coloridas
+pelo tipo de via:
+
+```{r}
+mapview::mapview(pontes, zcol = "highway", lwd = 3, layer.name = "Tipo de via")
+```
+
+Depois, só as que têm restrição de peso mapeada. Estão todas na Estrada da Graciosa: sinal de
+que alguém mapeou aquela via com cuidado, e não de que as demais pontes não têm limite.
+
+```{r}
+pontes_com_peso <- pontes |> filter(!is.na(maxweight))
+
+mapview::mapview(pontes_com_peso, zcol = "maxweight", lwd = 4,
+                 layer.name = "Peso máximo (t)")
+```
+
 ## `osmextract`: a malha viária inteira
 
 ```{r}
@@ -161,10 +190,32 @@ resolve; para roteamento de carga interestadual, o estado. O `.pbf` do Brasil in
 
 ## Preparar a malha para roteamento
 
-Uma malha viária baixada crua ainda não é uma rede navegável. Três cuidados:
+Uma malha viária baixada crua ainda não é uma rede navegável. Para acompanhar os passos sem
+baixar o extrato de um estado inteiro, vamos usar uma rede pequena: as vias principais do
+corredor Curitiba–Paranaguá, via `osmdata`. As colunas são as mesmas do `oe_get()` acima.
 
 ```{r}
-#| eval: false
+arquivo_rede <- "dados/brutos/rede_curitiba_paranagua.gpkg"
+
+if (!file.exists(arquivo_rede)) {
+  res <- osmdata::opq(bbox = c(-49.35, -25.62, -48.45, -25.35), timeout = 180) |>
+    osmdata::add_osm_feature(key = "highway", value = c(
+      "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
+      "secondary", "secondary_link", "tertiary")) |>
+    osmdata::osmdata_sf()
+
+  res$osm_lines |>
+    select(any_of(c("osm_id", "name", "ref", "highway", "maxspeed", "oneway", "lanes"))) |>
+    st_write(arquivo_rede, quiet = TRUE)
+}
+
+rede <- st_read(arquivo_rede, quiet = TRUE) |>
+  rename(geometry = geom)     # o GeoPackage chama a geometria de "geom"
+```
+
+Três cuidados:
+
+```{r}
 rede_limpa <- rede |>
   filter(!is.na(highway)) |>
   filter(!highway %in% c("footway", "path", "cycleway", "steps", "pedestrian")) |>
@@ -186,6 +237,28 @@ rede_limpa <- rede |>
 Os três pontos: (1) remover o que não é trafegável pelo modo de interesse; (2) preencher a
 velocidade quando o atributo falta — e documentar a regra usada; (3) calcular o custo que o
 roteamento vai minimizar (tempo, distância, ou custo generalizado).
+
+Confira a tabela: as primeiras linhas mostram se a velocidade foi preenchida e se o tempo de
+cada trecho faz sentido.
+
+```{r}
+rede_limpa |>
+  st_drop_geometry() |>
+  select(name, highway, maxspeed, velocidade, comprimento_m, tempo_min) |>
+  head(10)
+```
+
+E confira o mapa: a cor mostra a velocidade atribuída a cada trecho, mapeada ou preenchida
+pela regra. São cerca de 12 mil trechos, pesados demais para um mapa interativo; para
+conferir, basta a malha principal (no seu computador, o `leafgl` do @sec-m2-sf dá conta da
+rede inteira).
+
+```{r}
+rede_principal <- rede_limpa |>
+  filter(highway %in% c("motorway", "trunk", "primary"))
+
+mapview::mapview(rede_principal, zcol = "velocidade", layer.name = "Velocidade (km/h)")
+```
 
 ::: {.callout-note}
 ## Rede geométrica × rede topológica

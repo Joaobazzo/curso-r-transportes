@@ -8,6 +8,9 @@ trabalho não está na geocodificação em si, mas na **padronização do endere
 library(dplyr)
 library(stringr)
 library(sf)
+
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
 ```
 
 ## O pacote `geocodebr`
@@ -18,7 +21,6 @@ comerciais: é gratuito e roda localmente, sem enviar endereços para fora. Isso
 quando os dados são administrativos e não podem sair da rede do órgão.
 
 ```{r}
-#| eval: false
 enderecos <- data.frame(
   id         = 1:3,
   logradouro = c("Rua Direita", "Avenida Paulista", "Rua XV de Novembro"),
@@ -30,36 +32,46 @@ enderecos <- data.frame(
 )
 
 campos <- geocodebr::definir_campos(
-  logradouro     = "logradouro",
-  numero         = "numero",
-  cep            = "cep",
-  bairro         = "bairro",
-  localidade     = "municipio",
-  estado         = "estado"
+  estado     = "estado",
+  municipio  = "municipio",
+  logradouro = "logradouro",
+  numero     = "numero",
+  cep        = "cep",
+  localidade = "bairro"       # no geocodebr, "localidade" é o bairro
 )
 
 resultado <- geocodebr::geocode(
-  enderecos      = enderecos,
+  enderecos       = enderecos,
   campos_endereco = campos,
-  resultado_completo = TRUE,
-  verboso        = FALSE
+  verboso         = FALSE
 )
+
+resultado |>
+  dplyr::select(id, logradouro, numero, municipio, lat, lon, precisao, desvio_metros) |>
+  knitr::kable()
 ```
+
+Na primeira execução, o `geocodebr` baixa o CNEFE (cerca de 1,5 GB) para uma pasta de cache
+local (`geocodebr::listar_pasta_cache()`). Das próximas vezes, a geocodificação leva segundos.
 
 A saída traz as coordenadas e, sobretudo, o **tipo de correspondência**: a informação mais
 importante do processo.
 
-| Precisão | O que significa | Uso recomendado |
+| `precisao` | O que significa | Uso recomendado |
 |:--|:--|:--|
-| número exato | o endereço existe no cadastro | qualquer análise |
-| interpolação no logradouro | posição estimada entre dois números conhecidos | análise por quadra ou setor |
-| centroide do CEP | acertou o CEP, não o número | análise por bairro |
-| centroide do bairro / município | só o município é confiável | apenas agregações municipais |
+| `numero` | o endereço existe no cadastro | qualquer análise |
+| `numero_aproximado` | posição estimada entre dois números conhecidos | análise por quadra ou setor |
+| `logradouro` | acertou a rua, não o número | análise por bairro |
+| `cep` | acertou o CEP, não a rua | análise por bairro |
+| `localidade` / `municipio` | só o bairro ou o município é confiável | apenas agregações |
 
 ```{r}
-#| eval: false
-resultado |> dplyr::count(tipo_resultado, sort = TRUE)
+resultado |> dplyr::count(precisao, sort = TRUE)
 ```
+
+A coluna `desvio_metros` estima o erro da coordenada. Repare no primeiro endereço: a "Rua
+Direita" não foi encontrada no CEP informado, e o ponto caiu no centroide do CEP, com um
+desvio de algumas centenas de metros.
 
 ::: {.callout-important}
 ## Nunca use a coordenada sem olhar a precisão
@@ -133,7 +145,6 @@ ponto_km <- function(linha, km) {
 Três checagens obrigatórias antes de usar coordenadas geocodificadas:
 
 ```{r}
-#| eval: false
 pontos <- resultado |>
   dplyr::filter(!is.na(lon), !is.na(lat)) |>
   sf::st_as_sf(coords = c("lon", "lat"), crs = 4674)
@@ -143,7 +154,13 @@ c(total = nrow(resultado), geocodificados = nrow(pontos),
   taxa = round(nrow(pontos) / nrow(resultado), 3))
 
 # 2. caíram no município declarado?
-muni <- geobr::read_municipality(code_muni = "all", year = 2022, simplified = TRUE)
+arquivo <- "dados/brutos/muni_br.gpkg"
+if (!file.exists(arquivo)) {
+  br <- geobr::read_municipality(code_muni = "all", year = 2022,
+                                 simplified = TRUE, showProgress = FALSE)
+  sf::st_write(br, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE)
 
 conferencia <- pontos |>
   sf::st_join(muni |> dplyr::select(code_muni, name_muni)) |>
@@ -152,7 +169,7 @@ conferencia <- pontos |>
 dplyr::count(sf::st_drop_geometry(conferencia), bate)
 
 # 3. inspeção visual: o passo que as pessoas pulam e não deveriam
-mapview::mapview(pontos)
+mapview::mapview(pontos, zcol = "precisao", layer.name = "Precisão")
 ```
 
 A checagem 2 é a mais valiosa: um endereço que "geocodificou com sucesso" mas caiu em outro
@@ -161,17 +178,18 @@ imediatamente nessa contagem.
 
 ## Geocodificação reversa
 
-O caminho inverso, coordenada para endereço, também está no `geocodebr`.
+O caminho inverso, coordenada para endereço, também está no `geocodebr`. A entrada é um
+objeto `sf` de pontos:
 
 ```{r}
-#| eval: false
 coords <- data.frame(id = 1:2,
                      lon = c(-49.2733, -46.6333),
-                     lat = c(-25.4284, -23.5505))
+                     lat = c(-25.4284, -23.5505)) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4674)
 
-geocodebr::geocode_reverso(coords, campos_endereco = geocodebr::definir_campos(
-  lon = "lon", lat = "lat"
-))
+geocodebr::geocode_reverso(coords, verboso = FALSE) |>
+  sf::st_drop_geometry() |>
+  knitr::kable()
 ```
 
 Na prática, o uso mais comum da geocodificação reversa em transportes não é obter o endereço,

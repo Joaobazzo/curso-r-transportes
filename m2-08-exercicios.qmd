@@ -5,6 +5,9 @@ library(sf)
 library(dplyr)
 library(ggplot2)
 
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
+
 crs_trabalho <- 31982
 
 arquivo <- "dados/brutos/muni_pr_sc.gpkg"
@@ -183,14 +186,3 @@ mapview::mapview(faixa5, map.types = "Esri.WorldImagery") +
   mapview::mapview(br116)
 ```
 :::
-
-## 7. Para entregar
-
-Escolha um trecho de rodovia federal da sua área de trabalho e produza:
-
-1. um mapa da faixa de influência de 5 km, com escala, norte e fonte;
-2. uma tabela de população por município na faixa;
-3. três linhas de texto interpretando o resultado: quais municípios concentram a população
-   afetada e o que isso sugere para a priorização de intervenções.
-
-Entregue como script `.R` comentado ou, se quiser adiantar o módulo 5, como documento Quarto.

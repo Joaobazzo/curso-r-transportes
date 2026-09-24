@@ -43,6 +43,9 @@ library(sf)
 library(dplyr)
 library(ggplot2)
 
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
+
 crs_trabalho <- 31982    # SIRGAS 2000 / UTM 22S, em metros, para medir e fazer buffer
 ```
 
@@ -165,6 +168,24 @@ grade_recorte <- grade_recorte |> dplyr::mutate(pop = as.numeric(.data[[pop_col]
 
 c(celulas = nrow(grade_recorte), populacao_total = sum(grade_recorte$pop, na.rm = TRUE))
 ```
+
+São milhares de células, pesadas demais para o `mapview` desenhar de uma vez. Para ver como a
+grade é de fato, basta uma parcela: as células num raio de 3 km de um ponto do eixo, na saída
+de Curitiba.
+
+```{r}
+ponto_eixo <- sf::st_sfc(sf::st_point(c(-49.2066, -25.3895)), crs = 4326) |>
+  sf::st_transform(crs_trabalho)
+
+parcela_grade <- grade_recorte[
+  sf::st_is_within_distance(grade_recorte, ponto_eixo, dist = 3000, sparse = FALSE)[, 1], ]
+
+mapview::mapview(parcela_grade, zcol = "pop", layer.name = "População por célula") +
+  mapview::mapview(br116, color = "#b3402a", lwd = 3, layer.name = "BR-116")
+```
+
+Clique em uma célula para ver os atributos: cada quadrado tem um identificador e a população
+residente. As células menores ficam nas áreas urbanas, onde a grade do IBGE é mais fina.
 
 ::: {.callout-important}
 ## Por que não usar o setor censitário direto
@@ -318,7 +339,9 @@ ggplot() +
           aes(fill = pop), colour = NA) +
   geom_sf(data = influencia, fill = NA, colour = "#1a5b8a",
           linewidth = 0.4, linetype = "dashed") +
-  geom_sf(data = br116, colour = "#b3402a", linewidth = 0.8) +
+  # contorno branco por baixo + linha grossa por cima: a rodovia se destaca da grade
+  geom_sf(data = br116, colour = "white", linewidth = 3) +
+  geom_sf(data = br116, colour = "#1a5b8a", linewidth = 1.6) +
   scale_fill_viridis_c(option = "rocket", direction = -1, transform = "log10",
                        name = "População\npor célula") +
   coord_sf(xlim = zoom_curitiba[c("xmin", "xmax")],
