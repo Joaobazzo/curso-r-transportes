@@ -1,0 +1,325 @@
+# Comex Stat: o `join` que faz São Paulo desaparecer {#sec-m3-comexstat}
+
+::: {.modulo-meta}
+**Dados:** Comex Stat (MDIC), base municipal de exportações e tabelas de correspondência
+**Baixados por:** `scripts/01-baixa-comexstat.R`
+**Pré-requisitos:** @sec-m1-joins e @sec-m3-duckdb
+:::
+
+O Comex Stat é a base pública mais usada para analisar comércio exterior brasileiro, e é
+onde mais se erra. Este capítulo percorre um erro específico: um `join` que roda sem
+reclamar, casa 90% das linhas, e apaga do relatório o maior estado exportador do país.
+
+## As duas bases, e o que não dá para cruzar
+
+O portal publica dois arquivos por ano e por fluxo, e eles **não** têm a mesma granularidade:
+
+| | `ncm/EXP_2024.csv` | `mun/EXP_2024_MUN.csv` |
+|:--|:--|:--|
+| Produto | NCM, 8 dígitos | **SH4**, 4 dígitos |
+| Território | UF (`SG_UF_NCM`) | **município** (`CO_MUN`) |
+| Via de transporte | `CO_VIA` | **não tem** |
+| URF de embarque | `CO_URF` | **não tem** |
+| Quantidade estatística | `QT_ESTAT` | **não tem** |
+
+::: {.callout-important}
+## Município e modo de transporte não existem na mesma tabela
+
+Não é uma limitação do arquivo que você baixou: é a estrutura da base. Qualquer análise de
+"origem municipal da carga por modo" só pode ser feita **por UF**, assumindo que a divisão
+modal do estado vale para todos os seus municípios. Essa hipótese precisa estar escrita no
+relatório, não implícita no código.
+
+Saber o que a base **não** responde é parte do trabalho, e descobrir isso antes de prometer
+o produto é a diferença entre uma reunião tranquila e uma reunião ruim.
+:::
+
+## Passo 1: Baixar
+
+```{r}
+dir.create("dados/brutos/comexstat", recursive = TRUE, showWarnings = FALSE)
+
+baixa <- function(url, arquivo) {
+  caminho <- file.path("dados/brutos/comexstat", arquivo)
+  if (!file.exists(caminho)) {
+    utils::download.file(url, caminho, mode = "wb", quiet = TRUE)
+    # o servidor devolve uma página em PHP quando o caminho não existe,
+    # e download.file() não reclama
+    if (startsWith(readLines(caminho, n = 1, warn = FALSE), "<")) {
+      file.remove(caminho); stop("Veio HTML/PHP em vez de CSV: ", url)
+    }
+  }
+  caminho
+}
+
+arq_exp <- baixa(
+  "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/EXP_2024_MUN.csv",
+  "EXP_2024_MUN.csv")
+
+arq_mun <- baixa(
+  "https://balanca.economia.gov.br/balanca/bd/tabelas/UF_MUN.csv",
+  "tab_UF_MUN.csv")
+
+round(file.size(c(arq_exp, arq_mun)) / 1024^2, 1)
+```
+
+Repare que as tabelas de correspondência **não** ficam sob `comexstat-bd/`, e sim direto em
+`bd/tabelas/`. É um detalhe que custa meia hora a quem não sabe.
+
+## Passo 2: Ler preservando os zeros à esquerda
+
+Primeiro o jeito errado, o que qualquer pessoa faria, deixando o R inferir os tipos:
+
+```{r}
+ingenuo <- readr::read_delim(arq_exp, delim = ";", show_col_types = FALSE,
+                             locale = readr::locale(encoding = "latin1"))
+
+ingenuo |> dplyr::select(CO_ANO, CO_MES, SH4, CO_PAIS, SG_UF_MUN, CO_MUN) |>
+  dplyr::slice_head(n = 3)
+```
+
+`CO_MES`, `SH4` e `CO_MUN` viraram números. Parece inofensivo. Não é:
+
+```{r}
+c(
+  cafe_original = "0901",
+  cafe_lido     = as.character(unique(ingenuo$SH4[ingenuo$SH4 == 901])[1])
+)
+```
+
+O SH4 do café é `0901`. Lido como número, vira `901`. O mesmo acontece com **todos** os
+capítulos 01 a 09 do Sistema Harmonizado, que é exatamente onde mora o agronegócio
+brasileiro: carnes, café, soja em capítulo 12 escapa, mas açúcar, frutas, cereais e pescado
+não. Um `join` com a tabela de SH4 perde tudo isso em silêncio.
+
+A leitura correta declara os tipos. A regra desta base é simples: **campo que começa com
+`CO_`, `SG_` ou `SH` é código, não número.**
+
+```{r}
+con <- duckdb::dbConnect(duckdb::duckdb())
+
+exp_mun <- DBI::dbGetQuery(con, sprintf("
+  SELECT CO_ANO, CO_MES, SH4, CO_PAIS, SG_UF_MUN, CO_MUN,
+         CAST(KG_LIQUIDO AS DOUBLE) AS kg,
+         CAST(VL_FOB     AS DOUBLE) AS fob_usd
+  FROM read_csv('%s', delim=';', header=true, all_varchar=true, encoding='latin-1')
+", normalizePath(arq_exp, winslash = "/")))
+
+mun_tab <- DBI::dbGetQuery(con, sprintf("
+  SELECT * FROM read_csv('%s', delim=';', header=true, all_varchar=true, encoding='latin-1')
+", normalizePath(arq_mun, winslash = "/")))
+
+duckdb::dbDisconnect(con, shutdown = TRUE)
+
+dim(exp_mun)
+```
+
+`all_varchar=true` lê tudo como texto, e só o que é número de verdade é convertido depois.
+É mais trabalho e é o único jeito seguro.
+
+## Passo 3: Os totais-âncora
+
+Antes de qualquer `join`, registre contra o que vai conferir:
+
+```{r}
+ancora <- exp_mun |>
+  dplyr::summarise(
+    linhas      = dplyr::n(),
+    municipios  = dplyr::n_distinct(CO_MUN),
+    fob_bilhoes = sum(fob_usd) / 1e9
+  )
+ancora |> knitr::kable(digits = 1)
+```
+
+## Passo 4: O `join` que "funciona"
+
+A tabela de municípios tem uma coluna chamada `CO_MUN_GEO`. O nome sugere geocódigo do
+IBGE, então a tentação é juntar direto com o `geobr`:
+
+```{r}
+arquivo <- "dados/brutos/muni_br.gpkg"
+if (!file.exists(arquivo)) {
+  br <- geobr::read_municipality(code_muni = "all", year = 2022,
+                                 simplified = TRUE, showProgress = FALSE)
+  sf::st_write(br, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE) |>
+  dplyr::mutate(code_muni = as.character(code_muni))
+
+por_municipio <- exp_mun |>
+  dplyr::summarise(fob_usd = sum(fob_usd), .by = CO_MUN)
+
+ingenuo_join <- por_municipio |>
+  dplyr::left_join(sf::st_drop_geometry(muni), by = c("CO_MUN" = "code_muni"))
+
+c(
+  linhas          = nrow(ingenuo_join),
+  casaram         = sum(!is.na(ingenuo_join$name_muni)),
+  pct_casaram     = round(100 * mean(!is.na(ingenuo_join$name_muni)), 1),
+  pct_fob_casado  = round(100 * sum(ingenuo_join$fob_usd[!is.na(ingenuo_join$name_muni)]) /
+                            sum(ingenuo_join$fob_usd), 1)
+)
+```
+
+Nenhum erro. Nenhum aviso. Mais de 85% dos municípios casaram. Quem parar aqui publica o
+mapa.
+
+## Passo 5: A investigação
+
+O hábito do @sec-m1-joins: **sempre olhar quem ficou de fora.**
+
+```{r}
+nao_casaram <- ingenuo_join |>
+  dplyr::filter(is.na(name_muni)) |>
+  dplyr::left_join(dplyr::select(mun_tab, CO_MUN_GEO, NO_MUN, SG_UF),
+                   by = c("CO_MUN" = "CO_MUN_GEO"))
+
+nao_casaram |>
+  dplyr::summarise(municipios = dplyr::n(),
+                   fob_bilhoes = sum(fob_usd) / 1e9,
+                   .by = SG_UF) |>
+  dplyr::arrange(dplyr::desc(fob_bilhoes)) |>
+  knitr::kable(digits = 1)
+```
+
+Não é ruído espalhado. São **quatro unidades da federação inteiras**, e uma delas é São Paulo.
+
+```{r}
+nao_casaram |>
+  dplyr::slice_max(fob_usd, n = 5) |>
+  dplyr::transmute(CO_MUN, NO_MUN, SG_UF, fob_bilhoes = round(fob_usd / 1e9, 2)) |>
+  knitr::kable()
+```
+
+Jundiaí aparece no Comex como `3425904`. No IBGE, Jundiaí é `3525904`. Os cinco últimos
+dígitos são iguais; o que muda é o **prefixo de UF**.
+
+## Passo 6: A correção
+
+O Comex Stat usa uma numeração de UF própria, que coincide com a do IBGE em 23 estados e
+diverge em quatro:
+
+| UF | Comex | IBGE |
+|:--|:--|:--|
+| São Paulo | 34 | 35 |
+| Mato Grosso do Sul | 52 | 50 |
+| Goiás | 53 | 52 |
+| Distrito Federal | 54 | 53 |
+
+Há ainda dois códigos sem território: `93` (EX, operação não atribuída a município) e `99`
+(ND, não declarado).
+
+```{r}
+prefixo_comex_para_ibge <- c("34" = "35", "52" = "50", "53" = "52", "54" = "53")
+
+co_mun_comex_para_ibge <- function(co_mun) {
+  co_mun  <- as.character(co_mun)
+  prefixo <- substr(co_mun, 1, 2)
+  sufixo  <- substr(co_mun, 3, 7)
+  novo    <- prefixo_comex_para_ibge[prefixo]
+  prefixo <- ifelse(is.na(novo), prefixo, novo)
+  out <- paste0(prefixo, sufixo)
+  out[substr(co_mun, 1, 2) %in% c("93", "99")] <- NA_character_
+  out
+}
+
+stopifnot(
+  co_mun_comex_para_ibge("3106705") == "3106705",  # Betim/MG, não muda
+  co_mun_comex_para_ibge("3425904") == "3525904"   # Jundiaí/SP, muda
+)
+```
+
+```{r}
+corrigido <- por_municipio |>
+  dplyr::mutate(code_muni = co_mun_comex_para_ibge(CO_MUN)) |>
+  dplyr::left_join(sf::st_drop_geometry(muni), by = "code_muni")
+
+c(
+  pct_municipios = round(100 * mean(!is.na(corrigido$name_muni)), 1),
+  pct_fob        = round(100 * sum(corrigido$fob_usd[!is.na(corrigido$name_muni)]) /
+                           sum(corrigido$fob_usd), 1)
+)
+```
+
+## Passo 7: Conferência
+
+Um `join` correto não pode ter criado nem perdido linhas, e o total tem que bater com a
+âncora do passo 3:
+
+```{r}
+c(
+  linhas_antes  = nrow(por_municipio),
+  linhas_depois = nrow(corrigido),
+  fob_antes_bi  = round(sum(por_municipio$fob_usd) / 1e9, 3),
+  fob_depois_bi = round(sum(corrigido$fob_usd) / 1e9, 3)
+)
+```
+
+```{r}
+corrigido |>
+  dplyr::filter(is.na(name_muni)) |>
+  dplyr::summarise(casos = dplyr::n(), fob_bilhoes = sum(fob_usd) / 1e9) |>
+  knitr::kable(digits = 2)
+```
+
+O que sobra sem correspondência são os códigos `EX` e `ND`, que **não são território**.
+Eles não devem entrar no mapa, mas também não podem sumir do total: a soma do mapa mais os
+não territoriais tem que reproduzir a exportação total do país.
+
+## Passo 8: O mapa, agora defensável
+
+```{r}
+#| fig-height: 6
+#| fig-cap: "Exportações brasileiras em 2024 por município de domicílio da empresa exportadora."
+mapa <- muni |>
+  dplyr::left_join(
+    corrigido |> dplyr::select(code_muni, fob_usd) |> dplyr::filter(!is.na(code_muni)),
+    by = "code_muni"
+  ) |>
+  dplyr::mutate(fob_bi = fob_usd / 1e9)
+
+ggplot2::ggplot(mapa) +
+  ggplot2::geom_sf(ggplot2::aes(fill = fob_bi), colour = NA) +
+  ggplot2::scale_fill_viridis_c(trans = "log10", na.value = "grey92",
+                                labels = scales::label_number(accuracy = 0.01)) +
+  ggplot2::labs(fill = "US$ bilhões (log)",
+                title = "Exportações por município, 2024",
+                subtitle = "Domicílio da empresa exportadora, não origem da produção") +
+  ggplot2::theme_void(base_size = 11) +
+  ggplot2::theme(legend.position = "bottom")
+```
+
+::: {.callout-warning}
+## O município é o da empresa, não o da produção
+
+Esta é a terceira armadilha do Comex Stat, e ela é conceitual, não técnica. O município
+registrado é o do **domicílio fiscal da empresa exportadora**. Uma trading com sede em São
+Paulo que exporta soja do Mato Grosso aparece como São Paulo.
+
+Para análise de origem de carga, isso invalida o dado municipal como proxy de produção. O
+subtítulo do gráfico acima não é decoração: é a ressalva que impede alguém de usar o mapa
+para a pergunta errada.
+:::
+
+## Checklist
+
+::: {.callout-tip}
+## Antes de confiar em qualquer `join` com base federal
+
+1. **Declare os tipos na leitura.** Campo de código é texto. Zero à esquerda é informação.
+2. **Conte antes e depois.** O `join` não pode criar nem perder linhas sem que você saiba.
+3. **Olhe quem ficou de fora, sempre.** E olhe *agrupado*: se os não casados se concentram
+   numa UF, num ano ou num tipo, não é ruído, é sistema.
+4. **Não confie no nome da coluna.** `CO_MUN_GEO` não é o geocódigo do IBGE.
+5. **Confira o total contra a âncora.** A soma do mapa mais o que não é território tem que
+   reproduzir o total do país.
+:::
+
+## Exercício
+
+A tabela `UF_MUN.csv` tem 5.570 linhas, das quais duas são os códigos especiais `EX` e `ND`.
+Sobram 5.568 municípios, enquanto o IBGE reconhece 5.570.
+
+Descubra quais municípios faltam na tabela do Comex, comparando com o `geobr`, e explique o
+que aconteceria com um estudo de série histórica que usasse essa tabela como cadastro de
+referência.

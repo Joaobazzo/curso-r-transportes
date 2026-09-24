@@ -9,10 +9,11 @@ crs_trabalho <- 31982
 
 arquivo <- "dados/brutos/muni_pr_sc.gpkg"
 if (!file.exists(arquivo)) {
-  muni <- dplyr::bind_rows(
-    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
-    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
-  )
+  # uma UF de cada vez, depois empilha
+  muni_pr <- geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE)
+  muni_sc <- geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  muni <- dplyr::bind_rows(muni_pr, muni_sc)
+
   sf::st_write(muni, arquivo, quiet = TRUE)
 }
 muni <- sf::st_read(arquivo, quiet = TRUE) |> sf::st_transform(crs_trabalho)
@@ -131,12 +132,20 @@ Extraia a altitude ao longo do eixo da BR-116, a cada 500 m, e faça um gráfico
 #| fig-cap: "Perfil altimétrico aproximado ao longo do eixo da BR-116"
 library(terra)
 
-dem <- terra::rast("dados/brutos/dem_serra.tif") |> terra::project("EPSG:31982")
-
 # um único trecho contínuo, para o perfil fazer sentido
 trecho <- br116 |>
   dplyr::mutate(comp = as.numeric(sf::st_length(geom))) |>
   dplyr::slice_max(comp, n = 1)
+
+# MDE cobrindo só o trecho escolhido (com margem), não o município inteiro do
+# capítulo de raster: o eixo da BR-116 é muito mais extenso que um município
+arquivo_dem_perfil <- "dados/brutos/dem_br116_perfil.tif"
+if (!file.exists(arquivo_dem_perfil)) {
+  area_trecho <- sf::st_buffer(trecho, dist = 2000) |> sf::st_transform(4326)
+  dem_raw <- elevatr::get_elev_raster(locations = area_trecho, z = 10, clip = "bbox")
+  terra::writeRaster(terra::rast(dem_raw), arquivo_dem_perfil, overwrite = TRUE)
+}
+dem <- terra::rast(arquivo_dem_perfil) |> terra::project("EPSG:31982")
 
 pontos <- sf::st_line_sample(sf::st_geometry(trecho), density = 1 / 500) |>
   sf::st_cast("POINT") |>

@@ -36,7 +36,7 @@ rede <- osmextract::oe_get(
 )
 
 # 2. construir o grafo com um perfil de peso
-grafo <- weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
+grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
 
 # 3. componente conectado principal (descarta trechos isolados)
 grafo <- grafo[grafo$component == 1, ]
@@ -45,21 +45,21 @@ grafo <- grafo[grafo$component == 1, ]
 origens  <- cbind(c(-49.2733, -48.5119), c(-25.4284, -25.5016))   # lon, lat
 destinos <- origens
 
-dodgr_dists(grafo, from = origens, to = destinos)      # metros
-dodgr_times(grafo, from = origens, to = destinos)      # segundos
+dodgr::dodgr_dists(grafo, from = origens, to = destinos)      # metros
+dodgr::dodgr_times(grafo, from = origens, to = destinos)      # segundos
 ```
 
 ```{r}
 #| eval: false
-# o caminho em si, como geometria — para desenhar no mapa
-caminho <- dodgr_paths(grafo, from = origens[1, , drop = FALSE],
+# o caminho em si, como geometria, para desenhar no mapa
+caminho <- dodgr::dodgr_paths(grafo, from = origens[1, , drop = FALSE],
                        to = origens[2, , drop = FALSE])
 
-verts <- dodgr_vertices(grafo)
+verts <- dodgr::dodgr_vertices(grafo)
 rota <- verts[match(caminho[[1]][[1]], verts$id), c("x", "y")] |>
   as.matrix() |>
-  st_linestring() |>
-  st_sfc(crs = 4326)
+  sf::st_linestring() |>
+  sf::st_sfc(crs = 4326)
 ```
 
 Pontos de atenção do `dodgr`:
@@ -83,7 +83,7 @@ options(java.parameters = "-Xmx8G")    # ANTES de carregar o pacote
 library(r5r)
 
 pasta <- "dados/brutos/fortaleza"      # contém fortaleza.osm.pbf e gtfs_fortaleza.zip
-rede <- setup_r5(data_path = pasta)
+rede <- r5r::setup_r5(data_path = pasta)
 ```
 
 ::: {.callout-note}
@@ -91,7 +91,7 @@ rede <- setup_r5(data_path = pasta)
 
 As versões mais recentes do `r5r` renomearam `setup_r5()` para `build_network()`, mantendo o
 comportamento. Se o seu R reclamar de função não encontrada ou avisar de depreciação, troque o
-nome — o restante do código é idêntico. Confira com `packageVersion("r5r")`.
+nome. O restante do código é idêntico. Confira com `packageVersion("r5r")`.
 :::
 
 ```{r}
@@ -103,7 +103,7 @@ pontos <- data.frame(
   lat = c(-3.7275, -3.7763, -3.7147)
 )
 
-ttm <- travel_time_matrix(
+ttm <- r5r::travel_time_matrix(
   rede,
   origins            = pontos,
   destinations       = pontos,
@@ -115,20 +115,20 @@ ttm <- travel_time_matrix(
 )
 ```
 
-Os argumentos que mudam o resultado — e que precisam estar no relatório:
+Os argumentos que mudam o resultado, e que precisam estar no relatório:
 
 - `mode`: `"WALK"`, `"BICYCLE"`, `"CAR"`, `"TRANSIT"` (combinado com um modo de acesso).
 - `departure_datetime`: o horário importa muito no transporte público. Pico e entrepico dão
   resultados diferentes.
 - `time_window` e `percentiles`: em vez de um único horário de partida, o R5 simula várias
-  partidas e devolve percentis — o que captura a variabilidade da espera. O percentil 50 é a
+  partidas e devolve percentis. Isso captura a variabilidade da espera. O percentil 50 é a
   escolha usual; o 75 é mais honesto para quem depende de linha de baixa frequência.
 - `max_trip_duration`: corta a matriz e acelera muito o cálculo.
 
 ```{r}
 #| eval: false
 # itinerários detalhados: cada etapa da viagem, com geometria
-det <- detailed_itineraries(
+det <- r5r::detailed_itineraries(
   rede,
   origins      = pontos[1, ],
   destinations = pontos[2, ],
@@ -137,17 +137,17 @@ det <- detailed_itineraries(
   shortest_path = FALSE
 )
 
-det |> select(option, segment, mode, route, segment_duration, distance)
+det |> dplyr::select(option, segment, mode, route, segment_duration, distance)
 ```
 
 `detailed_itineraries()` é o que permite explicar um resultado: quando o tempo de viagem entre
-dois pontos parece alto demais, é olhando as etapas — caminhada, espera, linha, transferência
-— que se descobre por quê.
+dois pontos parece alto demais, é olhando as etapas (caminhada, espera, linha, transferência)
+que se descobre por quê.
 
 ```{r}
 #| eval: false
 # isócronas: até onde se chega em 15, 30 e 45 minutos
-iso <- isochrone(
+iso <- r5r::isochrone(
   rede,
   origins            = pontos[1, ],
   mode               = c("WALK", "TRANSIT"),
@@ -180,12 +180,12 @@ exemplo <- data.frame(
 )
 
 exemplo |>
-  mutate(custo_rs = round(custo_generalizado(dist_km, tempo_h, pedagio), 2)) |>
-  arrange(custo_rs) |>
+  dplyr::mutate(custo_rs = round(custo_generalizado(dist_km, tempo_h, pedagio), 2)) |>
+  dplyr::arrange(custo_rs) |>
   knitr::kable()
 ```
 
-A rota mais curta não é a mais barata quando o tempo custa caro — e é exatamente esse tipo de
+A rota mais curta não é a mais barata quando o tempo custa caro. É exatamente esse tipo de
 comparação que justifica uma duplicação ou um contorno. Os parâmetros (`custo_km`,
 `custo_hora`) devem vir de fonte citável: o **Sistema de Custos Referenciais de Obras** e os
 estudos de custo operacional do próprio Ministério.

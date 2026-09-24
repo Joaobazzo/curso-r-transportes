@@ -12,6 +12,8 @@ library(ggplot2)
 
 ## `geobr`: malhas e geometrias oficiais do IBGE
 
+Documentação e exemplos: <https://ipeagit.github.io/geobr/>.
+
 ```{r}
 #| eval: false
 geobr::list_geobr()   # todas as funções, com os anos disponíveis
@@ -77,9 +79,9 @@ introduz erro de alguns por cento, além de deixar vãos entre polígonos vizinh
 
 ## `censobr`: microdados e agregados do Censo
 
-O `censobr` distribui o Censo em formato Parquet, com leitura preguiçosa: a função devolve um
-objeto `arrow` que só é materializado no `collect()`. Isso permite trabalhar com o Censo
-inteiro em um notebook comum.
+Documentação: <https://ipeagit.github.io/censobr/>. O `censobr` distribui o Censo em formato
+Parquet, com leitura preguiçosa: a função devolve um objeto `arrow` que só é materializado no
+`collect()`. Isso permite trabalhar com o Censo inteiro em um notebook comum.
 
 ```{r}
 #| eval: false
@@ -102,6 +104,23 @@ censobr::read_households(year = 2010, columns = c("code_muni", "V0201"))
 # dicionário das variáveis: indispensável, os nomes são códigos
 censobr::data_dictionary(year = 2022, dataset = "tracts")
 ```
+
+::: {.callout-tip}
+## `add_labels`: traduz os códigos das variáveis categóricas
+
+Desde uma atualização recente, `read_population()` e `read_households()` aceitam
+`add_labels = "pt"`, que substitui o código bruto de cada variável categórica pelo rótulo em
+português, direto na leitura, sem precisar cruzar manualmente com `data_dictionary()`:
+
+```{r}
+#| eval: false
+censobr::read_population(year = 2010, columns = c("code_muni", "V0601", "V6036"),
+                         add_labels = "pt")
+```
+
+Confira a versão instalada com `packageVersion("censobr")`: este material assume `>= 0.6.0`,
+que é quando `add_labels` foi introduzido.
+:::
 
 ::: {.callout-note}
 ## Sobre os anos disponíveis
@@ -126,8 +145,9 @@ setores_pop <- setores_geo |>
 
 ## `sidrar`: tabelas do SIDRA/IBGE
 
-O SIDRA é onde estão as séries agregadas: população estimada, projeções, PIB municipal, PNAD,
-produção agrícola. O `sidrar` traz qualquer tabela pelo número.
+Documentação: <https://cran.r-project.org/package=sidrar>. O SIDRA é onde estão as séries
+agregadas: população estimada, projeções, PIB municipal, PNAD, produção agrícola. O `sidrar`
+traz qualquer tabela pelo número.
 
 ```{r}
 #| eval: false
@@ -170,6 +190,7 @@ módulo 1.
 
 ## `osmdata` e `osmextract`: OpenStreetMap
 
+Documentação: <https://docs.ropensci.org/osmdata/> e <https://docs.ropensci.org/osmextract/>.
 Dois caminhos, para necessidades diferentes:
 
 - **`osmdata`** consulta a API Overpass ao vivo. Ideal para recortes pequenos e feições

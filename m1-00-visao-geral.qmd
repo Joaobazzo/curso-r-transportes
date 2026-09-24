@@ -43,8 +43,10 @@
 
 ## Pacotes do módulo
 
-Rode o bloco abaixo **uma única vez** antes da primeira aula. A instalação pode levar alguns
-minutos.
+Este é o primeiro módulo, então a lista abaixo é o ponto de partida: todo pacote usado daqui
+para frente é adicionado a esta base, nunca a substitui. Os módulos seguintes só listam o que
+é **novo** em relação ao módulo anterior. Rode o bloco abaixo **uma única vez** antes da
+primeira aula. A instalação pode levar alguns minutos.
 
 ```{r}
 #| eval: false

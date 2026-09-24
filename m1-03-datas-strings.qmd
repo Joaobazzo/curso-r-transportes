@@ -23,6 +23,20 @@ lubridate::dmy(c("28/09/2026", "05-10-2026", "3 nov 2026"))
 lubridate::ymd_hms("2026-09-28 14:00:00")
 ```
 
+Repare que o `R` sempre **guarda** uma data no formato `AAAA-MM-DD` (é o objeto `Date`, por
+baixo do capô um número). O formato `28/09/2026` só existe na hora de **mostrar** a data. Para
+exibir ou exportar no padrão brasileiro, use `format()`:
+
+```{r}
+d <- lubridate::ymd("2026-09-28")
+
+format(d, "%d/%m/%Y")          # "28/09/2026"
+format(d, "%d de %B de %Y")    # por extenso, no locale do sistema
+```
+
+O padrão `%d/%m/%Y` (dia, mês, ano de 4 dígitos) é o mesmo vocabulário de `dmy()`/`ymd()`, só
+que para formatar em vez de ler: `%d` dia, `%m` mês, `%Y` ano com 4 dígitos, `%y` ano com 2.
+
 ```{r}
 #| error: true
 lubridate::dmy("2026-09-28")   # ordem errada: retorna NA com aviso

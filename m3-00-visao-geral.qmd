@@ -1,21 +1,24 @@
 # Visão geral do módulo {#sec-m3}
 
 ::: {.modulo-meta}
-**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
-**Datas (Opção A):** aulas em 13/10 e 14/10; material assíncrono liberado em 15/10
-**Pacotes:** `osmdata`, `osmextract`, `duckdb`, `duckplyr`, `geocodebr`, `dodgr`, `r5r`, `Matrix`, `sf`
-**Estudo de caso:** matriz OD e fluxos espaciais da cabotagem, com cálculo de TKU
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
+**Datas:** a definir\
+**Pacotes:** `osmdata`, `osmextract`, `duckdb`, `duckplyr`, `geocodebr`, `dodgr`, `r5r`, `Matrix`, `sf`\
+**Estudo de caso:** matriz OD e fluxos espaciais da cabotagem, com cálculo de TKU\
+**Também:** Comex Stat (MDIC), bases por NCM e municipal
 :::
 
 ## O que você vai conseguir fazer no fim do módulo
 
 - Extrair do OpenStreetMap a malha viária e os pontos de interesse de uma área de estudo.
 - Consultar bases grandes com SQL, direto do R, sem carregar tudo na memória.
+- Integrar bases federais com códigos que **não** são os do IBGE, e detectar quando um `join`
+  está perdendo linhas em silêncio.
 - Transformar listas de endereços em coordenadas (geocodificação) e avaliar a qualidade do
   resultado.
 - Calcular rotas, distâncias e tempos de viagem sobre uma rede real.
 - Representar matrizes origem–destino de forma eficiente e convertê-las em **fluxos
-  espaciais** — as linhas de desejo que aparecem nos mapas de carga.
+  espaciais**: as linhas de desejo que aparecem nos mapas de carga.
 - Calcular indicadores de transporte (TKU) a partir de uma matriz OD.
 
 ## Roteiro
@@ -26,6 +29,8 @@
 |:--|:--|:--|
 | 1 | Extração de dados do OpenStreetMap | @sec-m3-osm |
 | 2 | Processamento com SQL via DuckDB; comparação de desempenho | @sec-m3-duckdb |
+| 2b | Comex Stat: tipos, zeros à esquerda e o `join` que apaga São Paulo | @sec-m3-comexstat |
+| 2c | De script a função: funções próprias e iteração com `purrr` | @sec-m3-funcoes |
 | 3 | Geocodificação de endereços com `geocodebr` | @sec-m3-geocodificacao |
 | 4 | Roteamento com `dodgr` e `r5r` | @sec-m3-roteamento |
 
@@ -39,10 +44,13 @@
 
 ## Pacotes do módulo
 
+A lista abaixo é só o que é **novo** neste módulo. `osmdata`, `osmextract`, `duckplyr` e
+`data.table` já foram instalados nos módulos 1 e 2 e continuam em uso, sem reinstalar.
+
 ```{r}
 #| eval: false
-pacotes <- c("osmdata", "osmextract", "duckdb", "duckplyr", "DBI", "dbplyr",
-             "data.table", "arrow", "geocodebr", "dodgr", "r5r", "Matrix", "sfnetworks")
+pacotes <- c("duckdb", "DBI", "dbplyr", "purrr",
+             "arrow", "geocodebr", "dodgr", "r5r", "Matrix", "sfnetworks")
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))
 if (length(faltando) > 0) install.packages(faltando)
@@ -78,5 +86,5 @@ atravessam todos os capítulos:
 1. **Recorte antes de carregar**: filtre na consulta (SQL, `query=` do `osmextract`,
    `wkt_filter` do `sf`), não depois.
 2. **Guarde resultados intermediários** em `.parquet` ou `.rds`, e leia de lá.
-3. **Meça**: `system.time()` em volta de cada etapa pesada mostra onde está o gargalo — e
-   frequentemente ele não está onde se imagina.
+3. **Meça**: `system.time()` em volta de cada etapa pesada mostra onde está o gargalo.
+   Frequentemente ele não está onde se imagina.

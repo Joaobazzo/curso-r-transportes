@@ -299,6 +299,36 @@ ggplot() +
   theme(plot.title = element_text(face = "bold", size = 11))
 ```
 
+O mapa acima cobre o corredor inteiro, o que deixa pouco espaço para ver o detalhe onde a
+ocupação é mais densa. Um segundo mapa, com zoom na área de Curitiba, mostra melhor a
+distribuição da população nas células perto do início do corredor:
+
+```{r}
+#| label: fig-caso-faixa-curitiba
+#| fig-cap: "Zoom na área de Curitiba: mesma faixa de influência e população por célula"
+#| fig-height: 5.2
+zoom_curitiba <- muni |>
+  dplyr::filter(name_muni == "Curitiba") |>
+  sf::st_buffer(8000) |>
+  sf::st_bbox()
+
+ggplot() +
+  geom_sf(data = muni, fill = "grey98", colour = "grey80", linewidth = 0.2) +
+  geom_sf(data = grade_recorte |> dplyr::filter(pop > 0),
+          aes(fill = pop), colour = NA) +
+  geom_sf(data = influencia, fill = NA, colour = "#1a5b8a",
+          linewidth = 0.4, linetype = "dashed") +
+  geom_sf(data = br116, colour = "#b3402a", linewidth = 0.8) +
+  scale_fill_viridis_c(option = "rocket", direction = -1, transform = "log10",
+                       name = "População\npor célula") +
+  coord_sf(xlim = zoom_curitiba[c("xmin", "xmax")],
+           ylim = zoom_curitiba[c("ymin", "ymax")], expand = FALSE) +
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.25) +
+  labs(title = "Detalhe: início do corredor, região de Curitiba") +
+  theme_void(base_size = 10) +
+  theme(plot.title = element_text(face = "bold", size = 11))
+```
+
 ## Passo 7: Exportar
 
 ```{r}

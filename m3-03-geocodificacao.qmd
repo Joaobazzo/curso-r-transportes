@@ -1,7 +1,7 @@
 # Geocodificação {#sec-m3-geocodificacao}
 
 Geocodificar é transformar endereço em coordenada. É uma etapa recorrente e subestimada: a
-qualidade do resultado determina a qualidade de tudo o que vem depois — e a maior parte do
+qualidade do resultado determina a qualidade de tudo o que vem depois. A maior parte do
 trabalho não está na geocodificação em si, mas na **padronização do endereço antes** dela.
 
 ```{r}
@@ -12,14 +12,14 @@ library(sf)
 
 ## O pacote `geocodebr`
 
-O `geocodebr` (ipeaGIT) geocodifica endereços brasileiros usando o **CNEFE** — o Cadastro
+O `geocodebr` (ipeaGIT) geocodifica endereços brasileiros usando o **CNEFE**, o Cadastro
 Nacional de Endereços para Fins Estatísticos, do IBGE. Duas vantagens sobre serviços
-comerciais: é gratuito e roda localmente, sem enviar endereços para fora — o que importa
+comerciais: é gratuito e roda localmente, sem enviar endereços para fora. Isso importa
 quando os dados são administrativos e não podem sair da rede do órgão.
 
 ```{r}
 #| eval: false
-enderecos <- tibble::tibble(
+enderecos <- data.frame(
   id         = 1:3,
   logradouro = c("Rua Direita", "Avenida Paulista", "Rua XV de Novembro"),
   numero     = c(100, 1578, 300),
@@ -46,8 +46,8 @@ resultado <- geocodebr::geocode(
 )
 ```
 
-A saída traz as coordenadas e, sobretudo, o **tipo de correspondência** — a informação mais
-importante do processo:
+A saída traz as coordenadas e, sobretudo, o **tipo de correspondência**: a informação mais
+importante do processo.
 
 | Precisão | O que significa | Uso recomendado |
 |:--|:--|:--|
@@ -58,14 +58,14 @@ importante do processo:
 
 ```{r}
 #| eval: false
-resultado |> count(tipo_resultado, sort = TRUE)
+resultado |> dplyr::count(tipo_resultado, sort = TRUE)
 ```
 
 ::: {.callout-important}
 ## Nunca use a coordenada sem olhar a precisão
 
 Um endereço geocodificado no centroide do município vira um ponto no meio da cidade. Se você
-calcular acessibilidade ou distância com esse ponto, o resultado é ficção — e, pior, uma
+calcular acessibilidade ou distância com esse ponto, o resultado é ficção. E, pior, uma
 ficção com aparência de precisão. Filtre pelo nível de precisão aceitável para a análise e
 **relate quantos endereços foram descartados**.
 :::
@@ -85,17 +85,17 @@ sujos <- c(
 
 padronizar_endereco <- function(x) {
   x |>
-    str_squish() |>
-    str_to_upper() |>
+    stringr::str_squish() |>
+    stringr::str_to_upper() |>
     stringi::stri_trans_general("Latin-ASCII") |>
-    str_replace_all("\\bR\\.?\\b",   "RUA") |>
-    str_replace_all("\\bAV\\.?\\b",  "AVENIDA") |>
-    str_replace_all("\\bROD\\.?\\b", "RODOVIA") |>
-    str_replace_all("\\bPCA?\\.?\\b", "PRACA") |>
-    str_replace_all("\\bN[º°O]\\.?\\s*", "") |>
-    str_remove_all("\\bS/?N\\b") |>
-    str_remove_all("\\b(APTO|APT|AP|BLOCO|BL|CASA|FUNDOS|SALA|SL)\\b.*$") |>
-    str_squish()
+    stringr::str_replace_all("\\bR\\.?\\b",   "RUA") |>
+    stringr::str_replace_all("\\bAV\\.?\\b",  "AVENIDA") |>
+    stringr::str_replace_all("\\bROD\\.?\\b", "RODOVIA") |>
+    stringr::str_replace_all("\\bPCA?\\.?\\b", "PRACA") |>
+    stringr::str_replace_all("\\bN[º°O]\\.?\\s*", "") |>
+    stringr::str_remove_all("\\bS/?N\\b") |>
+    stringr::str_remove_all("\\b(APTO|APT|AP|BLOCO|BL|CASA|FUNDOS|SALA|SL)\\b.*$") |>
+    stringr::str_squish()
 }
 
 data.frame(original = sujos, padronizado = padronizar_endereco(sujos)) |>
@@ -107,8 +107,8 @@ Extrair o número do logradouro, quando ele vem embutido no texto:
 ```{r}
 extrair_numero <- function(x) {
   x |>
-    str_extract(",\\s*(\\d{1,6})") |>
-    str_extract("\\d+") |>
+    stringr::str_extract(",\\s*(\\d{1,6})") |>
+    stringr::str_extract("\\d+") |>
     as.integer()
 }
 
@@ -116,15 +116,15 @@ extrair_numero(sujos)
 ```
 
 O caso da rodovia (`km 25`) mostra o limite: endereço rodoviário não tem número de porta, e
-nenhum geocodificador urbano resolve. Para esses, o caminho é outro — localizar pelo **km** ao
-longo do eixo, que é uma operação de referenciamento linear:
+nenhum geocodificador urbano resolve. Para esses, o caminho é outro: localizar pelo **km** ao
+longo do eixo, que é uma operação de referenciamento linear.
 
 ```{r}
 #| eval: false
 # posição aproximada do km 25 ao longo de um trecho
 ponto_km <- function(linha, km) {
-  st_line_sample(st_geometry(linha), sample = km * 1000 / as.numeric(st_length(linha))) |>
-    st_cast("POINT")
+  sf::st_line_sample(sf::st_geometry(linha), sample = km * 1000 / as.numeric(sf::st_length(linha))) |>
+    sf::st_cast("POINT")
 }
 ```
 
@@ -135,8 +135,8 @@ Três checagens obrigatórias antes de usar coordenadas geocodificadas:
 ```{r}
 #| eval: false
 pontos <- resultado |>
-  filter(!is.na(lon), !is.na(lat)) |>
-  st_as_sf(coords = c("lon", "lat"), crs = 4674)
+  dplyr::filter(!is.na(lon), !is.na(lat)) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4674)
 
 # 1. quantos não foram geocodificados?
 c(total = nrow(resultado), geocodificados = nrow(pontos),
@@ -146,30 +146,28 @@ c(total = nrow(resultado), geocodificados = nrow(pontos),
 muni <- geobr::read_municipality(code_muni = "all", year = 2022, simplified = TRUE)
 
 conferencia <- pontos |>
-  st_join(muni |> select(code_muni, name_muni)) |>
-  mutate(bate = str_to_upper(name_muni) == str_to_upper(municipio))
+  sf::st_join(muni |> dplyr::select(code_muni, name_muni)) |>
+  dplyr::mutate(bate = stringr::str_to_upper(name_muni) == stringr::str_to_upper(municipio))
 
-count(st_drop_geometry(conferencia), bate)
+dplyr::count(sf::st_drop_geometry(conferencia), bate)
 
-# 3. inspeção visual — o passo que as pessoas pulam e não deveriam
-leaflet::leaflet(st_transform(pontos, 4326)) |>
-  leaflet::addProviderTiles("CartoDB.Positron") |>
-  leaflet::addCircleMarkers(radius = 4, popup = ~logradouro)
+# 3. inspeção visual: o passo que as pessoas pulam e não deveriam
+mapview::mapview(pontos)
 ```
 
 A checagem 2 é a mais valiosa: um endereço que "geocodificou com sucesso" mas caiu em outro
-município é um erro que passa despercebido em qualquer estatística agregada — e que aparece
+município é um erro que passa despercebido em qualquer estatística agregada. E aparece
 imediatamente nessa contagem.
 
 ## Geocodificação reversa
 
-O caminho inverso — coordenada para endereço — também está no `geocodebr`:
+O caminho inverso, coordenada para endereço, também está no `geocodebr`.
 
 ```{r}
 #| eval: false
-coords <- tibble::tibble(id = 1:2,
-                         lon = c(-49.2733, -46.6333),
-                         lat = c(-25.4284, -23.5505))
+coords <- data.frame(id = 1:2,
+                     lon = c(-49.2733, -46.6333),
+                     lat = c(-25.4284, -23.5505))
 
 geocodebr::geocode_reverso(coords, campos_endereco = geocodebr::definir_campos(
   lon = "lon", lat = "lat"
@@ -182,15 +180,15 @@ tráfego ele está? Isso é junção espacial, e você já sabe fazer:
 
 ```{r}
 #| eval: false
-pontos |> st_join(zonas, join = st_within)
+pontos |> sf::st_join(zonas, join = st_within)
 ```
 
 ::: {.callout-note}
 ## Sobre versões
 
-O `geocodebr` é recente e sua interface ainda muda entre versões — nomes de argumentos e
+O `geocodebr` é recente e sua interface ainda muda entre versões. Nomes de argumentos e
 colunas de saída podem diferir. Rode `?geocodebr::geocode` e
 `utils::packageVersion("geocodebr")` antes de reaproveitar código de tutoriais, inclusive
-deste. A lógica — padronizar, geocodificar, conferir precisão, validar espacialmente — é que
+deste. A lógica (padronizar, geocodificar, conferir precisão, validar espacialmente) é que
 não muda.
 :::

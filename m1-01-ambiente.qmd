@@ -64,6 +64,39 @@ Para montar caminhos entre sistemas operacionais, use `file.path()`:
 file.path("dados", "cabotagem_tku_2025.csv")
 ```
 
+## Como organizar os scripts do curso
+
+A recomendação deste material é simples e vale a pena seguir à risca: **um script de R por
+módulo**, dentro do seu projeto. Ao abrir o Módulo 2, crie `R/modulo2.R` (ou
+`modulo2.qmd`) e vá colando ali, em ordem, os blocos de código deste site. Cada módulo é
+**independente**: o script do Módulo 2 não espera que o do Módulo 1 tenha rodado antes, e o
+do Módulo 3 não depende do Módulo 2. Isso é proposital, não uma limitação:
+
+- Cada capítulo baixa e guarda em `dados/brutos/` (ou lê de `dados/`) tudo que precisa, então
+  rodar o script de um módulo do começo ao fim, numa sessão nova do R, sempre funciona.
+- Você pode revisitar o Módulo 2 semanas depois, sem precisar re-executar os módulos
+  anteriores para "montar o estado" da sessão.
+- Erros de copiar e colar ficam contidos a um único script, em vez de se propagarem para o
+  resto do curso.
+
+```
+meu-projeto/
+├── meu-projeto.Rproj
+├── dados/
+│   └── brutos/
+├── R/
+│   ├── modulo1.R      # tudo que voce roda no Modulo 1, de cima a baixo
+│   ├── modulo2.R      # comeca do zero: library(sf), leitura dos dados, etc.
+│   └── modulo3.R
+└── resultados/
+```
+
+O único cuidado de fato necessário: comece cada script com uma sessão limpa (a dica da seção
+anterior, sobre desligar a restauração automática do `.RData`, existe exatamente para isso) e
+com os `library()`/`::` do início do capítulo. Se um bloco der erro porque um objeto "não
+existe", quase sempre é porque um chunk anterior do **mesmo** módulo ainda não foi colado ou
+rodado.
+
 ## Pacotes
 
 ```{r}
@@ -173,8 +206,6 @@ simples: **se você não publicaria o conteúdo no site do Ministério, não col
 
 Isso inclui, no nosso contexto:
 
-- **Exportações de modelos de transporte** contratados, como a saída do VISUM que usamos no
-  @sec-m1-modelo4etapas. É produto de contrato, não dado público.
 - Planilhas de estudos em andamento, minutas de notas técnicas, termos de referência.
 - Qualquer dado pessoal (nome, CPF, placa, endereço de pessoa física), que além de tudo está
   sob a LGPD.
@@ -229,7 +260,7 @@ o erro num exemplo de cinco linhas, você frequentemente descobre a causa sozinh
    coluna que não estão no seu dado. Rode e confira num subconjunto pequeno em que você sabe
    qual é a resposta certa.
 2. **A IA não conhece a sua base.** Ela não sabe que o `VEHKMTRAVPRT` do VISUM vem em metros,
-   nem que o código de município do Comex Stat não é o do IBGE (Módulo 3). Esse
+   nem que o código de município do Comex Stat não é o do IBGE (@sec-m3-comexstat). Esse
    conhecimento é seu, e é ele que torna o resultado defensável.
 3. **Peça a explicação, não só o código.** O objetivo do curso é que você consiga ler,
    corrigir e defender tecnicamente o que o script faz.

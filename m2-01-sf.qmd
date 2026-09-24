@@ -51,7 +51,7 @@ chave de API. Para evitar isso, defina uma vez, no início da sessão, uma lista
 gratuitos e sem cadastro:
 
 ```{r}
-mapview::mapviewOptions(basemaps = c("CartoDB.Positron", "OpenStreetMap", "Esri.WorldImagery"))
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
 ```
 
 Essa opção vale para todos os `mapview()` da sessão, inclusive os deste capítulo.

@@ -14,6 +14,19 @@ que o tempo de aula seja gasto com R, não com instalação.
 4. Ciente da regra de ouro sobre IA: **não cole dado que você não publicaria**.
 :::
 
+## Como pedir ajuda {#como-pedir-ajuda}
+
+Guarde este roteiro antes mesmo de começar o Módulo 1: ele vale para qualquer dúvida do
+curso, técnica ou não.
+
+1. **Issues do repositório**:
+   <https://github.com/Joaobazzo/curso-r-transportes/issues>. Preferível: a resposta fica
+   registrada e ajuda os demais participantes. Ao abrir, inclua o código que você rodou, a
+   mensagem de erro completa e a saída de `sessionInfo()`.
+2. **E-mail**: para questões específicas do seu trabalho que envolvam dados não públicos.
+3. **Nos encontros**: os primeiros 15 minutos de cada aula são reservados a dúvidas do
+   material anterior.
+
 ## R e RStudio
 
 A instalação do R, do RStudio, do Rtools (Windows) e dos pacotes do Módulo 1 está detalhada em

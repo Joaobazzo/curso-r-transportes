@@ -1,0 +1,250 @@
+# De script a função {#sec-m3-funcoes}
+
+::: {.modulo-meta}
+**Dados:** recorte do modelo quatro etapas (@sec-m1-modelo4etapas) e Comex Stat
+(@sec-m3-comexstat)
+**Pacotes:** `purrr`, `dplyr`, `duckdb`
+**Pré-requisito:** a seção de funções de @sec-m1-linguagem
+:::
+
+No módulo 1 você escreveu funções pequenas. Este capítulo trata do passo seguinte, que é o
+que separa quem escreve *script* de quem escreve *ferramenta*: perceber que um trecho está
+sendo copiado e colado, transformá-lo numa função, e aplicá-la a muitos casos de uma vez.
+
+```{r}
+library(dplyr)
+
+con <- duckdb::dbConnect(duckdb::duckdb())
+links <- DBI::dbGetQuery(con, "
+  SELECT * FROM 'dados/processados/modelo4etapas/links_rmc_2018_completo.parquet'
+")
+duckdb::dbDisconnect(con, shutdown = TRUE)
+```
+
+## O sintoma: copiar e colar
+
+No @sec-m1-modelo4etapas, calculamos os indicadores da rede para a rede completa e depois
+para a rede estrutural. Agora o gestor pede também "só rodovias" e "só conectores". O
+caminho natural é copiar o bloco:
+
+```{r}
+#| eval: false
+completa <- links |>
+  summarise(veic_km = sum(veic_km, na.rm = TRUE),
+            atraso  = sum(veic_h_carreg - veic_h_livre, na.rm = TRUE))
+
+estrutural <- links |> filter(typeno < 50) |>
+  summarise(veic_km = sum(veic_km, na.rm = TRUE),
+            atraso  = sum(veic_h_carreg - veic_h_livre, na.rm = TRUE))
+
+rodovias <- links |> filter(typeno %/% 10 == 1) |>
+  summarise(veic_km = sum(veic_km, na.rm = TRUE),
+            atraso  = sum(veic_h_carreg - veic_h_livre, na.rm = TRUE))
+# ... e assim por diante
+```
+
+Três problemas. Se a definição de atraso mudar, é preciso lembrar de mudar em quatro lugares.
+Se esquecer um, os cenários deixam de ser comparáveis, e nada avisa. E cada novo cenário é
+mais um bloco copiado.
+
+::: {.callout-tip}
+## A regra das três vezes
+
+Copiou o mesmo trecho pela terceira vez? É uma função.
+:::
+
+## Extrair a função
+
+O que muda entre os blocos é **o dado de entrada**. O cálculo é sempre o mesmo. Então o
+cálculo vira o corpo da função, e o dado vira o argumento:
+
+```{r}
+#' Indicadores de desempenho de uma rede alocada
+#'
+#' @param links data.frame com as colunas corrigidas do recorte do VISUM
+#' @param cenario rótulo do cenário, para identificar a linha no resultado
+#' @return data.frame de uma linha
+indicadores_rede <- function(links, cenario = "sem nome") {
+  obrigatorias <- c("veic_km", "veic_h_livre", "veic_h_carreg", "vc")
+  faltando <- setdiff(obrigatorias, names(links))
+  if (length(faltando) > 0) {
+    stop("Faltam colunas: ", paste(faltando, collapse = ", "))
+  }
+
+  links |>
+    summarise(
+      links         = n(),
+      veic_km       = sum(veic_km, na.rm = TRUE),
+      atraso_veic_h = sum(veic_h_carreg - veic_h_livre, na.rm = TRUE),
+      vel_media_kmh = sum(veic_km, na.rm = TRUE) / sum(veic_h_carreg, na.rm = TRUE),
+      saturados     = sum(vc >= 1, na.rm = TRUE)
+    ) |>
+    mutate(cenario = cenario, .before = 1)
+}
+
+indicadores_rede(links, "Rede completa")
+```
+
+Três elementos para observar:
+
+1. **Validação da entrada.** Se alguém passar a tabela crua, sem as colunas corrigidas, a
+   função para com uma mensagem clara, em vez de devolver um número errado.
+2. **Documentação no topo.** Os comentários `#'` dizem o que entra e o que sai. É o que
+   permite a outra pessoa usar a função sem ler o corpo.
+3. **Retorno previsível.** Sempre uma tabela de uma linha, com as mesmas colunas. É isso que
+   permite empilhar os resultados depois.
+
+Agora o teste que interessa: a função reproduz os totais-âncora do @sec-m1-modelo4etapas?
+
+```{r}
+r <- indicadores_rede(links)
+stopifnot(abs(r$veic_km - 3676335) < 5, r$saturados == 3436)
+```
+
+## Aplicar a muitos casos com `purrr`
+
+Os cenários agora são só **filtros diferentes**. Em R, uma função pode ser guardada numa lista
+como qualquer outro objeto:
+
+```{r}
+cenarios <- list(
+  "Rede completa"   = \(x) x,
+  "Rede estrutural" = \(x) filter(x, typeno < 50),
+  "Só rodovias"     = \(x) filter(x, typeno %/% 10 == 1),
+  "Só conectores"   = \(x) filter(x, typeno %/% 10 == 7)
+)
+```
+
+A notação `\(x)` é uma função anônima, curta, escrita no próprio lugar em que é usada. É o
+mesmo que `function(x)`.
+
+`purrr::imap()` percorre a lista, entregando a cada passo o elemento e o seu nome:
+
+```{r}
+resultado <- purrr::imap(cenarios, \(filtro, nome) indicadores_rede(filtro(links), nome)) |>
+  purrr::list_rbind()
+
+resultado |>
+  mutate(across(where(is.numeric), \(v) round(v, 1))) |>
+  knitr::kable(format.args = list(big.mark = "."))
+```
+
+Um quinto cenário é uma linha a mais na lista. A definição de atraso está num lugar só.
+
+### `map`, `lapply` e `for`
+
+Os três fazem a mesma coisa. A diferença é o que devolvem e o quanto você precisa escrever:
+
+```{r}
+#| eval: false
+# for: você cuida do recipiente
+saida <- vector("list", length(cenarios))
+for (i in seq_along(cenarios)) {
+  saida[[i]] <- indicadores_rede(cenarios[[i]](links), names(cenarios)[i])
+}
+
+# lapply: base R, sem pacote
+lapply(names(cenarios), \(n) indicadores_rede(cenarios[[n]](links), n))
+
+# purrr: família com o tipo de saída no nome
+purrr::map(cenarios, \(f) nrow(f(links)))       # lista
+purrr::map_int(cenarios, \(f) nrow(f(links)))   # vetor de inteiros, ou erro
+```
+
+A vantagem do `purrr` não é velocidade: é que `map_int()`, `map_dbl()` e `map_chr()`
+**garantem o tipo** da saída. Se algum elemento não devolver um inteiro, a função para na
+hora, em vez de produzir um vetor misturado que quebra três passos adiante.
+
+## Aplicação real: baixar dez anos de Comex Stat
+
+O padrão de maior retorno no trabalho do dia a dia é este: **uma função que faz um caso, e um
+`map` que faz todos**.
+
+```{r}
+#| eval: false
+baixa_comex_ano <- function(ano, fluxo = c("EXP", "IMP"),
+                            destino = "dados/brutos/comexstat") {
+  fluxo <- match.arg(fluxo)
+  arquivo <- file.path(destino, sprintf("%s_%d_MUN.csv", fluxo, ano))
+  if (file.exists(arquivo)) return(arquivo)
+
+  url <- sprintf(
+    "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/%s_%d_MUN.csv",
+    fluxo, ano)
+  utils::download.file(url, arquivo, mode = "wb", quiet = TRUE)
+
+  if (startsWith(readLines(arquivo, n = 1, warn = FALSE), "<")) {
+    file.remove(arquivo)
+    stop("Veio HTML em vez de CSV para ", ano)
+  }
+  arquivo
+}
+
+anos <- 2015:2024
+arquivos <- purrr::map_chr(anos, baixa_comex_ano)
+```
+
+Um problema: se o download de 2019 falhar, o `map` para e você perde os anos seguintes. Para
+tarefas em que uma falha não deve derrubar o conjunto, `purrr::possibly()` embrulha a função
+e devolve um valor padrão em caso de erro:
+
+```{r}
+#| eval: false
+baixa_com_tolerancia <- purrr::possibly(baixa_comex_ano, otherwise = NA_character_)
+
+arquivos <- purrr::map_chr(anos, baixa_com_tolerancia)
+anos[is.na(arquivos)]   # quais anos falharam, para tentar de novo
+```
+
+::: {.callout-important}
+## Tolerar a falha não é esconder a falha
+
+O `possibly()` evita que um erro derrube o resto. Ele **não** deve fazer o erro sumir. A
+última linha acima, que lista os anos que falharam, é obrigatória. Uma série histórica com um
+ano faltando, sem que ninguém saiba, é o pior resultado possível.
+:::
+
+## Onde guardar as funções
+
+Uma função útil vai ser usada em mais de um script. Ela não deve ficar escondida no meio de
+uma análise. A convenção é uma pasta `R/` na raiz do projeto:
+
+```
+meu-projeto/
+├── R/
+│   ├── funcoes_rede.R       # indicadores_rede(), ...
+│   └── funcoes_comex.R      # baixa_comex_ano(), co_mun_comex_para_ibge(), ...
+└── scripts/
+    ├── 01-baixa-dados.R
+    └── 02-analise.R
+```
+
+E no início de cada script:
+
+```{r}
+#| eval: false
+source("R/funcoes_rede.R")
+source("R/funcoes_comex.R")
+```
+
+Quando o conjunto de funções crescer e começar a ser usado por outras equipes, o passo
+seguinte é transformá-lo num **pacote** interno. Mas isso fica para depois do curso.
+
+::: {.callout-note}
+## Paralelizar
+
+Quando cada caso demora (rotear uma matriz OD, processar um raster grande), o pacote `furrr`
+oferece as mesmas funções do `purrr` rodando em vários núcleos. Troca-se `purrr::map()` por
+`furrr::future_map()`, depois de `future::plan(future::multisession)`. Não é o primeiro
+recurso: meça antes (@sec-m3-duckdb) e confirme que o gargalo é mesmo o cálculo, e não a
+leitura do disco.
+:::
+
+## Exercício
+
+1. Escreva uma função `participacao_classe(links, classe)` que devolva a participação de uma
+   classe de via no veículo-quilômetro e no atraso totais.
+2. Use `purrr::map()` para aplicá-la às seis classes do @sec-m1-modelo4etapas e empilhe o
+   resultado numa tabela.
+3. Confira que a soma das participações dá 100% nas duas colunas. Se não der, descubra por
+   quê antes de seguir.

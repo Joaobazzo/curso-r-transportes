@@ -1,7 +1,5 @@
 # Visão geral do módulo {#sec-m2}
 
-![Fluxo de atividades de caminhada em vista 3D: cada linha é um dado espacial vetorial, o objeto que este módulo ensina a manipular. Fonte: Strava (2026).](img/bsb_3d.png)
-
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
 **Datas:** a definir\
@@ -43,6 +41,9 @@
 | 8 | Exercícios | @sec-m2-exercicios |
 
 ## Pacotes do módulo
+
+A lista abaixo tem só o que é **novo** neste módulo. `dplyr`, `ggplot2` e os demais pacotes
+do Módulo 1 continuam em uso, sem precisar reinstalar nada.
 
 ```{r}
 #| eval: false

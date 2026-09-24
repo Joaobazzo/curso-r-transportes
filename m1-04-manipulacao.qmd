@@ -137,6 +137,19 @@ As três convivem no mesmo script: é comum ler com `duckplyr`, agregar, `collec
 em `dplyr`.
 :::
 
+::: {.callout-note}
+## Sobre o `data.table`
+
+O `data.table` é, em geral, **mais rápido** que `dplyr` em manipulações pesadas (muitos
+`group_by`, tabelas de dezenas de milhões de linhas). O motivo de não ser o pacote principal
+deste curso é didático, não técnico: a sintaxe (`DT[i, j, by]`, com referências por coluna
+sem aspas e operadores como `:=`) é mais compacta, mas menos legível para quem está
+aprendendo. Se depois do curso você decidir migrar um script inteiro para `data.table` por
+desempenho, qualquer assistente de IA (@sec-m1-ambiente) converte um trecho de `dplyr` para
+`data.table` de forma confiável, porque é uma tradução mecânica entre sintaxes equivalentes.
+Vale conferir o resultado com os mesmos totais-âncora do capítulo anterior.
+:::
+
 ## Os verbos do `dplyr`
 
 ### `select()`: escolher colunas

@@ -12,6 +12,11 @@
 - `lubridate`: manipulação de datas e horários. <https://lubridate.tidyverse.org/>
 - `ggplot2`: visualização de dados baseada em gramática de gráficos. <https://ggplot2.tidyverse.org/>
 - `patchwork`: combinação de múltiplos gráficos ggplot2 em um só layout. <https://patchwork.data-imaginist.com/>
+- `purrr`: iteração funcional (`map()` e variantes), no lugar de `for`/`sapply`. <https://purrr.tidyverse.org/>
+- `duckdb`: driver do banco DuckDB para R (conexão via `DBI`). <https://duckdb.org/docs/api/r>
+- `dbplyr`: traduz verbos do `dplyr` em SQL, para consultar bancos de dados. <https://dbplyr.tidyverse.org/>
+- `arrow`: leitura/escrita eficiente em Parquet e integração com bases maiores que a memória. <https://arrow.apache.org/docs/r/>
+- `Matrix`: matrizes esparsas, essencial para matrizes OD grandes. <https://cran.r-project.org/package=Matrix>
 
 **Espacial**
 
@@ -21,6 +26,7 @@
 - `mapview`: conferência visual rápida de objetos espaciais, em uma linha. <https://r-spatial.github.io/mapview/>
 - `leafgl`: renderização por WebGL para o `mapview`, para bases espaciais grandes. <https://github.com/r-spatial/leafgl>
 - `mapgl`: mapas interativos baseados em Mapbox GL / MapLibre. <https://walker-data.com/mapgl/>
+- `sfnetworks`: redes espaciais topológicas (nós e arestas) a partir de geometrias `sf`. <https://luukvdmeer.github.io/sfnetworks/>
 
 **Bases públicas brasileiras**
 

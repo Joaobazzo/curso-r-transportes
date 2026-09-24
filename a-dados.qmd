@@ -120,14 +120,16 @@ para o repositório. Nas execuções seguintes, leem do cache.
 | `muni_pr_sc.gpkg`, `muni_br.gpkg`, `uf_br.gpkg`, `pr.gpkg` | `geobr` (malhas do IBGE) | módulos 2, 3 e 5 |
 | `grade_pr.gpkg` | `geobr::read_statistical_grid()`: população por célula | @sec-m2-estudo-de-caso, Módulo 4 |
 | `br116_serra.gpkg`, `pontes_br116.gpkg`, `portos_osm.gpkg` | OpenStreetMap via `osmdata` | módulos 2, 3 e 4 |
-| `dem_serra.tif` | altimetria via `elevatr` (AWS Terrain Tiles) | @sec-m2-raster, Módulo 4 |
+| `dem_morretes.tif` | altimetria de Morretes (PR) via `elevatr` (AWS Terrain Tiles); troque o município no código para gerar outro | @sec-m2-raster |
+| `dem_br116_perfil.tif` | altimetria só da faixa do trecho mais longo da BR-116, para o perfil altimétrico | @sec-m2-exercicios |
+| `dem_serra.tif` | altimetria da Serra do Mar via `elevatr` (bbox fixo) | Módulo 4 |
 | `aop_fortaleza.rds` | `aopdata`: acessibilidade em Fortaleza, 2019 | Módulo 4 |
-| `od_sintetica.csv/.parquet` | gerado localmente (2 milhões de linhas) | Módulo 3 |
+| `od_sintetica.csv/.parquet` | gerado localmente (2 milhões de linhas) | @sec-m3-duckdb |
 
 ## Comex Stat (MDIC)
 
 Baixado por `scripts/01-baixa-comexstat.R`, com cache em `dados/brutos/comexstat/`. Usado no
-Módulo 3.
+@sec-m3-comexstat.
 
 **Os arquivos ficam em dois lugares diferentes**, o que é a primeira pegadinha:
 

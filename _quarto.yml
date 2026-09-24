@@ -49,6 +49,18 @@ book:
         - m2-05-mapas.qmd
         - m2-07-estudo-de-caso.qmd
         - m2-08-exercicios.qmd
+    - part: "Módulo 3 — Dados geoespaciais avançados: DuckDB, geocodificação e roteamento"
+      chapters:
+        - m3-00-visao-geral.qmd
+        - m3-01-osm.qmd
+        - m3-02-duckdb.qmd
+        - m3-02b-comexstat.qmd
+        - m3-02c-funcoes.qmd
+        - m3-03-geocodificacao.qmd
+        - m3-04-roteamento.qmd
+        - m3-05-matrizes.qmd
+        - m3-06-estudo-de-caso.qmd
+        - m3-07-exercicios.qmd
   appendices:
     - a-dados.qmd
     - a-slides.qmd

@@ -27,12 +27,4 @@ Os encontros síncronos são gravados e o material assíncrono de cada módulo �
 do dia seguinte ao segundo encontro. Os *links* das gravações são disponibilizados pela
 Subsecretaria de Fomento e Planejamento aos participantes inscritos.
 
-## Como pedir ajuda
-
-1. **Issues do repositório**:
-   <https://github.com/Joaobazzo/curso-r-transportes/issues>. Preferível: a resposta fica
-   registrada e ajuda os demais participantes. Ao abrir, inclua o código que você rodou, a
-   mensagem de erro completa e a saída de `sessionInfo()`.
-2. **E-mail**: para questões específicas do seu trabalho que envolvam dados não públicos.
-3. **Nos encontros**: os primeiros 15 minutos de cada aula são reservados a dúvidas do
-   material anterior.
+Como pedir ajuda durante o curso está na [Preparação](m0-00-preparacao.qmd#como-pedir-ajuda).

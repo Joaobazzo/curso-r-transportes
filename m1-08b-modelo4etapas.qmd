@@ -34,7 +34,7 @@ ggplot2::theme_set(
 ## Passo 1: Ler o arquivo
 
 O recorte está em Parquet, formato colunar que ocupa uma fração do shapefile original e é
-lido em uma fração do tempo (SQL com DuckDB, no Módulo 3). Leitura direta pelo DuckDB, sem carregar nada
+lido em uma fração do tempo (SQL com DuckDB, @sec-m3-duckdb). Leitura direta pelo DuckDB, sem carregar nada
 que não seja necessário:
 
 ```{r}
@@ -56,6 +56,26 @@ links |>
   dplyr::slice_head(n = 5) |>
   knitr::kable()
 ```
+
+Antes de entrar nos números, vale ver do que estamos falando: a mesma tabela também existe
+como camada espacial (`dados/processados/modelo4etapas/rede_rmc_2018.gpkg`), com uma linha
+por trecho de via. Um mapa estático, colorindo pela relação volume/capacidade (`vc`), já
+mostra o formato da rede e onde ela está mais carregada:
+
+```{r}
+#| label: fig-rede-preview
+#| fig-cap: "Rede viária do modelo, colorida pela relação volume/capacidade (vc)"
+#| fig-height: 5
+rede <- sf::st_read("dados/processados/modelo4etapas/rede_rmc_2018.gpkg", quiet = TRUE)
+
+ggplot2::ggplot(rede) +
+  ggplot2::geom_sf(ggplot2::aes(colour = vc), linewidth = 0.25) +
+  ggplot2::scale_colour_viridis_c(option = "rocket", direction = -1, name = "vc") +
+  ggplot2::theme_void(base_size = 10)
+```
+
+Voltamos a essa camada espacial com mais calma no @sec-m2 (reprojeção, comprimento, mapas
+estáticos); aqui ela só serve para você enxergar a rede antes de mergulhar na tabela.
 
 ## Passo 2: Três perguntas antes de qualquer conta
 
@@ -310,7 +330,7 @@ Este mesmo dado atravessa o resto do curso:
 | Módulo | O que faremos com ele |
 |:--|:--|
 | @sec-m2 | Ler a camada espacial, reprojetar, conferir o comprimento calculado contra o gravado, mapear carregamento e saturação |
-| Módulo 3 | Comparar o modelo com as 25 contagens de campo, tratar a rede como grafo |
+| @sec-m3 | Comparar o modelo com as 25 contagens de campo, tratar a rede como grafo |
 | Módulo 4 | Cruzar as paradas e os corredores de BRT com acessibilidade |
 | Módulo 5 | Gerar um relatório parametrizado, um por município da região |
 
