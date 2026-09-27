@@ -309,8 +309,8 @@ margens |>
 ```
 
 No módulo 3 esta mesma matriz será convertida em **fluxos espaciais**, desenhados sobre o mapa
-do Brasil como linhas de desejo entre os portos; no módulo 4, os totais por UF alimentarão uma
-análise de rede.
+do Brasil como linhas de desejo entre os portos; no módulo 5, os totais por UF viram um mapa
+temático com padrão de publicação.
 
 ## Passo 7: Exportar os resultados
 

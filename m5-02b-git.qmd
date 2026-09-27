@@ -1,0 +1,184 @@
+# Controle de versão com Git e GitHub {#sec-m5-git}
+
+Um relatório reproduzível sem histórico de versões é meia reprodutibilidade. O código
+regenera o resultado, mas ninguém sabe **qual** código gerou o número que foi para a nota
+técnica de março, nem o que mudou entre ela e a de junho.
+
+O Git resolve isso. Ele guarda cada estado do projeto como um *commit*: uma fotografia com
+data, autor e uma frase dizendo o que mudou e por quê. O GitHub é o lugar onde essas
+fotografias ficam guardadas fora da sua máquina, e onde outras pessoas podem acessá-las.
+
+::: {.callout-note}
+## Git não é GitHub
+
+**Git** é o programa, instalado no seu computador, que registra o histórico. Funciona sem
+internet. **GitHub** é um serviço na web que hospeda repositórios Git. Dá para usar Git sem
+GitHub; o contrário não.
+:::
+
+## Por que isso importa no setor público
+
+Três situações que todo técnico já viveu:
+
+1. **"Qual versão foi enviada?"** Uma pasta com `analise_final.R`, `analise_final_v2.R`,
+   `analise_final_v2_revisado_JOAO.R`. Com Git, existe um arquivo só, e o histórico diz qual
+   estado foi entregue em cada data.
+2. **"O número mudou e ninguém sabe por quê."** O Git mostra, linha por linha, o que foi
+   alterado entre duas versões, por quem e quando.
+3. **"A pessoa que fez saiu da equipe."** O repositório continua, com o código, o histórico
+   e as mensagens explicando cada decisão.
+
+É o **rastro** que planilha e clique no QGIS não deixam.
+
+## Instalação e configuração
+
+Instale o Git em <https://git-scm.com/downloads>. Em máquina institucional, peça junto com o
+R e o RStudio (@sec-m1-ambiente). Depois, reinicie o RStudio e confira no **terminal** do
+RStudio (aba *Terminal*, não o *Console*):
+
+```bash
+git --version
+```
+
+Configure seu nome e e-mail uma única vez. O pacote `usethis` faz isso de dentro do R:
+
+```{r}
+#| eval: false
+install.packages(c("usethis", "gitcreds"))
+
+usethis::use_git_config(
+  user.name  = "Seu Nome",
+  user.email = "seu.email@transportes.gov.br"
+)
+```
+
+Para enviar ao GitHub, o RStudio precisa de um **token de acesso pessoal**, que substitui a
+senha:
+
+```{r}
+#| eval: false
+usethis::create_github_token()   # abre o GitHub no navegador para gerar o token
+gitcreds::gitcreds_set()         # cole o token quando pedir
+```
+
+::: {.callout-warning}
+## O token é uma senha
+
+Não cole o *token* em script, em *chat* de IA nem em e-mail. O `gitcreds` o guarda no
+gerenciador de credenciais do sistema, que é o lugar certo.
+:::
+
+## Colocar um projeto sob controle de versão
+
+Com o projeto aberto no RStudio:
+
+```{r}
+#| eval: false
+usethis::use_git()      # inicia o repositório local e oferece o primeiro commit
+usethis::use_github()   # cria o repositório no GitHub e envia tudo
+```
+
+Reinicie o RStudio quando pedir. Aparecerá uma aba **Git** no painel superior direito.
+
+## O ciclo do dia a dia
+
+Todo o trabalho com Git é este ciclo, repetido:
+
+| Passo | No RStudio (aba Git) | No terminal |
+|:--|:--|:--|
+| Ver o que mudou | a lista de arquivos com M (modificado) ou ? (novo) | `git status` |
+| Escolher o que entra | marcar a caixa *Staged* | `git add arquivo.R` |
+| Registrar | botão **Commit**, escrever a mensagem | `git commit -m "mensagem"` |
+| Enviar ao GitHub | botão **Push** (seta verde para cima) | `git push` |
+| Trazer do GitHub | botão **Pull** (seta azul para baixo) | `git pull` |
+
+**Commit é local. Push é o que envia.** Você pode fazer vários commits ao longo do dia e um
+único push no fim. Nada sai do seu computador até o push.
+
+### Mensagens de commit que servem para alguma coisa
+
+A mensagem é para quem vai ler o histórico daqui a um ano, possivelmente você.
+
+| Ruim | Boa |
+|:--|:--|
+| `ajustes` | `Corrige unidade de veic-km do VISUM (vinha em metros)` |
+| `versão final` | `Restringe atraso à rede estrutural, exclui conectores` |
+| `atualiza` | `Atualiza Comex Stat para 2025 e refaz de-para de municípios` |
+
+Uma boa mensagem diz **o que** mudou e, quando não é óbvio, **por quê**.
+
+## O que **não** versionar
+
+Esta é a parte mais importante do capítulo para quem trabalha no setor público.
+
+Tudo que é enviado a um repositório **público** no GitHub fica acessível a qualquer pessoa,
+e fica no histórico mesmo que seja apagado depois. Apagar o arquivo num commit seguinte não
+remove o que já foi publicado.
+
+Nunca versione:
+
+- **Dados não públicos.** Exportações de modelos contratados, bases com dado pessoal,
+  planilhas de estudos em andamento. A exportação do VISUM do @sec-m1-modelo4etapas é o
+  exemplo do curso: ela só pode ir para um repositório público com autorização expressa.
+- **Credenciais.** Senhas, *tokens*, *strings* de conexão. Use variáveis de ambiente
+  (`usethis::edit_r_environ()`).
+- **Dados brutos grandes**, que se baixam por script. Versione o script, não o arquivo.
+- **Arquivos gerados**, que o código recria: pastas de resultados, o `_site/` do Quarto,
+  a `renv/library/`.
+
+O arquivo `.gitignore` na raiz do projeto lista o que o Git deve ignorar. Um trecho do deste
+curso:
+
+```
+# Quarto
+/_site/
+/.quarto/
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+
+# dados baixados por script
+/dados/brutos/
+```
+
+```{r}
+#| eval: false
+usethis::use_git_ignore("dados/brutos/")   # acrescenta uma linha ao .gitignore
+```
+
+::: {.callout-important}
+## Repositório privado para o que for interno
+
+O GitHub permite repositórios **privados**, visíveis só para quem você convidar. Para análise
+interna do Ministério, esse é o padrão, e ele continua dando o histórico e o *backup*. Público
+só o que for, de fato, para publicação.
+:::
+
+## Ver o histórico
+
+O botão do relógio na aba Git abre o histórico. Clicando num commit, você vê exatamente quais
+linhas mudaram. No terminal:
+
+```bash
+git log --oneline          # a lista de commits, uma linha cada
+git diff                   # o que mudou desde o último commit
+git diff HEAD~1 analise.R  # o que mudou num arquivo desde o penúltimo commit
+```
+
+## Do repositório ao site
+
+Este material é um repositório Git publicado como site pelo GitHub Pages. O mesmo vale para
+qualquer relatório em Quarto (@sec-m5-quarto): cada push para o ramo principal pode
+disparar a regeneração do site, sem nenhum passo manual. É o fechamento natural do que o
+curso ensina: o código produz o resultado, o Git registra o histórico, e a publicação é
+automática.
+
+## Exercício
+
+1. Coloque o projeto do seu trabalho final sob controle de versão com `usethis::use_git()`.
+2. Escreva um `.gitignore` que exclua os dados brutos e qualquer dado não público.
+3. Faça três commits, cada um com uma mensagem que explique o que mudou e por quê.
+4. Crie um repositório **privado** no GitHub e envie o projeto.
+5. Abra o histórico e encontre, no *diff* de um dos commits, a linha que você alterou.

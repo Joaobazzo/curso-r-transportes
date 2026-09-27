@@ -1,6 +1,6 @@
 # Acessibilidade a oportunidades {#sec-m4-acessibilidade}
 
-Acessibilidade é a facilidade de alcançar destinos de interesse — empregos, saúde, educação —
+Acessibilidade é a facilidade de alcançar destinos de interesse (empregos, saúde, educação)
 a partir de um lugar, considerando o tempo de viagem real pela rede de transporte. É um
 indicador que reúne, em um número por lugar, a **distribuição das oportunidades** e o
 **desempenho do sistema de transporte**. É a medida que responde à pergunta "esta obra melhora
@@ -30,7 +30,7 @@ tecnicamente, e a mais difícil de explicar em uma reunião.
 ## Dados prontos: `aopdata`
 
 O projeto Acesso a Oportunidades (Ipea) publica, para 20 cidades brasileiras, os indicadores
-já calculados em grade hexagonal — com população, renda, raça e oportunidades por hexágono.
+já calculados em grade hexagonal, com população, renda, raça e oportunidades por hexágono.
 Para diagnóstico, é o caminho mais rápido.
 
 ```{r}
@@ -66,25 +66,25 @@ cols_cma
 # coluna de estrato de renda: o pacote traz quintil e decil (R002 e R003).
 # Confira no dicionário qual é qual antes de rotular o gráfico:
 # aopdata::aopdata_dictionary(lang = "pt")
-col_renda <- intersect(c("R002", "R003"), names(aop))[1]
+col_renda <- dplyr::intersect(c("R002", "R003"), names(aop))[1]
 col_renda
 ```
 
 ```{r}
 #| label: fig-aop-mapa
-#| fig-cap: "Empregos acessíveis em até 60 minutos por transporte público — Fortaleza"
+#| fig-cap: "Empregos acessíveis em até 60 minutos por transporte público em Fortaleza"
 #| fig-height: 5
-col_60 <- intersect(c("CMATT60"), names(aop))[1]
+col_60 <- dplyr::intersect(c("CMATT60"), names(aop))[1]
 
 if (!is.na(col_60)) {
   aop_plot <- aop |>
-    filter(!is.na(.data[[col_60]]), P001 > 0) |>
-    mutate(acesso = .data[[col_60]])
+    dplyr::filter(!is.na(.data[[col_60]]), P001 > 0) |>
+    dplyr::mutate(acesso = .data[[col_60]])
 
   ggplot(aop_plot) +
     geom_sf(aes(fill = acesso), colour = NA) +
     scale_fill_viridis_c(option = "inferno", direction = -1,
-                         labels = scales::label_number(big.mark = "."),
+                         labels = scales::label_number(big.mark = ".", decimal.mark = ","),
                          name = "Empregos\nem 60 min") +
     labs(caption = "Fonte: Ipea, Projeto Acesso a Oportunidades (aopdata), 2019.") +
     theme_void(base_size = 9)
@@ -98,22 +98,23 @@ O indicador ganha sentido quando cruzado com quem vive em cada lugar:
 ```{r}
 if (!is.na(col_60)) {
   aop |>
-    st_drop_geometry() |>
-    filter(P001 > 0, !is.na(.data[[col_60]]), !is.na(.data[[col_renda]])) |>
-    mutate(estrato_renda = .data[[col_renda]]) |>
-    summarise(
+    sf::st_drop_geometry() |>
+    dplyr::filter(P001 > 0, !is.na(.data[[col_60]]), !is.na(.data[[col_renda]])) |>
+    dplyr::mutate(estrato_renda = .data[[col_renda]]) |>
+    dplyr::summarise(
       pessoas = sum(P001),
-      acesso_medio = round(weighted.mean(.data[[col_60]], P001, na.rm = TRUE)),
+      # as.numeric(): P001 e o acesso são inteiros, e o produto estoura o limite do inteiro
+      acesso_medio = round(weighted.mean(as.numeric(.data[[col_60]]), P001, na.rm = TRUE)),
       .by = estrato_renda
     ) |>
-    arrange(estrato_renda) |>
-    rename(`Estrato de renda` = estrato_renda, `População` = pessoas,
+    dplyr::arrange(estrato_renda) |>
+    dplyr::rename(`Estrato de renda` = estrato_renda, `População` = pessoas,
            `Empregos acessíveis em 60 min (média)` = acesso_medio) |>
     knitr::kable(align = "lrr")
 }
 ```
 
-A leitura típica desse tipo de tabela — os estratos mais pobres com acesso menor — é o
+A leitura típica desse tipo de tabela (os estratos mais pobres com acesso menor) é o
 principal argumento de equidade em avaliação de projetos de transporte urbano. As colunas
 `R002` e `R003` trazem os estratos de renda (quintil e decil); confira no dicionário do pacote
 qual é qual antes de rotular o gráfico, porque a troca inverte a leitura.
@@ -121,8 +122,8 @@ qual é qual antes de rotular o gráfico, porque a troca inverte a leitura.
 ## Calcular do zero: o pacote `accessibility`
 
 Quando a cidade não está no `aopdata`, ou quando se quer avaliar um **cenário** (uma linha
-nova, uma linha removida), é preciso calcular. O insumo é uma matriz de tempo de viagem —
-normalmente vinda do `r5r` (@sec-m4-r5r) — e uma tabela de uso do solo.
+nova, uma linha removida), é preciso calcular. O insumo é uma matriz de tempo de viagem,
+normalmente vinda do `r5r` (@sec-m4-r5r), e uma tabela de uso do solo.
 
 Para demonstrar as funções de forma executável, vamos construir uma matriz de tempos
 **aproximada** a partir das distâncias entre os hexágonos, supondo uma velocidade média.
@@ -131,25 +132,25 @@ Para demonstrar as funções de forma executável, vamos construir uma matriz de
 set.seed(2026)
 
 hex <- aop |>
-  filter(P001 > 0) |>
-  select(id_hex, P001, T001, all_of(col_renda)) |>
-  slice_sample(n = 250)          # amostra, para o exemplo rodar rápido
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex, P001, T001, dplyr::all_of(col_renda)) |>
+  dplyr::slice_sample(n = 250)          # amostra, para o exemplo rodar rápido
 
-centros <- st_point_on_surface(st_transform(hex, 31984))   # UTM 24S (Fortaleza)
+centros <- sf::st_point_on_surface(sf::st_transform(hex, 31984))   # UTM 24S (Fortaleza)
 
-d <- st_distance(centros) |> units::set_units(km) |> as.numeric()
+d <- sf::st_distance(centros) |> units::set_units(km) |> as.numeric()
 d <- matrix(d, nrow = nrow(hex))
 
 velocidade_kmh <- 18    # velocidade porta-a-porta típica de transporte público urbano
 
 matriz <- expand.grid(from_id = hex$id_hex, to_id = hex$id_hex,
                       stringsAsFactors = FALSE) |>
-  mutate(travel_time = round(as.vector(d) / velocidade_kmh * 60, 1)) |>
-  filter(travel_time <= 90)
+  dplyr::mutate(travel_time = round(as.vector(d) / velocidade_kmh * 60, 1)) |>
+  dplyr::filter(travel_time <= 90)
 
 uso_solo <- hex |>
-  st_drop_geometry() |>
-  rename(id = id_hex, populacao = P001, empregos = T001)
+  sf::st_drop_geometry() |>
+  dplyr::rename(id = id_hex, populacao = P001, empregos = T001)
 
 head(matriz, 3)
 ```
@@ -158,13 +159,13 @@ head(matriz, 3)
 Essa matriz é **ilustrativa**: distância em linha reta dividida por uma velocidade média não é
 tempo de viagem por transporte público. Ela serve para mostrar como as funções do
 `accessibility` operam. Em qualquer uso real, a matriz vem do `r5r`, com a rede, o GTFS e o
-horário de partida — e a diferença entre as duas é grande, sobretudo em cidades com barreiras
+horário de partida. A diferença entre as duas é grande, sobretudo em cidades com barreiras
 físicas.
 :::
 
 ```{r}
 # 1. oportunidades cumulativas em 30, 60 e 90 minutos
-cma <- cumulative_cutoff(
+cma <- accessibility::cumulative_cutoff(
   travel_matrix = matriz,
   land_use_data = uso_solo,
   opportunity   = "empregos",
@@ -177,7 +178,7 @@ head(cma, 4)
 
 ```{r}
 # 2. tempo até a oportunidade mais próxima
-tmi <- cost_to_closest(
+tmi <- accessibility::cost_to_closest(
   travel_matrix = matriz,
   land_use_data = uso_solo,
   opportunity   = "empregos",
@@ -190,12 +191,12 @@ summary(tmi[[ncol(tmi)]])   # a última coluna traz o tempo até a oportunidade 
 
 ```{r}
 # 3. medida gravitacional, com decaimento exponencial
-grav <- gravity(
+grav <- accessibility::gravity(
   travel_matrix = matriz,
   land_use_data = uso_solo,
   opportunity   = "empregos",
   travel_cost   = "travel_time",
-  decay_function = decay_exponential(decay_value = 0.05)
+  decay_function = accessibility::decay_exponential(decay_value = 0.05)
 )
 
 head(grav, 4)
@@ -229,33 +230,33 @@ precisa estar declarada.
 
 ## Comparação de cenários
 
-A aplicação mais valiosa em planejamento não é o valor absoluto do indicador — é a
+A aplicação mais valiosa em planejamento não é o valor absoluto do indicador. É a
 **diferença entre dois cenários**:
 
 ```{r}
 #| eval: false
 # matriz do cenário atual e do cenário com a intervenção (ver @sec-m4-r5r)
-acesso_atual  <- cumulative_cutoff(matriz_atual,  uso_solo, "empregos", "travel_time", 60)
-acesso_novo   <- cumulative_cutoff(matriz_cenario, uso_solo, "empregos", "travel_time", 60)
+acesso_atual  <- accessibility::cumulative_cutoff(matriz_atual,  uso_solo, "empregos", "travel_time", 60)
+acesso_novo   <- accessibility::cumulative_cutoff(matriz_cenario, uso_solo, "empregos", "travel_time", 60)
 
 comparacao <- acesso_atual |>
-  rename(acesso_atual = empregos) |>
-  left_join(rename(acesso_novo, acesso_novo = empregos), by = "id") |>
-  mutate(
+  dplyr::rename(acesso_atual = empregos) |>
+  dplyr::left_join(dplyr::rename(acesso_novo, acesso_novo = empregos), by = "id") |>
+  dplyr::mutate(
     variacao_abs = acesso_novo - acesso_atual,
     variacao_pct = 100 * (acesso_novo / acesso_atual - 1)
   ) |>
-  left_join(uso_solo, by = "id")
+  dplyr::left_join(uso_solo, by = "id")
 
 # o número que interessa ao gestor: quantas pessoas ganharam acesso, e quem são
 comparacao |>
-  summarise(
+  dplyr::summarise(
     pessoas_beneficiadas = sum(populacao[variacao_abs > 0]),
     ganho_medio_pct = weighted.mean(variacao_pct, populacao, na.rm = TRUE),
-    .by = estrato_renda
+    .by = dplyr::all_of(col_renda)
   )
 ```
 
-É esse quadro — pessoas beneficiadas por faixa de renda — que transforma uma análise de
-transporte em um argumento de política pública. O módulo 5 fecha o curso construindo
-exatamente esse relatório.
+É esse quadro, pessoas beneficiadas por faixa de renda, que transforma uma análise de
+transporte em um argumento de política pública. A opção 2 do projeto final
+(@sec-m5-projeto) percorre exatamente esse caminho.

@@ -1,7 +1,7 @@
 # Mapas temáticos {#sec-m5-mapas}
 
-Um mapa técnico bem-feito não é questão de estética: cada decisão — classificação, paleta,
-projeção, elementos — muda o que o leitor conclui. Este capítulo percorre essas decisões com
+Um mapa técnico bem-feito não é questão de estética: cada decisão (classificação, paleta,
+projeção, elementos) muda o que o leitor conclui. Este capítulo percorre essas decisões com
 um exemplo único, refinado passo a passo.
 
 ```{r}
@@ -15,7 +15,7 @@ library(classInt)
 
 ## O dado
 
-TKU de cabotagem atraído por UF — o resultado do módulo 1, agora para virar mapa.
+TKU de cabotagem atraído por UF: o resultado do módulo 1, agora para virar mapa.
 
 ```{r}
 colunas <- c("ano", "perfil", "sh2",
@@ -23,27 +23,27 @@ colunas <- c("ano", "perfil", "sh2",
              "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
              "tku")
 
-cabotagem <- read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
 names(cabotagem) <- colunas
 
 por_uf <- cabotagem |>
-  filter(tku > 0) |>
-  mutate(uf_destino = str_to_upper(str_squish(uf_destino))) |>
-  summarise(tku_bi = sum(tku) / 1e9, .by = uf_destino)
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(uf_destino = stringr::str_to_upper(stringr::str_squish(uf_destino))) |>
+  dplyr::summarise(tku_bi = sum(tku) / 1e9, .by = uf_destino)
 
 if (!file.exists("dados/brutos/uf_br.gpkg")) {
-  st_write(geobr::read_state(year = 2020, showProgress = FALSE),
+  sf::st_write(geobr::read_state(year = 2020, showProgress = FALSE),
            "dados/brutos/uf_br.gpkg", quiet = TRUE)
 }
 
-ufs <- st_read("dados/brutos/uf_br.gpkg", quiet = TRUE) |>
-  left_join(por_uf, by = c("abbrev_state" = "uf_destino")) |>
-  mutate(tku_bi = tidyr::replace_na(tku_bi, 0))
+ufs <- sf::st_read("dados/brutos/uf_br.gpkg", quiet = TRUE) |>
+  dplyr::left_join(por_uf, by = c("abbrev_state" = "uf_destino")) |>
+  dplyr::mutate(tku_bi = tidyr::replace_na(tku_bi, 0))
 
 summary(ufs$tku_bi)
 ```
 
-## Versão 1 — o mapa cru
+## Versão 1: o mapa cru
 
 ```{r}
 #| label: fig-v1
@@ -57,23 +57,23 @@ ggplot(ufs) +
 O problema é visível: a distribuição é muito assimétrica, então quase tudo fica na mesma cor e
 só um ou dois estados se destacam. O mapa não informa.
 
-## Versão 2 — classificar
+## Versão 2: classificar
 
 Classificar é agrupar os valores em faixas. O método muda a leitura, como vimos em
-@sec-m1-ggplot2 — aqui, aplicado ao mapa.
+@sec-m1-ggplot2, aqui aplicado ao mapa.
 
 ```{r}
 #| label: fig-v2
 #| fig-cap: "Os mesmos dados com três métodos de classificação"
 #| fig-height: 3.4
 classificar <- function(x, estilo, n = 5) {
-  brks <- classIntervals(x[x > 0], n = n, style = estilo)$brks
+  brks <- classInt::classIntervals(x[x > 0], n = n, style = estilo)$brks
   cut(x, breaks = unique(c(0, brks)), include.lowest = TRUE, dig.lab = 2)
 }
 
 mapa_classe <- function(estilo, titulo) {
   ufs |>
-    mutate(classe = classificar(tku_bi, estilo)) |>
+    dplyr::mutate(classe = classificar(tku_bi, estilo)) |>
     ggplot() +
     geom_sf(aes(fill = classe), colour = "white", linewidth = 0.15) +
     scale_fill_brewer(palette = "YlGnBu", na.value = "grey93", name = NULL) +
@@ -94,7 +94,7 @@ patchwork::wrap_plots(
 | Método | Efeito no mapa | Quando usar |
 |:--|:--|:--|
 | Quantis | mesmo número de unidades por classe; sempre "colorido" | ranques, comparações relativas |
-| Jenks | respeita os agrupamentos naturais dos dados | distribuições assimétricas — o caso mais comum |
+| Jenks | respeita os agrupamentos naturais dos dados | distribuições assimétricas, o caso mais comum |
 | Intervalos iguais | faixas de mesma amplitude | quando a escala tem significado próprio (%, temperatura) |
 
 ::: {.callout-important}
@@ -103,7 +103,7 @@ dado com métodos diferentes contam histórias diferentes, e o leitor tem o dire
 qual foi usado.
 :::
 
-## Versão 3 — a paleta certa para o tipo de variável
+## Versão 3: a paleta certa para o tipo de variável
 
 ```{r}
 #| label: fig-paletas
@@ -137,18 +137,19 @@ Duas verificações rápidas de acessibilidade visual: converta o mapa para tons
 se a ordem ainda se lê; e evite vermelho-verde como par de contraste, que é o tipo mais comum
 de daltonismo. As paletas `viridis` resolvem os dois problemas por construção.
 
-## Versão 4 — o mapa completo
+## Versão 4: o mapa completo
 
 ```{r}
 #| label: fig-mapa-final
 #| fig-cap: "TKU de cabotagem atraído por unidade da federação, 2025"
 #| fig-height: 6
 ufs_cls <- ufs |>
-  mutate(classe = classificar(tku_bi, "jenks"))
+  dplyr::mutate(classe = classificar(tku_bi, "jenks"))
 
 rotulos <- ufs_cls |>
-  filter(tku_bi > 5) |>
-  st_point_on_surface()
+  dplyr::filter(tku_bi > 5) |>
+  sf::st_transform(5880) |>      # ponto interno calculado em projeção plana
+  sf::st_point_on_surface()
 
 ggplot(ufs_cls) +
   geom_sf(aes(fill = classe), colour = "white", linewidth = 0.2) +
@@ -176,7 +177,8 @@ ggplot(ufs_cls) +
     plot.title = element_text(face = "bold", size = 12),
     plot.subtitle = element_text(colour = "grey35", size = 9),
     plot.caption = element_text(colour = "grey45", size = 7, hjust = 0),
-    legend.position = c(0.18, 0.28)
+    legend.position = "inside",
+    legend.position.inside = c(0.18, 0.28)
   )
 ```
 
@@ -190,7 +192,7 @@ declarar: **fonte do dado**, **fonte da malha**, **método de classificação** 
 #| label: fig-inset
 #| fig-cap: "Mapa de detalhe com mapa de situação"
 #| fig-height: 5
-principal <- ufs_cls |> filter(abbrev_state %in% c("PR", "SC", "RS"))
+principal <- ufs_cls |> dplyr::filter(abbrev_state %in% c("PR", "SC", "RS"))
 
 g_principal <- ggplot(principal) +
   geom_sf(aes(fill = classe), colour = "white", linewidth = 0.3) +
@@ -208,7 +210,7 @@ g_principal +
                            right = 1, top = 1)
 ```
 
-`patchwork::inset_element()` resolve o mapa de situação — aquele retângulo no canto que mostra
+`patchwork::inset_element()` resolve o mapa de situação: aquele retângulo no canto que mostra
 onde, no país, fica a área ampliada. É esperado em qualquer mapa de recorte regional.
 
 ## Símbolos proporcionais e fluxos
@@ -220,7 +222,8 @@ proporcional:
 #| label: fig-simbolos
 #| fig-cap: "Símbolos proporcionais: TKU atraído por UF"
 #| fig-height: 5.4
-centros <- ufs_cls |> filter(tku_bi > 0) |> st_point_on_surface()
+centros <- ufs_cls |> dplyr::filter(tku_bi > 0) |> sf::st_transform(5880) |>
+  sf::st_point_on_surface()
 
 ggplot() +
   geom_sf(data = ufs, fill = "grey97", colour = "white", linewidth = 0.2) +
@@ -231,7 +234,7 @@ ggplot() +
 ```
 
 `scale_size_area()` é a função correta aqui: ela garante que a **área** do círculo seja
-proporcional ao valor. Com `scale_size()`, o proporcional é o raio — e o olho lê área, o que
+proporcional ao valor. Com `scale_size()`, o proporcional é o raio. O olho lê área, o que
 exagera as diferenças por um fator quadrático.
 
 ## Mapas interativos no relatório
@@ -240,11 +243,11 @@ exagera as diferenças por um fator quadrático.
 #| eval: false
 library(mapgl)
 
-maplibre(bounds = ufs) |>
-  add_fill_layer(
+mapgl::maplibre(bounds = ufs) |>
+  mapgl::add_fill_layer(
     id = "tku",
-    source = st_transform(ufs_cls, 4326),
-    fill_color = interpolate(
+    source = sf::st_transform(ufs_cls, 4326),
+    fill_color = mapgl::interpolate(
       column = "tku_bi",
       values = c(0, 10, 30, 60),
       stops = c("#f7fcf0", "#7bccc4", "#2b8cbe", "#084081")
@@ -252,12 +255,12 @@ maplibre(bounds = ufs) |>
     fill_opacity = 0.8,
     tooltip = "abbrev_state"
   ) |>
-  add_legend("TKU (bi t·km)", values = c(0, 60),
+  mapgl::add_legend("TKU (bi t·km)", values = c(0, 60),
              colors = c("#f7fcf0", "#084081"))
 ```
 
 Em um relatório HTML, o mapa interativo é um ganho real: o leitor explora. Em PDF ou Word, ele
-vira uma imagem estática — então o documento precisa funcionar nos dois casos, com o mapa
+vira uma imagem estática. O documento precisa funcionar nos dois casos, com o mapa
 estático como base e o interativo como complemento.
 
 ## Lista de verificação antes de entregar um mapa

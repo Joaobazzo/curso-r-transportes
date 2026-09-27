@@ -1,9 +1,12 @@
 # Visão geral do módulo {#sec-m4}
 
+![Mapa de zonas de tempo mínimo de viagem por trem ou bonde, Melbourne, 1922 (Metropolitan Town Planning Commission). Cem anos antes deste módulo, a acessibilidade já era medida e desenhada. Fonte: coleção de David Levinson.](img/access_levinson.png){width=60%}
+
+
 ::: {.modulo-meta}
-**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
-**Datas (Opção A):** aulas em 19/10 e 21/10; material assíncrono liberado em 22/10
-**Pacotes:** `spdep`, `gstat`, `terra`, `r5r`, `accessibility`, `aopdata`, `gtfstools`, `flownet`
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
+**Datas:** 19/10 e 21/10 (síncronas); 22/10 (assíncrono)\
+**Pacotes:** `spdep`, `gstat`, `terra`, `r5r`, `accessibility`, `aopdata`, `gtfstools`, `flownet`\
 **Estudos de caso:** declividade × traçado na BR-116 (Serra do Mar) e acessibilidade em Fortaleza
 :::
 
@@ -56,7 +59,7 @@ if (length(faltando) > 0) install.packages(faltando)
 
 Os capítulos deste módulo são executados quando o site é construído, com uma exceção
 declarada: os blocos que dependem do **`r5r`** exigem o JDK 21 e uma pasta com o `.pbf` do
-OpenStreetMap e o GTFS da cidade — arquivos que não cabem no repositório. Esses blocos estão
+OpenStreetMap e o GTFS da cidade: arquivos que não cabem no repositório. Esses blocos estão
 marcados como não executados e trazem, no texto, o resultado esperado.
 
 Para rodá-los na sua máquina, monte a pasta uma vez:
@@ -75,5 +78,5 @@ osmextract::oe_download(
 #    e salve o .zip na mesma pasta, sem descompactar
 ```
 
-O resto do módulo — autocorrelação, interpolação, declividade e acessibilidade com `aopdata` —
+O resto do módulo (autocorrelação, interpolação, declividade e acessibilidade com `aopdata`)
 roda sem Java e sem *download* manual.

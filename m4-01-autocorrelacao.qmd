@@ -1,7 +1,7 @@
 # Autocorrelação espacial {#sec-m4-autocorrelacao}
 
 "Tudo está relacionado com tudo, mas coisas próximas estão mais relacionadas que coisas
-distantes" — a primeira lei da geografia, de Tobler. A autocorrelação espacial mede exatamente
+distantes": a primeira lei da geografia, de Tobler. A autocorrelação espacial mede exatamente
 isso: o quanto o valor observado em um lugar se parece com o dos seus vizinhos.
 
 Importa para o trabalho do Ministério por dois motivos. Primeiro, porque **descreve**: mostrar
@@ -25,37 +25,40 @@ baixadas nos módulos anteriores.
 ```{r}
 # os dois arquivos já foram baixados no módulo 2; se não existirem, busca de novo
 if (!file.exists("dados/brutos/muni_pr_sc.gpkg")) {
-  st_write(dplyr::bind_rows(
+  sf::st_write(dplyr::bind_rows(
     geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
     geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
   ), "dados/brutos/muni_pr_sc.gpkg", quiet = TRUE)
 }
 if (!file.exists("dados/brutos/grade_pr.gpkg")) {
-  st_write(geobr::read_statistical_grid(code_grid = "PR", showProgress = FALSE),
+  sf::st_write(geobr::read_statistical_grid(year = 2022, code_muni = "PR", showProgress = FALSE),
            "dados/brutos/grade_pr.gpkg", quiet = TRUE)
 }
 
-muni <- st_read("dados/brutos/muni_pr_sc.gpkg", quiet = TRUE) |>
-  filter(abbrev_state == "PR") |>
-  st_transform(31982)
+muni <- sf::st_read("dados/brutos/muni_pr_sc.gpkg", quiet = TRUE) |>
+  dplyr::filter(abbrev_state == "PR") |>
+  sf::st_transform(31982)
 
-grade <- st_read("dados/brutos/grade_pr.gpkg", quiet = TRUE) |> st_transform(31982)
+grade <- sf::st_read("dados/brutos/grade_pr.gpkg", quiet = TRUE) |> sf::st_transform(31982)
 
-pop_col <- intersect(c("POP", "pop"), names(grade))[1]
+pop_col <- dplyr::intersect(c("pop_total", "POP", "pop"), names(grade))[1]
 
 pop_muni <- grade |>
-  mutate(pop = as.numeric(.data[[pop_col]])) |>
-  st_point_on_surface() |>
-  st_join(muni |> select(code_muni)) |>
-  st_drop_geometry() |>
-  summarise(pop = sum(pop, na.rm = TRUE), .by = code_muni) |>
-  filter(!is.na(code_muni))
+  dplyr::mutate(pop = as.numeric(.data[[pop_col]])) |>
+  # a grade já vem com code_muni/name_muni do IBGE; descartamos para evitar
+  # colisão de nomes com o join abaixo, que é a fonte que queremos usar
+  dplyr::select(pop) |>
+  sf::st_point_on_surface() |>
+  sf::st_join(muni |> dplyr::select(code_muni)) |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(pop = sum(pop, na.rm = TRUE), .by = code_muni) |>
+  dplyr::filter(!is.na(code_muni))
 
 pr <- muni |>
-  left_join(pop_muni, by = "code_muni", relationship = "one-to-one") |>
-  mutate(
+  dplyr::left_join(pop_muni, by = "code_muni", relationship = "one-to-one") |>
+  dplyr::mutate(
     pop = tidyr::replace_na(pop, 0),
-    area_km2 = as.numeric(units::set_units(st_area(geom), km^2)),
+    area_km2 = as.numeric(units::set_units(sf::st_area(geom), km^2)),
     densidade = pop / area_km2,
     log_dens = log1p(densidade)
   )
@@ -65,29 +68,29 @@ c(municipios = nrow(pr), pop_total = sum(pr$pop))
 
 ## Definir a vizinhança
 
-Não existe autocorrelação sem uma definição de vizinho — e essa definição **é uma escolha
+Não existe autocorrelação sem uma definição de vizinho. Essa definição **é uma escolha
 do analista**, que muda o resultado.
 
 ```{r}
 # contiguidade: vizinhos são os que compartilham fronteira
-nb_queen <- poly2nb(pr, queen = TRUE)    # fronteira ou vértice
-nb_rook  <- poly2nb(pr, queen = FALSE)   # apenas fronteira
+nb_queen <- spdep::poly2nb(pr, queen = TRUE)    # fronteira ou vértice
+nb_rook  <- spdep::poly2nb(pr, queen = FALSE)   # apenas fronteira
 
 nb_queen
 ```
 
 ```{r}
 # vizinhança por distância: todos a menos de 60 km do centroide
-coords <- st_coordinates(st_point_on_surface(pr))
-nb_dist <- dnearneigh(coords, 0, 60000)
+coords <- sf::st_coordinates(sf::st_point_on_surface(pr))
+nb_dist <- spdep::dnearneigh(coords, 0, 60000)
 
 # k vizinhos mais próximos: garante o mesmo número de vizinhos para todos
-nb_knn <- knn2nb(knearneigh(coords, k = 5))
+nb_knn <- spdep::knn2nb(spdep::knearneigh(coords, k = 5))
 
 data.frame(
   criterio = c("contiguidade (queen)", "distância 60 km", "5 mais próximos"),
-  vizinhos_medios = round(c(mean(card(nb_queen)), mean(card(nb_dist)), mean(card(nb_knn))), 1),
-  sem_vizinhos = c(sum(card(nb_queen) == 0), sum(card(nb_dist) == 0), sum(card(nb_knn) == 0))
+  vizinhos_medios = round(c(mean(spdep::card(nb_queen)), mean(spdep::card(nb_dist)), mean(spdep::card(nb_knn))), 1),
+  sem_vizinhos = c(sum(spdep::card(nb_queen) == 0), sum(spdep::card(nb_dist) == 0), sum(spdep::card(nb_knn) == 0))
 ) |>
   knitr::kable()
 ```
@@ -101,11 +104,11 @@ data.frame(
 ::: {.callout-warning}
 Municípios sem vizinho (ilhas, ou unidades isoladas pelo critério de distância) quebram as
 funções seguintes. Use `zero.policy = TRUE` para tratá-los como "sem vizinhança" em vez de
-erro — e diga no relatório quantos foram.
+erro. Diga no relatório quantos foram.
 :::
 
 ```{r}
-lw <- nb2listw(nb_queen, style = "W", zero.policy = TRUE)
+lw <- spdep::nb2listw(nb_queen, style = "W", zero.policy = TRUE)
 ```
 
 O argumento `style` define a padronização dos pesos: `"W"` (por linha, o padrão de uso) faz
@@ -114,7 +117,7 @@ cada vizinho pesar 1/n; `"B"` é binário; `"S"` é uma variante estabilizada.
 ## I de Moran global
 
 ```{r}
-moran.test(pr$log_dens, lw, zero.policy = TRUE)
+spdep::moran.test(pr$log_dens, lw, zero.policy = TRUE)
 ```
 
 Leitura do resultado:
@@ -126,14 +129,14 @@ Leitura do resultado:
 
 ```{r}
 set.seed(42)
-moran.mc(pr$log_dens, lw, nsim = 999, zero.policy = TRUE)
+spdep::moran.mc(pr$log_dens, lw, nsim = 999, zero.policy = TRUE)
 ```
 
 ```{r}
 #| label: fig-moran-plot
 #| fig-cap: "Diagrama de dispersão de Moran: valor × média dos vizinhos"
 #| fig-height: 4.6
-moran.plot(pr$log_dens, lw, zero.policy = TRUE,
+spdep::moran.plot(pr$log_dens, lw, zero.policy = TRUE,
            xlab = "log(1 + densidade)", ylab = "média dos vizinhos",
            labels = FALSE, pch = 19, col = "#1a5b8a")
 ```
@@ -147,15 +150,15 @@ O I global responde "há concentração?". O **LISA** (indicador local de associ
 responde "onde?".
 
 ```{r}
-lisa <- localmoran(pr$log_dens, lw, zero.policy = TRUE)
+lisa <- spdep::localmoran(pr$log_dens, lw, zero.policy = TRUE)
 
 pr_lisa <- pr |>
-  mutate(
+  dplyr::mutate(
     ii    = lisa[, "Ii"],
     p_val = lisa[, ncol(lisa)],
     z     = as.numeric(scale(log_dens)),
-    z_lag = lag.listw(lw, as.numeric(scale(log_dens)), zero.policy = TRUE),
-    cluster = case_when(
+    z_lag = spdep::lag.listw(lw, as.numeric(scale(log_dens)), zero.policy = TRUE),
+    cluster = dplyr::case_when(
       p_val > 0.05        ~ "não significativo",
       z > 0 & z_lag > 0   ~ "alto–alto",
       z < 0 & z_lag < 0   ~ "baixo–baixo",
@@ -164,7 +167,7 @@ pr_lisa <- pr |>
     )
   )
 
-count(st_drop_geometry(pr_lisa), cluster, sort = TRUE)
+dplyr::count(sf::st_drop_geometry(pr_lisa), cluster, sort = TRUE)
 ```
 
 ```{r}
@@ -184,7 +187,7 @@ ggplot(pr_lisa) +
 
 Os agrupamentos alto–alto identificam as regiões metropolitanas; os baixo–baixo, as áreas de
 esvaziamento demográfico. Em uma análise de transportes, a mesma técnica aplicada a acidentes,
-a volume de tráfego ou a tempo de viagem identifica trechos críticos — e o mapa LISA é um
+a volume de tráfego ou a tempo de viagem identifica trechos críticos. O mapa LISA é um
 produto direto para o relatório.
 
 ::: {.callout-note}
@@ -199,16 +202,16 @@ produto direto para o relatório.
 
 ## E quando a autocorrelação atrapalha
 
-Se o objetivo é modelar — prever demanda, explicar acidentes — a autocorrelação nos resíduos
-indica que um modelo comum não serve:
+Se o objetivo é modelar (prever demanda, explicar acidentes), a autocorrelação nos resíduos
+indica que um modelo comum não serve.
 
 ```{r}
 modelo <- lm(log_dens ~ log(area_km2), data = pr)
-lm.morantest(modelo, lw, zero.policy = TRUE)
+spdep::lm.morantest(modelo, lw, zero.policy = TRUE)
 ```
 
 Um p-valor pequeno aqui significa que sobrou estrutura espacial no resíduo. As saídas usuais
 são modelos espaciais explícitos (`spatialreg::lagsarlm`, `errorsarlm`), regressão
-geograficamente ponderada (`GWmodel`) ou modelos bayesianos com efeito espacial (`INLA`) —
-todos fora do escopo deste curso, mas é importante saber que o diagnóstico existe e que
+geograficamente ponderada (`GWmodel`) ou modelos bayesianos com efeito espacial (`INLA`).
+Todos ficam fora do escopo deste curso, mas é importante saber que o diagnóstico existe e que
 ignorá-lo invalida os testes de significância.

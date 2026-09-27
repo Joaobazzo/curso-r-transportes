@@ -1,21 +1,23 @@
 # Visão geral do módulo {#sec-m5}
 
 ::: {.modulo-meta}
-**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)
-**Datas (Opção A):** aulas em 03/11 e 04/11; material assíncrono liberado em 05/11
-**Pacotes:** Quarto, `rmarkdown`, `knitr`, `gt`, `ggplot2`, `sf`, `ggspatial`, `patchwork`, `mapgl`
-**Entrega:** projeto final — relatório técnico reproduzível com dados reais
+**Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
+**Datas:** 26/10 e 27/10 (síncronas); 23/10 (assíncrono)\
+**Pacotes:** Quarto, `rmarkdown`, `knitr`, `gt`, `ggplot2`, `sf`, `ggspatial`, `patchwork`, `mapgl`\
+**Projeto final:** relatório técnico reproduzível com dados reais, para levar para o trabalho
 :::
 
 ## O que você vai conseguir fazer no fim do módulo
 
 - Produzir mapas temáticos com padrão de publicação: classificação justificada, paleta
   adequada ao tipo de variável, elementos cartográficos completos e legendas legíveis.
-- Escrever um documento que **se atualiza sozinho** quando o dado muda — texto, tabelas,
+- Escrever um documento que **se atualiza sozinho** quando o dado muda: texto, tabelas,
   gráficos e mapas gerados pelo mesmo código.
 - Gerar o mesmo relatório para vários municípios, trechos ou cenários, em um laço.
 - Exportar para HTML, PDF e Word, sem refazer o trabalho.
-- Entregar uma análise que outra pessoa consegue reexecutar — que é o objetivo de todo o
+- Registrar o histórico de uma análise com Git e saber o que **não** pode ir para um
+  repositório público.
+- Entregar uma análise que outra pessoa consegue reexecutar. É o objetivo de todo o
   curso.
 
 ## Roteiro
@@ -26,6 +28,7 @@
 |:--|:--|:--|
 | 1 | Mapas temáticos: classificação, paletas, elementos, composição | @sec-m5-mapas |
 | 2 | Quarto: estrutura, figuras, tabelas, referências cruzadas, formatos | @sec-m5-quarto |
+| 2b | Controle de versão com Git e GitHub | @sec-m5-git |
 | 3 | Relatórios parametrizados e automação | @sec-m5-parametrizados |
 
 ### Conteúdo assíncrono (3h)
@@ -39,7 +42,7 @@
 
 ```{r}
 #| eval: false
-pacotes <- c("quarto", "rmarkdown", "knitr", "gt", "kableExtra",
+pacotes <- c("quarto", "rmarkdown", "knitr", "gt", "kableExtra", "usethis", "gitcreds",
              "ggspatial", "patchwork", "scales", "classInt", "mapgl")
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))

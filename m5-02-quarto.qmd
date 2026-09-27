@@ -1,7 +1,7 @@
 # Relatórios reproduzíveis com Quarto {#sec-m5-quarto}
 
 Um relatório reproduzível é um documento em que texto, código e resultados vivem no mesmo
-arquivo. Quando o dado muda, o documento inteiro se atualiza — tabelas, gráficos, mapas e os
+arquivo. Quando o dado muda, o documento inteiro se atualiza: tabelas, gráficos, mapas e os
 números citados no meio das frases.
 
 É a diferença entre "refazer o relatório do ano passado" (uma semana de trabalho, com risco de
@@ -30,7 +30,7 @@ execute:
 
 ## Introdução
 
-O porto movimentou **`r round(tku, 1)` bilhões de t·km** em 2025.
+O porto movimentou **`r knitr::inline_expr("round(tku, 1)")` bilhões de t·km** em 2025.
 
 ```{{r}}
 #| label: fig-serie
@@ -49,7 +49,7 @@ As mais úteis, no YAML (valem para o documento todo) ou no bloco (valem só par
 
 | Opção | Efeito |
 |:--|:--|
-| `echo: false` | esconde o código, mostra o resultado — o padrão para relatório institucional |
+| `echo: false` | esconde o código, mostra o resultado: o padrão para relatório institucional |
 | `eval: false` | mostra o código sem executar |
 | `include: false` | executa sem mostrar nada (para preparar dados) |
 | `warning: false`, `message: false` | esconde avisos e mensagens dos pacotes |
@@ -83,7 +83,7 @@ Como mostra a @fig-fluxos, o corredor Norte–Sudeste concentra...
 Veja também a @tbl-corredores e a @sec-m5-mapas.
 ````
 
-A numeração se ajusta sozinha quando você insere uma figura no meio do documento — o que
+A numeração se ajusta sozinha quando você insere uma figura no meio do documento. Isso
 elimina a revisão manual de "Figura 7 (ver Figura 12)" que todo relatório longo tem.
 
 ## Tabelas
@@ -91,7 +91,7 @@ elimina a revisão manual de "Figura 7 (ver Figura 12)" que todo relatório long
 ```{r}
 library(dplyr)
 
-resumo <- tibble::tibble(
+resumo <- data.frame(
   perfil = c("Granel Líquido e Gasoso", "Carga Conteinerizada",
              "Granel Sólido", "Carga Geral"),
   tku_bi = c(157.2, 76.0, 46.1, 7.7),
@@ -101,16 +101,16 @@ resumo <- tibble::tibble(
 
 ```{r}
 #| label: tbl-knitr
-#| tbl-cap: "Com knitr::kable — simples e suficiente na maioria dos casos"
+#| tbl-cap: "Com knitr::kable, simples e suficiente na maioria dos casos"
 resumo |>
-  mutate(part = scales::percent(part, accuracy = 0.1)) |>
+  dplyr::mutate(part = scales::percent(part, accuracy = 0.1)) |>
   knitr::kable(col.names = c("Perfil", "TKU (bi t·km)", "Participação"),
                align = "lrr")
 ```
 
 ```{r}
 #| label: tbl-gt
-#| tbl-cap: "Com gt — quando a tabela é o produto"
+#| tbl-cap: "Com gt, quando a tabela é o produto"
 resumo |>
   gt::gt() |>
   gt::fmt_number(columns = tku_bi, decimals = 1, dec_mark = ",", sep_mark = ".") |>
@@ -121,7 +121,7 @@ resumo |>
   gt::tab_options(table.font.size = 12)
 ```
 
-`kable` resolve o dia a dia; `gt` entra quando a tabela precisa de formatação fina — grupos,
+`kable` resolve o dia a dia; `gt` entra quando a tabela precisa de formatação fina: grupos,
 notas de rodapé, destaque condicional, totais.
 
 ## Números no meio do texto
@@ -131,15 +131,15 @@ você o calcula.
 
 ```{r}
 tku_total <- sum(resumo$tku_bi)
-maior <- resumo |> slice_max(tku_bi, n = 1)
+maior <- resumo |> dplyr::slice_max(tku_bi, n = 1)
 ```
 
-O texto abaixo é escrito assim — e se o dado mudar, ele muda junto:
+O texto abaixo é escrito assim, e se o dado mudar, ele muda junto:
 
 ````
-A cabotagem movimentou `r round(tku_total, 1)` bilhões de t·km em 2025,
-sendo `r maior$perfil` o perfil dominante, com
-`r scales::percent(maior$part)` do total.
+A cabotagem movimentou `r knitr::inline_expr("round(tku_total, 1)")` bilhões de t·km em 2025,
+sendo `r knitr::inline_expr("maior$perfil")` o perfil dominante, com
+`r knitr::inline_expr('scales::percent(maior$part)')` do total.
 ````
 
 E se lê assim:
@@ -192,7 +192,7 @@ relatorio-paranagua/
 
 A separação importa: o relatório **não** deve conter o processamento pesado. Ele lê um dado já
 tratado e se concentra em apresentar. Assim o documento renderiza em segundos, e o
-processamento — que leva minutos — roda só quando o dado de origem muda.
+processamento (que leva minutos) roda só quando o dado de origem muda.
 
 ## Citações e bibliografia
 
@@ -230,6 +230,6 @@ A tonelagem é estimada a partir do TKU e de distâncias em linha reta.
 
 ## Do documento ao site
 
-Quando os relatórios viram uma coleção — um por trimestre, um por corredor —, o passo natural
+Quando os relatórios viram uma coleção (um por trimestre, um por corredor), o passo natural
 é publicá-los como site, exatamente como este material. O `_quarto.yml` define a navegação, e
 o GitHub Pages hospeda sem custo. É o mesmo ferramental, com outra escala.

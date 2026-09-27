@@ -61,6 +61,24 @@ book:
         - m3-05-matrizes.qmd
         - m3-06-estudo-de-caso.qmd
         - m3-07-exercicios.qmd
+    - part: "Módulo 4 — Geoestatística, sensoriamento remoto e acessibilidade"
+      chapters:
+        - m4-00-visao-geral.qmd
+        - m4-01-autocorrelacao.qmd
+        - m4-02-interpolacao.qmd
+        - m4-03-declividade.qmd
+        - m4-04-acessibilidade.qmd
+        - m4-05-r5r.qmd
+        - m4-06-exercicios.qmd
+    - part: "Módulo 5 — Mapas temáticos, relatórios reproduzíveis e projeto final"
+      chapters:
+        - m5-00-visao-geral.qmd
+        - m5-01-mapas-tematicos.qmd
+        - m5-02-quarto.qmd
+        - m5-02b-git.qmd
+        - m5-03-parametrizados.qmd
+        - m5-04-projeto.qmd
+        - m5-05-proximos-passos.qmd
   appendices:
     - a-dados.qmd
     - a-slides.qmd

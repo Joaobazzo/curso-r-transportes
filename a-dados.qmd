@@ -44,8 +44,7 @@ Após a padronização de nomes adotada no curso (@sec-m1-manipulacao):
 
 Recorte didático da saída de alocação de um modelo quatro etapas da Região Metropolitana de
 Curitiba, hora pico manhã (rede de 2018, contagens de 2017, 18 municípios, 967 zonas de
-tráfego). É o **fio condutor do curso**: aparece no @sec-m1-modelo4etapas e volta nos
-módulos 2 a 5.
+tráfego). Aparece no @sec-m1-modelo4etapas e volta no @sec-m3-funcoes.
 
 | Arquivo | Conteúdo |
 |:--|:--|
@@ -118,12 +117,12 @@ para o repositório. Nas execuções seguintes, leem do cache.
 | Arquivo gerado | Origem | Capítulo |
 |:--|:--|:--|
 | `muni_pr_sc.gpkg`, `muni_br.gpkg`, `uf_br.gpkg`, `pr.gpkg` | `geobr` (malhas do IBGE) | módulos 2, 3 e 5 |
-| `grade_pr.gpkg` | `geobr::read_statistical_grid()`: população por célula | @sec-m2-estudo-de-caso, Módulo 4 |
+| `grade_pr.gpkg` | `geobr::read_statistical_grid()`: população por célula | @sec-m2-estudo-de-caso, @sec-m4-autocorrelacao |
 | `br116_serra.gpkg`, `pontes_br116.gpkg`, `portos_osm.gpkg`, `rede_curitiba_paranagua.gpkg` | OpenStreetMap via `osmdata` | módulos 2, 3 e 4 |
 | `dem_morretes.tif` | altimetria de Morretes (PR) via `elevatr` (AWS Terrain Tiles); troque o município no código para gerar outro | @sec-m2-raster |
 | `dem_br116_perfil.tif` | altimetria só da faixa do trecho mais longo da BR-116, para o perfil altimétrico | @sec-m2-exercicios |
-| `dem_serra.tif` | altimetria da Serra do Mar via `elevatr` (bbox fixo) | Módulo 4 |
-| `aop_fortaleza.rds` | `aopdata`: acessibilidade em Fortaleza, 2019 | Módulo 4 |
+| `dem_serra.tif` | altimetria da Serra do Mar via `elevatr` (bbox fixo) | @sec-m4-interpolacao, @sec-m4-declividade |
+| `aop_fortaleza.rds` | `aopdata`: acessibilidade em Fortaleza, 2019 | @sec-m4-acessibilidade |
 | `od_sintetica.csv/.parquet` | gerado localmente (2 milhões de linhas) | @sec-m3-duckdb |
 
 ## Comex Stat (MDIC)
@@ -181,7 +180,7 @@ invalida o dado municipal como proxy de origem de carga.
 
 ## Preparo manual (apenas o `r5r`)
 
-Os blocos do `r5r` no Módulo 4 não são executados na construção do site. Para rodá-los:
+Os blocos do `r5r` (@sec-m4-r5r) não são executados na construção do site. Para rodá-los:
 
 1. **JDK 21** instalado (`java -version` responde 21).
 2. Pasta `dados/brutos/fortaleza/` com:

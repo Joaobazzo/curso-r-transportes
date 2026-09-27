@@ -23,8 +23,8 @@ Os arquivos ficam na pasta `slides/` do
 
 ## Gravações
 
-Os encontros síncronos são gravados e o material assíncrono de cada módulo é liberado às 14h
-do dia seguinte ao segundo encontro. Os *links* das gravações são disponibilizados pela
+Os encontros síncronos são gravados e o material assíncrono de cada módulo é liberado a partir
+das 14h do dia indicado no [cronograma](index.qmd#cronograma). Os *links* das gravações são disponibilizados pela
 Subsecretaria de Fomento e Planejamento aos participantes inscritos.
 
 Como pedir ajuda durante o curso está na [Preparação](m0-00-preparacao.qmd#como-pedir-ajuda).
