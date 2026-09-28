@@ -61,6 +61,13 @@ para até 30 participantes, em formato on-line.
 | 4. Geoestatística, sensoriamento remoto e acessibilidade | 19/10 (seg), 14h–15h30 | 21/10 (qua), 9h30–11h | 22/10 (qui), a partir das 14h |
 | 5. Mapas temáticos avançados, relatórios reproduzíveis e projeto final | 26/10 (seg), 14h–15h30 | 27/10 (ter), 14h–15h30 | 23/10 (sex), a partir das 14h |
 
+## Encontro de abertura
+
+Os slides do primeiro encontro, com o roteiro do curso e a apresentação do instrutor:
+[baixar em PDF](slides/00-abertura-curso.pdf) (1,7 MB).
+
+<iframe src="slides/00-abertura-curso.pdf" width="100%" height="480" style="border: 1px solid #ddd;" title="Slides do encontro de abertura"></iframe>
+
 ## Como acompanhar
 
 1. **Antes do módulo:** confira a página de [Instalação](m1-01-ambiente.qmd) e garanta que
