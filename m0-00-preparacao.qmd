@@ -8,10 +8,13 @@ que o tempo de aula seja gasto com R, não com instalação.
 ## Checklist rápido
 
 1. R e RStudio instalados (@sec-m1-ambiente).
-2. Conta no GitHub criada, Git instalado.
-3. Decidido qual editor você vai usar (RStudio é o padrão do curso; veja as alternativas
+2. Dados do Módulo 1 baixados: o arquivo `dados_modulo1.zip` da página de
+   [Releases](https://github.com/Joaobazzo/curso-r-transportes/releases), descompactado dentro
+   da pasta do projeto do curso.
+3. Conta no GitHub criada, Git instalado.
+4. Decidido qual editor você vai usar (RStudio é o padrão do curso; veja as alternativas
    abaixo se tiver curiosidade).
-4. Ciente da regra de ouro sobre IA: **não cole dado que você não publicaria**.
+5. Ciente da regra de ouro sobre IA: **não cole dado que você não publicaria**.
 :::
 
 ## Como pedir ajuda {#como-pedir-ajuda}

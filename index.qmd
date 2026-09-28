@@ -65,11 +65,16 @@ para até 30 participantes, em formato on-line.
 
 1. **Antes do módulo:** confira a página de [Instalação](m1-01-ambiente.qmd) e garanta que
    R, RStudio e os pacotes do módulo estão funcionando.
-2. **Durante o encontro síncrono:** acompanhe rodando o código junto. Todos os blocos são
+2. **Baixe os dados do módulo:** na página de
+   [Releases](https://github.com/Joaobazzo/curso-r-transportes/releases) do repositório, baixe
+   o arquivo `dados_moduloN.zip` do módulo e descompacte **dentro da pasta do projeto do
+   curso**. Os arquivos vão para a pasta `dados/`, onde o código dos capítulos os procura, e
+   a aula não depende de internet.
+3. **Durante o encontro síncrono:** acompanhe rodando o código junto. Todos os blocos são
    executáveis e usam dados públicos ou os arquivos de exemplo do curso. A exceção é o recorte
    do modelo quatro etapas, cedido para uso didático (ver [Dados de exemplo](a-dados.qmd)).
-3. **Depois do encontro:** leia a parte assíncrona do módulo e faça os exercícios.
-4. **Dúvidas:** abra uma *issue* no
+4. **Depois do encontro:** leia a parte assíncrona do módulo e faça os exercícios.
+5. **Dúvidas:** abra uma *issue* no
    [repositório do curso](https://github.com/Joaobazzo/curso-r-transportes/issues) ou
    escreva por e-mail. Dúvidas em *issues* ficam registradas e ajudam os demais participantes.
 

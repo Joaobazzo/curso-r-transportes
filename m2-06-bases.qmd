@@ -58,15 +58,33 @@ Argumentos que importam:
 - `cache = TRUE` (padrão): o arquivo fica guardado localmente após o primeiro *download*.
 
 ::: {.callout-tip}
-## Não decorou o código IBGE do município? `lookup_muni()` resolve
+## Não decorou o código IBGE do município? Procure na própria malha
+
+A malha que acabamos de ler já traz o nome e o código de todos os municípios:
 
 ```{r}
-geobr::lookup_muni(name_muni = "fortaleza", year = 2022)
+br |>
+  sf::st_drop_geometry() |>
+  dplyr::filter(stringr::str_detect(name_muni, "Fortaleza")) |>
+  dplyr::select(code_muni, name_muni, abbrev_state)
 ```
 
-Funciona também no sentido inverso, do código para o nome:
+Repare que vieram cinco municípios, em quatro UFs: "Fortaleza" aparece no nome de vários. É
+por isso que o nome sozinho não serve de chave, e o código IBGE sim. No sentido inverso, do código para o nome:
 
 ```{r}
+br |>
+  sf::st_drop_geometry() |>
+  dplyr::filter(code_muni == 4106902) |>
+  dplyr::select(code_muni, name_muni, abbrev_state)
+```
+
+O `geobr` também tem `lookup_muni()`, que faz a mesma busca direto na internet, sem precisar
+da malha:
+
+```{r}
+#| eval: false
+geobr::lookup_muni(name_muni = "fortaleza", year = 2022)
 geobr::lookup_muni(code_muni = 4106902, year = 2022)
 ```
 :::

@@ -224,7 +224,13 @@ Esta é a operação que conecta raster e vetor. É provavelmente a mais útil d
 ```{r}
 # por ponto: a altitude da sede de cada município, vinda do geobr
 # (em vez de digitar longitude/latitude na mão)
-sedes <- geobr::read_municipal_seat(year = 2022, showProgress = FALSE) |>
+arquivo_sedes <- "dados/brutos/sedes_2022.gpkg"
+if (!file.exists(arquivo_sedes)) {
+  sf::st_write(geobr::read_municipal_seat(year = 2022, showProgress = FALSE),
+               arquivo_sedes, quiet = TRUE)
+}
+
+sedes <- sf::st_read(arquivo_sedes, quiet = TRUE) |>
   dplyr::filter(name_muni %in% c("Curitiba", "Morretes", "Paranaguá")) |>
   sf::st_transform(terra::crs(dem_utm))
 

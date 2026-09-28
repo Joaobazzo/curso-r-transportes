@@ -24,3 +24,8 @@ Thumbs.db
 
 # scripts de teste gerados por R/gerar_r_teste.R
 /R_teste/
+
+# pacotes de dados por módulo, publicados como Release do GitHub
+/releases/
+
+**/*.quarto_ipynb
