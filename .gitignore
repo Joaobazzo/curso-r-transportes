@@ -1,3 +1,12 @@
+# others
+*.json
+*.pptx
+*.img
+*.css
+*.ini
+*.png
+*.svg
+
 # Quarto
 /_site/
 /.quarto/
