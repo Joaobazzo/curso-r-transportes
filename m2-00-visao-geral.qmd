@@ -42,8 +42,20 @@
 
 ## Pacotes do módulo
 
-A lista abaixo tem só o que é **novo** neste módulo. `dplyr`, `ggplot2` e os demais pacotes
-do Módulo 1 continuam em uso, sem precisar reinstalar nada.
+O jeito mais simples de deixar tudo pronto é rodar o script de preparação do módulo. Abra o
+projeto do curso no RStudio e cole no console:
+
+```{r}
+#| eval: false
+source("https://raw.githubusercontent.com/Joaobazzo/curso-r-transportes/main/R/preparar_modulo2.R")
+```
+
+Ele instala os pacotes que faltam, baixa os dados do módulo para a pasta `dados/` do projeto e
+termina com a mensagem **Tudo pronto para o Módulo 2**. Pode rodar mais de uma vez: o que já
+estiver instalado ou baixado é pulado.
+
+Se preferir instalar à mão, a lista abaixo tem só o que é **novo** neste módulo. `dplyr`,
+`ggplot2` e os demais pacotes do Módulo 1 continuam em uso, sem precisar reinstalar nada.
 
 ```{r}
 #| eval: false
