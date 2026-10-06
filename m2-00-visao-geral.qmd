@@ -40,6 +40,13 @@
 | 7 | Estudo de caso: população na faixa de influência da BR-116 | @sec-m2-estudo-de-caso |
 | 8 | Exercícios | @sec-m2-exercicios |
 
+## Slides da aula
+
+Os slides do encontro síncrono, sobre objetos espaciais no R:
+[baixar em PDF](slides/Objetos%20espaciais%20no%20R.pdf) (1,2 MB).
+
+<iframe src="slides/Objetos%20espaciais%20no%20R.pdf" width="100%" height="480" style="border: 1px solid #ddd;" title="Slides: objetos espaciais no R"></iframe>
+
 ## Pacotes do módulo
 
 O jeito mais simples de deixar tudo pronto é rodar o script de preparação do módulo. Abra o

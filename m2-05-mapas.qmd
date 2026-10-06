@@ -137,7 +137,7 @@ muni |>
 
 ```{r}
 leaflet::leaflet(portos) |>
-  leaflet::addProviderTiles("CartoDB.Positron") |>
+  leaflet::addProviderTiles("Esri.WorldGrayCanvas") |>
   leaflet::addCircleMarkers(
     radius = ~sqrt(tku_bi) * 2,
     color = "#1a5b8a", fillOpacity = 0.6, stroke = FALSE,
@@ -152,6 +152,15 @@ leaflet::leaflet(portos) |>
 O `leaflet` exige **coordenadas geográficas** (`EPSG:4326`): se o dado estiver em UTM, ele
 reclama ou desenha errado. `sf::st_transform(x, 4326)` antes de plotar resolve.
 
+::: {.callout-note}
+## Mapa-base sem chave de acesso
+
+Alguns provedores de mapa-base passaram a exigir chave de API: o `CartoDB.Positron`, muito
+usado em tutoriais, hoje aparece coberto por "API KEY REQUIRED". Para um fundo claro e
+neutro sem cadastro, use `Esri.WorldGrayCanvas`; para satélite, `Esri.WorldImagery`; para o
+mapa de ruas, `OpenStreetMap`. A lista completa está em `names(leaflet::providers)`.
+:::
+
 ### `mapview`: conferência visual rápida
 
 ::: {.callout-tip}
@@ -162,12 +171,17 @@ de satélite e olhe: o *buffer* cobre o que deveria? Os pontos caíram na estrad
 O recorte pegou o município certo? Cinco segundos de conferência visual evitam um relatório
 errado. Diferente do `leaflet`, o `mapview` não exige reprojetar para `EPSG:4326` nem montar
 camada por camada. É uma linha, com seletor de mapa-base (satélite incluído) já pronto.
+:::
+
+Por exemplo, para conferir o recorte do litoral do Paraná feito acima:
 
 ```{r}
-#| eval: false
+area_analise <- litoral
+
 mapview::mapview(area_analise, map.types = "Esri.WorldImagery")
 ```
-:::
+
+Note que `litoral` está em SIRGAS 2000 (`EPSG:4674`), e o `mapview` reprojetou sozinho.
 
 ### `mapgl`: mapas vetoriais modernos
 
@@ -176,7 +190,6 @@ suaves. É a melhor opção quando o mapa interativo é o produto final: um pain
 Subsecretaria, por exemplo.
 
 ```{r}
-#| eval: false
 library(mapgl)
 
 mapgl::maplibre(bounds = portos) |>

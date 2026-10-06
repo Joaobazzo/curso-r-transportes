@@ -10,7 +10,7 @@ library(dplyr)
 library(ggplot2)
 
 # mapa-base padrão dos mapview(): OpenStreetMap
-mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
 ```
 
 ## `geobr`: malhas e geometrias oficiais do IBGE

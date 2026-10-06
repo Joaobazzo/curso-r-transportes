@@ -10,7 +10,7 @@ library(dplyr)
 library(ggplot2)
 
 # mapa-base padrão dos mapview(): OpenStreetMap
-mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
 ```
 
 ## Obter um modelo digital de elevação
@@ -65,7 +65,7 @@ O `elevatr` usa *tiles* de terreno da AWS, derivados de SRTM/Copernicus. São ó
 análise exploratória e ensino, sem cadastro. Para um documento oficial, prefira uma fonte
 citável:
 
-- **TOPODATA/INPE**: <http://www.dsr.inpe.br/topodata/>. SRTM refinado para 30 m, folhas
+- **TOPODATA/INPE**: <https://data.inpe.br/dados/topodata/>. SRTM refinado para 30 m, folhas
   por quadrícula, sem cadastro. É a referência mais usada em estudos brasileiros.
 - **Copernicus DEM GLO-30**: 30 m, cobertura global, via OpenTopography.
 - O procedimento do capítulo é idêntico: `rast("caminho/do/arquivo.tif")`.
@@ -277,8 +277,7 @@ terra::writeRaster(terreno$slope, "resultados/declividade.tif",
             overwrite = TRUE,
             gdal = c("COMPRESS=DEFLATE", "TILED=YES"))
 
-# raster -> vetor (contornos, polígonos de classe)
-contornos <- terra::as.contour(dem_utm, levels = seq(0, 1600, by = 200)) |> sf::st_as_sf()
+# raster -> vetor (polígonos de classe; os contornos estão no bloco seguinte)
 poligonos <- terra::as.polygons(dem_classes) |> sf::st_as_sf()
 
 # vetor -> raster
@@ -286,6 +285,18 @@ grade <- terra::rasterize(terra::vect(muni_serra), dem_utm, field = "code_muni")
 
 # raster -> tabela (para análise em dplyr)
 tabela <- as.data.frame(dem_utm, xy = TRUE, na.rm = TRUE)
+```
+
+As curvas de nível são o caso típico de conversão raster → vetor. Antes de entregar o
+arquivo, confira no mapa se elas acompanham o relevo da imagem de satélite: troque o
+mapa-base no seletor do canto superior esquerdo e clique numa curva para ver a altitude.
+
+```{r}
+contornos <- terra::as.contour(dem_utm, levels = seq(0, 1600, by = 200))
+contornos <- sf::st_as_sf(contornos)
+
+mapview::mapview(contornos, zcol = "level", layer.name = "Altitude (m)",
+                 map.types = c("Esri.WorldImagery", "OpenStreetMap"))
 ```
 
 A conversão para tabela merece destaque: com `as.data.frame(r, xy = TRUE)` o raster vira um

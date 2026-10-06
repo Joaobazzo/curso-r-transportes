@@ -44,7 +44,7 @@ library(dplyr)
 library(ggplot2)
 
 # mapa-base padrão dos mapview(): OpenStreetMap
-mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
 
 crs_trabalho <- 31982    # SIRGAS 2000 / UTM 22S, em metros, para medir e fazer buffer
 ```
@@ -111,15 +111,20 @@ influencia <- lapply(faixas, \(d) {
   sf::st_buffer(eixo, dist = d) |>
     sf::st_as_sf() |>
     dplyr::mutate(faixa_m = d)
-}) |>
+})
+
+influencia <- influencia |>
   dplyr::bind_rows() |>
   dplyr::rename(geom = x) |>
   dplyr::arrange(dplyr::desc(faixa_m))     # do maior para o menor, para desenhar em camadas
 
-influencia |>
-  dplyr::mutate(area_km2 = round(as.numeric(units::set_units(sf::st_area(geom), km^2)), 1)) |>
-  sf::st_drop_geometry() |>
-  knitr::kable()
+# área de cada faixa, numa tabela à parte
+area_km2 <- units::set_units(sf::st_area(influencia), km^2)
+
+tabela_faixas <- sf::st_drop_geometry(influencia)
+tabela_faixas$area_km2 <- round(as.numeric(area_km2), 1)
+
+knitr::kable(tabela_faixas)
 ```
 
 Três faixas, e não uma, porque a pergunta "quem é afetado" raramente tem uma resposta única:

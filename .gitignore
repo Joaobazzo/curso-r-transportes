@@ -7,9 +7,14 @@
 *.png
 *.svg
 
+# o cache do Quarto precisa de tudo (css, json, png das figuras e dos widgets):
+# o site é montado no GitHub Actions a partir dele, sem R
+!_freeze/**
+
 # Quarto
 /_site/
 /.quarto/
+/site_libs/
 *_files/
 *_cache/
 
