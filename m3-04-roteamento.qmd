@@ -1,42 +1,49 @@
-# Roteamento {#sec-m3-roteamento}
+# Roteamento de automóvel com `dodgr` {#sec-m3-roteamento}
 
 Roteamento é calcular o caminho e o custo (distância, tempo) entre pares de pontos sobre uma
 rede. É o que substitui a distância em linha reta do módulo 2 por algo que corresponde ao
 deslocamento real.
 
-Dois pacotes, com perfis distintos:
+Há dois problemas de roteamento bem diferentes, e cada um tem a sua ferramenta:
 
-| | `dodgr` | `r5r` |
+| | Automóvel e carga | Transporte público |
 |:--|:--|:--|
-| Implementação | C++ dentro do R | motor R5 (Java) |
-| Modos | um modo por vez (carro, caminhão, a pé, bicicleta) | multimodal, com transporte público e GTFS |
-| Insumo | `sf` de linhas (ex.: OSM) | pasta com `.pbf` + GTFS |
-| Instalação | direta | exige **JDK 21** |
-| Uso típico | rede rodoviária, carga, distâncias | acessibilidade urbana, isócronas |
+| O que se percorre | a malha viária | a malha viária **e** as linhas, com horários |
+| O tempo depende do horário de partida? | não, numa primeira aproximação | sim, muito: depende de quando passa o ônibus |
+| Insumo | `sf` de linhas (ex.: OSM, @sec-m3-osm) | `.pbf` do OSM + GTFS |
+| Pacote neste curso | `dodgr`: C++ dentro do R, instalação direta | `r5r`: motor R5, em Java (JDK 21) |
+| Uso típico | distâncias rodoviárias, carga, matrizes entre municípios | acessibilidade urbana, isócronas, cenários de linha |
+
+Este capítulo trata do automóvel e da carga; o transporte público fica para o módulo 4
+(@sec-m4-gtfs), onde ele é a base do cálculo de acessibilidade.
 
 ```{r}
 library(sf)
 library(dplyr)
 library(ggplot2)
-
-# mapa-base padrão dos mapview(): OpenStreetMap
-mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
-```
-
-## `dodgr`: roteamento sobre a malha viária
-
-```{r}
 library(dodgr)
 
-# 1. a malha: vias principais do corredor Curitiba–Paranaguá, a mesma do @sec-m3-osm
-#    (para um estado inteiro, troque por osmextract::oe_get(), como lá)
-arquivo_rede <- "dados/brutos/rede_curitiba_paranagua.gpkg"
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+## Da malha ao grafo
+
+O ponto de partida é a malha do corredor São Paulo–Santos, a mesma do @sec-m3-osm, que vem no
+pacote de dados do módulo. Para um estado inteiro, troque a consulta por
+`osmextract::oe_get()`, como lá.
+
+```{r}
+arquivo_rede <- "dados/brutos/rede_sao_paulo_santos.gpkg"
 
 if (!file.exists(arquivo_rede)) {
-  res <- osmdata::opq(bbox = c(-49.35, -25.62, -48.45, -25.35), timeout = 180) |>
+  # download lento (vários minutos): o arquivo normalmente já vem no pacote de dados
+  osmdata::set_overpass_url("https://overpass.kumi.systems/api/interpreter")
+
+  res <- osmdata::opq(bbox = c(-46.80, -24.02, -46.25, -23.45), timeout = 300) |>
     osmdata::add_osm_feature(key = "highway", value = c(
       "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
-      "secondary", "secondary_link", "tertiary")) |>
+      "secondary", "secondary_link")) |>
     osmdata::osmdata_sf()
 
   res$osm_lines |>
@@ -48,143 +55,244 @@ if (!file.exists(arquivo_rede)) {
 rede <- sf::st_read(arquivo_rede, quiet = TRUE) |>
   dplyr::rename(geometry = geom)
 
-# 2. construir o grafo com um perfil de peso
-grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
-
-# 3. componente conectado principal (descarta trechos isolados)
-grafo <- grafo[grafo$component == 1, ]
-
-# 4. matriz de distâncias entre pontos: centro de Curitiba e Porto de Paranaguá
-origens  <- cbind(x = c(-49.2733, -48.5119), y = c(-25.4284, -25.5016))   # lon, lat
-destinos <- origens
-
-dodgr::dodgr_dists(grafo, from = origens, to = destinos)      # metros
-dodgr::dodgr_times(grafo, from = origens, to = destinos)      # segundos
+nrow(rede)    # trechos de via, como linhas sf
 ```
 
-```{r}
-# o caminho em si, como geometria, para desenhar no mapa
-caminho <- dodgr::dodgr_paths(grafo, from = origens[1, , drop = FALSE],
-                       to = origens[2, , drop = FALSE])
+`weight_streetnet()` faz a conversão de rede geométrica em rede topológica que o @sec-m3-osm
+mostrou com o exemplo de brinquedo, e atribui a cada aresta um peso segundo um **perfil**:
 
+```{r}
+grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
+
+c(trechos_sf = nrow(rede),
+  arestas    = nrow(grafo),
+  vertices   = nrow(dodgr::dodgr_vertices(grafo)))
+```
+
+O grafo tem muito mais arestas que a malha tinha linhas, por dois motivos: cada via é cortada
+em todos os nós por onde passa, e cada trecho de mão dupla vira **duas** arestas, uma em cada
+sentido. Vale olhar as primeiras linhas:
+
+```{r}
+grafo |>
+  as.data.frame() |>
+  dplyr::select(from_id, to_id, highway, d, d_weighted, time, time_weighted, component) |>
+  head(6)
+```
+
+Cada linha é uma aresta dirigida, de `from_id` para `to_id`:
+
+- `d`: comprimento, em metros;
+- `d_weighted`: o comprimento "penalizado" pela preferência do perfil (abaixo). É o que o
+  `dodgr` minimiza por padrão ao procurar o caminho;
+- `time` e `time_weighted`: o tempo de percurso, em segundos, pela velocidade do perfil;
+- `component`: a que pedaço conectado da rede a aresta pertence.
+
+## O perfil de peso
+
+O perfil diz, para cada tipo de via, **quanto o roteador gosta dela** (`value`, de 0 a 1) e
+**a que velocidade se anda nela** (`max_speed`, em km/h):
+
+```{r}
+dodgr::weighting_profiles$weighting_profiles |>
+  dplyr::filter(name == "motorcar",
+                way %in% c("motorway", "trunk", "primary", "secondary", "tertiary",
+                           "residential")) |>
+  dplyr::select(way, value, max_speed)
+```
+
+Duas consequências práticas:
+
+1. **As velocidades são as do pacote, não as do Brasil.** Rodovia troncal a 85 km/h e via
+   primária a 65 km/h são padrões genéricos. Para um estudo, ajuste o perfil com a regra de
+   velocidades que você documentou no @sec-m3-osm: exporte o perfil para um arquivo, edite e
+   use-o no `weight_streetnet()`.
+2. **O caminho "mais curto" é o de menor `d_weighted`, não o de menor `d`.** Uma via com
+   `value = 0.5` "pesa" o dobro do seu comprimento, então o roteador desvia dela sempre que há
+   alternativa razoável. É isso que faz o carro preferir a rodovia à rua de bairro.
+
+```{r}
+#| eval: false
+# exportar o perfil padrão, editar as velocidades e usar o arquivo editado
+dodgr::write_dodgr_wt_profile("dados/perfil_dodgr.json")
+# ... editar o JSON ...
+grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway",
+                                 wt_profile_file = "dados/perfil_dodgr.json")
+
+# penalidade de conversão: virar à esquerda cruzando o fluxo e esperar em semáforo custa tempo
+grafo_conv <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway",
+                                      turn_penalty = TRUE)
+```
+
+A penalidade de conversão (`turn_penalty = TRUE`) importa em malha urbana, onde as viagens têm
+muitas conversões. Em rodovia, o efeito é pequeno.
+
+## Componentes conectados
+
+O @sec-m3-osm avisou que uma malha real raramente forma um único grafo conectado. Esta forma
+`r length(unique(grafo$component))` pedaços:
+
+```{r}
+table(grafo$component) |> sort(decreasing = TRUE) |> head(6)
+```
+
+O componente 1 concentra praticamente todas as arestas. Os demais são trechos soltos: alças
+mapeadas sem ligação, vias cortadas na borda da área baixada. Para ver onde estão:
+
+```{r}
+# cada aresta tem as coordenadas das duas pontas: basta ligá-las
+soltos <- grafo[grafo$component != 1, ]
+
+soltos_sf <- sf::st_sf(
+  componente = factor(soltos$component),
+  geometry = sf::st_sfc(lapply(seq_len(nrow(soltos)), \(i) sf::st_linestring(rbind(
+    c(soltos$from_lon[i], soltos$from_lat[i]),
+    c(soltos$to_lon[i],   soltos$to_lat[i])
+  ))), crs = 4326)
+)
+
+mapview::mapview(soltos_sf, zcol = "componente", lwd = 4, layer.name = "Componente")
+```
+
+Um ponto que se ligue a um desses trechos não alcança o resto da rede, e o resultado é `NA` ou
+`Inf`. Por isso o passo seguinte é ficar só com o componente principal:
+
+```{r}
+grafo <- grafo[grafo$component == 1, ]
+```
+
+## Distâncias e tempos entre pontos
+
+Os pontos de origem e destino podem vir de qualquer lugar: digitados, do `geocodebr`
+(@sec-m3-geocodificacao), de centroides de zonas. Aqui, o centro de São Paulo (Praça da Sé) e
+o centro de Santos, junto ao porto.
+
+```{r}
+pontos <- cbind(x = c(-46.6339, -46.3336), y = c(-23.5503, -23.9345))   # lon, lat
+rownames(pontos) <- c("São Paulo", "Santos")
+```
+
+Antes de rotear, o `dodgr` liga cada ponto ao vértice mais próximo da rede (o *snapping*). Isso
+é automático e silencioso, então vale conferir a que distância ficou essa ligação:
+
+```{r}
 verts <- dodgr::dodgr_vertices(grafo)
+idx   <- dodgr::match_points_to_verts(verts, pontos)   # vértice mais próximo de cada ponto
+
+# os pontos e os vértices escolhidos, como sf
+pontos_sf   <- sf::st_as_sf(as.data.frame(pontos), coords = c("x", "y"), crs = 4326)
+vertices_sf <- sf::st_as_sf(verts[idx, ], coords = c("x", "y"), crs = 4326)
+
+# distância de cada ponto ao seu vértice (by_element: 1º com 1º, 2º com 2º)
+dist_ligacao <- sf::st_distance(pontos_sf, vertices_sf, by_element = TRUE)
+
+ligacao <- data.frame(
+  ponto   = rownames(pontos),
+  vertice = verts$id[idx],
+  dist_m  = round(as.numeric(dist_ligacao))
+)
+ligacao
+```
+
+Algumas dezenas ou centenas de metros é normal. Se der quilômetros, o ponto está longe da
+malha, e o resultado vai incluir um "trecho fantasma" que não existe.
+
+Agora as matrizes. `dodgr_dists()` devolve metros; `dodgr_times()`, segundos:
+
+```{r}
+dist_m <- dodgr::dodgr_dists(grafo, from = pontos, to = pontos)
+tempo_s <- dodgr::dodgr_times(grafo, from = pontos, to = pontos)
+
+dist_m      # linhas e colunas vêm com o código do vértice em que cada ponto se ligou
+```
+
+Os nomes das linhas e colunas são os códigos dos vértices, os mesmos da tabela de ligação
+acima. Para ler, troque pelos nomes dos pontos e converta as unidades:
+
+```{r}
+dimnames(dist_m) <- dimnames(tempo_s) <- list(rownames(pontos), rownames(pontos))
+
+round(dist_m / 1000, 1)     # km
+round(tempo_s / 60)         # minutos
+```
+
+São matrizes `n × n`: uma linha por origem, uma coluna por destino. Para dez pontos são 100
+pares; para os 645 municípios de São Paulo, mais de 416 mil. Guarde essa conta: ela volta no
+@sec-m3-duckdb.
+
+## O caminho
+
+A matriz diz quanto custa; `dodgr_paths()` diz **por onde** se vai. Ele devolve a sequência de
+vértices do caminho, que convertemos em linha:
+
+```{r}
+caminho <- dodgr::dodgr_paths(grafo, from = pontos[1, , drop = FALSE],
+                              to = pontos[2, , drop = FALSE])
+
+length(caminho[[1]][[1]])     # quantos vértices o caminho atravessa
+
 rota <- verts[match(caminho[[1]][[1]], verts$id), c("x", "y")] |>
   as.matrix() |>
   sf::st_linestring() |>
   sf::st_sfc(crs = 4326)
 ```
 
-A conferência visual, como sempre: a rota deve seguir a BR-277 descendo a serra.
+A conferência visual, como sempre: a rota deve descer a serra por uma das duas rodovias, a Anchieta (SP-150) ou a Imigrantes (SP-160).
 
 ```{r}
-extremos <- data.frame(nome = c("Curitiba", "Paranaguá"),
-                       lon = origens[, 1], lat = origens[, 2]) |>
+extremos <- data.frame(nome = rownames(pontos), lon = pontos[, 1], lat = pontos[, 2]) |>
   sf::st_as_sf(coords = c("lon", "lat"), crs = 4326)
 
 mapview::mapview(rota, color = "#b3402a", lwd = 5, layer.name = "Rota") +
   mapview::mapview(extremos, col.regions = "#1a5b8a", layer.name = "Origem e destino")
 ```
 
-Pontos de atenção do `dodgr`:
+## Grafo contraído: o mesmo resultado, mais rápido
 
-- `wt_profile` define como cada tipo de via é penalizado: `"motorcar"`, `"foot"`, `"bicycle"`.
-  Para caminhão, o caminho é ajustar o perfil manualmente (`weighting_profiles`), penalizando
-  vias estreitas e restrições de peso.
-- O *snapping* dos pontos à rede é automático e silencioso: um ponto longe da malha se liga ao
-  vértice mais próximo, possivelmente do outro lado do rio. Confira a distância de ligação.
-- Filtrar pelo componente conectado (`component == 1`) evita `Inf` em pares que "não se
-  alcançam" apenas porque a malha tem trechos soltos.
-
-## `r5r`: roteamento multimodal
-
-O `r5r` trabalha com uma **pasta de dados**: basta colocar nela o `.pbf` do OSM e um ou mais
-GTFS, e ele monta a rede.
+A maior parte dos vértices do grafo não é cruzamento: são pontos intermediários que só
+desenham a curva da via. `dodgr_contract_graph()` remove esses vértices e junta as arestas.
+A rede continua a mesma, com muito menos arestas:
 
 ```{r}
-#| eval: false
-options(java.parameters = "-Xmx8G")    # ANTES de carregar o pacote
-library(r5r)
+grafo_contraido <- dodgr::dodgr_contract_graph(grafo)
 
-pasta <- "dados/brutos/fortaleza"      # contém fortaleza.osm.pbf e gtfs_fortaleza.zip
-rede <- r5r::setup_r5(data_path = pasta)
+c(arestas_original = nrow(grafo), arestas_contraido = nrow(grafo_contraido))
+
+dist_contraido <- dodgr::dodgr_dists(grafo_contraido, from = pontos, to = pontos)
+dist_contraido      # repare nos códigos dos vértices: não são os mesmos de antes
 ```
-
-::: {.callout-note}
-## `setup_r5()` ou `build_network()`?
-
-As versões mais recentes do `r5r` renomearam `setup_r5()` para `build_network()`, mantendo o
-comportamento. Se o seu R reclamar de função não encontrada ou avisar de depreciação, troque o
-nome. O restante do código é idêntico. Confira com `packageVersion("r5r")`.
-:::
 
 ```{r}
-#| eval: false
-# matriz de tempos de viagem
-pontos <- data.frame(
-  id  = c("centro", "aeroporto", "porto"),
-  lon = c(-38.5267, -38.5326, -38.4756),
-  lat = c(-3.7275, -3.7763, -3.7147)
-)
+dimnames(dist_contraido) <- list(rownames(pontos), rownames(pontos))
 
-ttm <- r5r::travel_time_matrix(
-  rede,
-  origins            = pontos,
-  destinations       = pontos,
-  mode               = c("WALK", "TRANSIT"),
-  departure_datetime = as.POSIXct("2026-10-15 07:30:00", tz = "America/Fortaleza"),
-  max_trip_duration  = 120,
-  time_window        = 30,          # média de 30 partidas, minuto a minuto
-  percentiles        = c(25, 50, 75)
-)
+# grafo completo x grafo contraído, em km
+cbind(completo  = round(dist_m["São Paulo", "Santos"] / 1000, 1),
+      contraido = round(dist_contraido["São Paulo", "Santos"] / 1000, 1))
 ```
 
-Os argumentos que mudam o resultado, e que precisam estar no relatório:
+A distância mudou um pouco, e a rede não mudou. O que mudou foi a **ligação dos pontos**: no
+grafo contraído só sobram vértices de cruzamento, então cada ponto se liga a um cruzamento,
+às vezes mais distante que o vértice intermediário de antes. É o *snapping* de novo, agora
+com efeito no resultado.
 
-- `mode`: `"WALK"`, `"BICYCLE"`, `"CAR"`, `"TRANSIT"` (combinado com um modo de acesso).
-- `departure_datetime`: o horário importa muito no transporte público. Pico e entrepico dão
-  resultados diferentes.
-- `time_window` e `percentiles`: em vez de um único horário de partida, o R5 simula várias
-  partidas e devolve percentis. Isso captura a variabilidade da espera. O percentil 50 é a
-  escolha usual; o 75 é mais honesto para quem depende de linha de baixa frequência.
-- `max_trip_duration`: corta a matriz e acelera muito o cálculo.
+A regra prática: use o grafo contraído para matrizes grandes, em que ele é várias vezes mais
+rápido e a diferença de algumas centenas de metros se dilui; e o grafo completo quando a
+localização exata de cada ponto importa, ou quando for desenhar o caminho.
 
-```{r}
-#| eval: false
-# itinerários detalhados: cada etapa da viagem, com geometria
-det <- r5r::detailed_itineraries(
-  rede,
-  origins      = pontos[1, ],
-  destinations = pontos[2, ],
-  mode         = c("WALK", "TRANSIT"),
-  departure_datetime = as.POSIXct("2026-10-15 07:30:00"),
-  shortest_path = FALSE
-)
+## Pontos de atenção
 
-det |> dplyr::select(option, segment, mode, route, segment_duration, distance)
-```
+- **Perfil:** `wt_profile` define como cada tipo de via é penalizado: `"motorcar"`, `"foot"`,
+  `"bicycle"`. As velocidades padrão não são brasileiras; documente as que você usou.
+- **Caminhão:** não há perfil pronto. O caminho é ajustar o perfil manualmente, penalizando
+  vias locais e excluindo as que têm restrição de peso ou altura (que, como o @sec-m3-osm
+  mostrou, o OSM raramente traz).
+- **Snapping:** confira sempre a distância de ligação dos pontos à rede.
+- **Componentes:** filtre pelo componente principal (`component == 1`) para evitar `Inf` em
+  pares que "não se alcançam" apenas porque a malha tem trechos soltos.
+- **Congestionamento:** o `dodgr` usa velocidades fixas. O tempo é o de fluxo livre, não o
+  da hora de pico.
 
-`detailed_itineraries()` é o que permite explicar um resultado: quando o tempo de viagem entre
-dois pontos parece alto demais, é olhando as etapas (caminhada, espera, linha, transferência)
-que se descobre por quê.
-
-```{r}
-#| eval: false
-# isócronas: até onde se chega em 15, 30 e 45 minutos
-iso <- r5r::isochrone(
-  rede,
-  origins            = pontos[1, ],
-  mode               = c("WALK", "TRANSIT"),
-  departure_datetime = as.POSIXct("2026-10-15 07:30:00"),
-  cutoffs            = c(15, 30, 45)
-)
-
-ggplot(iso) +
-  geom_sf(aes(fill = factor(isochrone)), alpha = 0.4, colour = NA) +
-  scale_fill_brewer(palette = "YlOrRd", direction = -1, name = "minutos") +
-  theme_void()
-```
-
-## Custo generalizado: o que realmente se minimiza
+## Carga: o custo generalizado
 
 Em transporte de carga, o caminho mais curto raramente é o escolhido. O que se minimiza é o
 **custo generalizado**, que combina distância, tempo, pedágio, consumo e restrições.
@@ -213,13 +321,7 @@ comparação que justifica uma duplicação ou um contorno. Os parâmetros (`cus
 `custo_hora`) devem vir de fonte citável: o **Sistema de Custos Referenciais de Obras** e os
 estudos de custo operacional do próprio Ministério.
 
-## Qual usar
-
-- **Distâncias e tempos rodoviários, carga, matrizes grandes entre municípios:** `dodgr`.
-  Não precisa de Java e lida bem com redes extensas.
-- **Acessibilidade urbana, transporte público, isócronas, cenários de GTFS:** `r5r`.
-- **Uma rota específica para ilustrar um mapa:** qualquer um dos dois, ou até
-  `osrm`/`mapbox` via API quando a rede não precisa ser sua.
-
-No módulo 4 o `r5r` volta com o estudo de acessibilidade de Fortaleza; no próximo capítulo,
-os resultados de roteamento viram **matrizes OD**.
+O roteamento terminou numa **matriz**: uma linha por par de origem e destino. Com dois pontos,
+ela cabe na tela. Com todos os municípios de um estado, passa de centenas de milhares de
+linhas, e cada cenário, modo ou horário multiplica isso. É o ponto em que o `data.frame` na
+memória deixa de ser confortável, e o assunto do próximo capítulo.

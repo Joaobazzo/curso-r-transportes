@@ -87,7 +87,7 @@ Avalia o impacto de uma mudança na rede de transporte público sobre o acesso a
 5. **Recalcule** e compare: variação absoluta e percentual por hexágono.
 6. **Equidade**: quantas pessoas ganham e perdem acesso, por estrato de renda
    (@sec-m4-acessibilidade).
-7. **Mapa da diferença**, com paleta divergente centrada em zero (@sec-m5-mapas).
+7. **Mapa da diferença**, com paleta divergente centrada em zero (@sec-m2-mapas).
 8. **Interpretação**: quem é afetado, em que magnitude, e o que isso implica para a decisão.
 
 ## Opção 3: Tema livre da sua área
@@ -106,9 +106,9 @@ Exemplos que aparecem com frequência no dia a dia da Subsecretaria:
 | Tema | Ferramentas |
 |:--|:--|
 | População e equipamentos na faixa de influência de um trecho rodoviário | @sec-m2-estudo-de-caso |
-| Comparação de alternativas de traçado por relevo | @sec-m4-declividade |
+| Comparação de alternativas de traçado por relevo | @sec-m3-declividade |
 | Matriz OD e carregamento de um corredor logístico | @sec-m3-estudo-de-caso |
-| Concentração espacial de acidentes em rodovias federais | @sec-m4-autocorrelacao |
+| Trechos de rodovias de serra junto a encostas íngremes | @sec-m3-declividade |
 | Séries do Comex Stat por município e modal | @sec-m1-estudo-de-caso |
 
 ## Como saber se ficou bom

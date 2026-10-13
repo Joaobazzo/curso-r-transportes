@@ -11,7 +11,22 @@ Eles exigem o **JDK 21** e uma pasta com o `.pbf` do OpenStreetMap e o GTFS da c
 arquivos grandes, que não ficam no repositório. O código está pronto para rodar na sua
 máquina, e o material do encontro síncrono percorre esses passos ao vivo. O preparo da pasta
 está em @sec-m4.
+
+Os **mapas** deste capítulo são executados: eles usam os resultados que o Ipea publica no
+`aopdata` para Fortaleza, calculados com o mesmo motor R5. Servem para mostrar como fica cada
+etapa, enquanto o seu próprio cálculo não roda.
 :::
+
+```{r}
+# para os mapas de referência: a grade de Fortaleza com os resultados do Ipea,
+# a mesma baixada no @sec-m4-acessibilidade
+library(sf)
+
+aop <- readRDS("dados/brutos/aop_fortaleza.rds") |>
+  dplyr::filter(P001 > 0)
+
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
 
 ```{r}
 #| eval: false
@@ -70,6 +85,15 @@ nrow(pontos)
 O `r5r` exige exatamente as colunas `id`, `lon` e `lat`. Pontos que caírem longe da rede são
 descartados com aviso. Confira a contagem antes e depois.
 
+Cada hexágono com população vira um ponto de origem e de destino. A grade, com a população de
+cada hexágono:
+
+```{r}
+# só as colunas do mapa: com as 206 do aopdata, cada hexágono carrega um popup enorme
+mapview::mapview(dplyr::select(aop, id_hex, P001), zcol = "P001", lwd = 0, alpha.regions = 0.7,
+                 layer.name = "População")
+```
+
 ## 3. Matriz de tempos de viagem
 
 ```{r}
@@ -100,6 +124,22 @@ Os parâmetros que mais mudam o resultado, e que precisam aparecer na nota metod
 | `time_window` + `percentiles` | captura a variabilidade da espera; percentil 50 é o usual |
 | `max_walk_time` | caminhada máxima de acesso; 15–20 min é a prática corrente |
 | `max_trip_duration` | corta a matriz e acelera muito o cálculo |
+
+Da matriz sai qualquer indicador por hexágono. Um dos mais simples de ler é o **tempo até o
+estabelecimento de saúde mais próximo**. É o que o Ipea calculou para Fortaleza, no pico da
+manhã, por transporte público:
+
+```{r}
+aop_saude <- aop |>
+  dplyr::mutate(tempo_saude = dplyr::if_else(is.finite(TMIST), TMIST, NA_real_))
+
+mapview::mapview(dplyr::select(aop_saude, id_hex, tempo_saude), zcol = "tempo_saude", lwd = 0, alpha.regions = 0.8,
+                 col.regions = grDevices::hcl.colors(10, "YlOrRd", rev = TRUE),
+                 layer.name = "Minutos até a saúde")
+```
+
+Clique nos hexágonos da borda da cidade: os tempos mais altos ficam onde a rede de transporte
+público chega pior, e não necessariamente onde há menos postos de saúde.
 
 ## 4. Isócronas
 
@@ -191,6 +231,19 @@ gtfstools::get_trip_geometry(gtfs, file = "shapes")              # traçado das 
 ```
 
 ## 7. Recalcular e comparar
+
+A comparação parte da acessibilidade do cenário atual. Para Fortaleza, o Ipea publica a
+quantidade de empregos acessíveis em até 60 minutos de transporte público, que é exatamente o
+indicador `atual` calculado abaixo:
+
+```{r}
+mapview::mapview(dplyr::select(aop, id_hex, CMATT60), zcol = "CMATT60", lwd = 0, alpha.regions = 0.8,
+                 col.regions = grDevices::hcl.colors(10, "Viridis"),
+                 layer.name = "Empregos em 60 min")
+```
+
+O cenário é calculado com a rede editada, e o que interessa é a **diferença** entre os dois
+mapas.
 
 ```{r}
 #| eval: false

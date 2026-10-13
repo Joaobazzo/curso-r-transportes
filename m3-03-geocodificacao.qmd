@@ -10,7 +10,7 @@ library(stringr)
 library(sf)
 
 # mapa-base padrão dos mapview(): OpenStreetMap
-mapview::mapviewOptions(basemaps = c("OpenStreetMap", "CartoDB.Positron", "Esri.WorldImagery"))
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
 ```
 
 ## O pacote `geocodebr`
@@ -22,13 +22,13 @@ quando os dados são administrativos e não podem sair da rede do órgão.
 
 ```{r}
 enderecos <- data.frame(
-  id         = 1:3,
-  logradouro = c("Rua Direita", "Avenida Paulista", "Rua XV de Novembro"),
-  numero     = c(100, 1578, 300),
-  cep        = c("80010-010", "01310-200", "80020-310"),
-  bairro     = c("Centro", "Bela Vista", "Centro"),
-  municipio  = c("Curitiba", "São Paulo", "Curitiba"),
-  estado     = c("PR", "SP", "PR")
+  id         = 1:4,
+  logradouro = c("Praça Cívica", "Avenida Goiás", "Avenida Afonso Pena", "Avenida Paulista"),
+  numero     = c(1, 400, 1212, 1578),
+  cep        = c("74003-010", "74005-010", "30130-003", "01310-200"),
+  bairro     = c("Setor Central", "Setor Central", "Centro", "Bela Vista"),
+  municipio  = c("Goiânia", "Goiânia", "Belo Horizonte", "São Paulo"),
+  estado     = c("GO", "GO", "MG", "SP")
 )
 
 campos <- geocodebr::definir_campos(
@@ -51,6 +51,15 @@ resultado |>
   knitr::kable()
 ```
 
+A coluna `endereco_encontrado` mostra **o que** o `geocodebr` de fato encontrou no CNEFE, que
+nem sempre é o que foi pedido:
+
+```{r}
+resultado |>
+  dplyr::select(id, logradouro, endereco_encontrado) |>
+  knitr::kable()
+```
+
 Na primeira execução, o `geocodebr` baixa o CNEFE (cerca de 1,5 GB) para uma pasta de cache
 local (`geocodebr::listar_pasta_cache()`). Das próximas vezes, a geocodificação leva segundos.
 
@@ -69,9 +78,17 @@ importante do processo.
 resultado |> dplyr::count(precisao, sort = TRUE)
 ```
 
-A coluna `desvio_metros` estima o erro da coordenada. Repare no primeiro endereço: a "Rua
-Direita" não foi encontrada no CEP informado, e o ponto caiu no centroide do CEP, com um
-desvio de algumas centenas de metros.
+A coluna `desvio_metros` estima o erro da coordenada. Compare os quatro endereços:
+
+- a **Avenida Afonso Pena, 1212**, em Belo Horizonte, e a **Avenida Paulista, 1578** existem
+  no cadastro com esse número: precisão `numero`;
+- a **Avenida Goiás, 400**, em Goiânia, não tem o número 400 no cadastro, e o ponto foi
+  estimado entre os números vizinhos: `numero_aproximado`;
+- a **Praça Cívica** não foi encontrada como logradouro: o `endereco_encontrado` traz só o
+  bairro, o município e o CEP, e o ponto caiu no centroide do CEP.
+
+Os quatro "foram geocodificados", mas só os dois primeiros servem para uma análise na escala do
+lote.
 
 ::: {.callout-important}
 ## Nunca use a coordenada sem olhar a precisão
@@ -87,6 +104,10 @@ ficção com aparência de precisão. Filtre pelo nível de precisão aceitável
 Aqui voltamos ao módulo 1. Endereços em bases administrativas vêm com abreviações
 inconsistentes, número no campo errado, complemento misturado ao logradouro.
 
+Não é preciso escrever as regras de padronização à mão: o pacote `enderecobr`, também do
+ipeaGIT, tem uma função para cada campo do endereço. Ela expande abreviações, tira acentos,
+passa para maiúsculas e remove espaços sobrando:
+
 ```{r}
 sujos <- c(
   "R. XV de Novembro, 300 - Centro",
@@ -95,37 +116,57 @@ sujos <- c(
   "Rua Sete de Setembro nº 45, fundos"
 )
 
-padronizar_endereco <- function(x) {
-  x |>
-    stringr::str_squish() |>
-    stringr::str_to_upper() |>
-    stringi::stri_trans_general("Latin-ASCII") |>
-    stringr::str_replace_all("\\bR\\.?\\b",   "RUA") |>
-    stringr::str_replace_all("\\bAV\\.?\\b",  "AVENIDA") |>
-    stringr::str_replace_all("\\bROD\\.?\\b", "RODOVIA") |>
-    stringr::str_replace_all("\\bPCA?\\.?\\b", "PRACA") |>
-    stringr::str_replace_all("\\bN[º°O]\\.?\\s*", "") |>
-    stringr::str_remove_all("\\bS/?N\\b") |>
-    stringr::str_remove_all("\\b(APTO|APT|AP|BLOCO|BL|CASA|FUNDOS|SALA|SL)\\b.*$") |>
-    stringr::str_squish()
-}
-
-data.frame(original = sujos, padronizado = padronizar_endereco(sujos)) |>
+data.frame(original = sujos, padronizado = enderecobr::padronizar_logradouros(sujos)) |>
   knitr::kable()
 ```
 
-Extrair o número do logradouro, quando ele vem embutido no texto:
+O mesmo vale para os outros campos:
 
 ```{r}
-extrair_numero <- function(x) {
-  x |>
-    stringr::str_extract(",\\s*(\\d{1,6})") |>
-    stringr::str_extract("\\d+") |>
-    as.integer()
+enderecobr::padronizar_ceps(c("74003010", "1310200"))
+enderecobr::padronizar_numeros(c("0045", "s/n", "SN"))
+enderecobr::padronizar_estados(c("go", "Sao Paulo", "35"), formato = "sigla")
+enderecobr::padronizar_municipios(c("goiania", "SAO PAULO", "3550308"))
+enderecobr::padronizar_bairros(c("setor central", "JD. AMERICA"))
+```
+
+Para uma tabela inteira, `enderecobr::padronizar_enderecos()` recebe o data frame e a
+correspondência entre colunas e campos (`enderecobr::correspondencia_campos()`), no mesmo
+espírito do `geocodebr::definir_campos()`.
+
+::: {.callout-note}
+## O `geocodebr` já padroniza
+
+O `geocode()` chama o `enderecobr` internamente (argumento `padronizar_enderecos = TRUE`, o
+padrão). Ou seja, abreviações e acentos não precisam ser tratados antes. Padronizar por conta
+própria só faz sentido para inspecionar a base, deduplicar endereços ou cruzá-la com outra
+fonte.
+:::
+
+O que o `enderecobr` **não** faz é separar campos. Note acima que o número e o
+`APARTAMENTO 51` continuam dentro do logradouro: a função uniformiza o texto, mas não sabe
+onde termina a rua. Se a base traz tudo numa coluna só, essa separação ainda é trabalho de
+expressão regular:
+
+```{r}
+separar_numero <- function(x) {
+  # logradouro, depois vírgula/espaço (e "NO" opcional), depois número ou S/N, depois o resto
+  partes <- stringr::str_match(x, "^(.*?)[, ]+(?:NO )?(\\d{1,6}|S/N)\\b[ ,-]*(.*)$")
+  data.frame(
+    logradouro  = dplyr::coalesce(partes[, 2], x),
+    numero      = partes[, 3],
+    complemento = dplyr::na_if(partes[, 4], "")
+  )
 }
 
-extrair_numero(sujos)
+sujos |>
+  enderecobr::padronizar_logradouros() |>
+  separar_numero() |>
+  knitr::kable()
 ```
+
+A regra é frágil, e o resultado mostra isso: o bairro `CENTRO` foi parar no complemento, e uma
+rua como `RUA 7 DE SETEMBRO` teria o 7 lido como número. Confira sempre uma amostra.
 
 O caso da rodovia (`km 25`) mostra o limite: endereço rodoviário não tem número de porta, e
 nenhum geocodificador urbano resolve. Para esses, o caminho é outro: localizar pelo **km** ao
@@ -210,3 +251,7 @@ colunas de saída podem diferir. Rode `?geocodebr::geocode` e
 deste. A lógica (padronizar, geocodificar, conferir precisão, validar espacialmente) é que
 não muda.
 :::
+
+Com os endereços transformados em pontos conferidos, temos o primeiro insumo de qualquer
+roteamento: **de onde e para onde**. Falta o segundo: **por onde**, a malha viária sobre a
+qual as viagens acontecem. É o que o próximo capítulo baixa do OpenStreetMap e prepara.

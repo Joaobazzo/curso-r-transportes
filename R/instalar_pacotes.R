@@ -31,9 +31,6 @@ pacotes_espaciais <- c(
   "osmdata", "osmextract", "elevatr", "ggspatial", "units", "RColorBrewer"
 )
 
-# módulo 4: geoestatística e acessibilidade
-pacotes_geoestatistica <- c("spdep", "gstat", "sp")
-
 # módulo 5: relatórios
 pacotes_relatorios <- c("quarto", "rmarkdown", "knitr", "gt")
 
@@ -66,9 +63,7 @@ instalar(pacotes_modulo1)
 # instalar(pacotes_opcionais)          # módulo 1 (exemplos não executados)
 # instalar(pacotes_espaciais)          # módulo 2
 # instalar(pacotes_dados_grandes)      # módulo 3
-# instalar(pacotes_transportes)        # módulos 3 e 4
-# instalar(pacotes_geoestatistica)     # módulo 4
-# instalar(pacotes_relatorios)         # módulo 5
+# instalar(pacotes_transportes)        # módulos 3 e 4# instalar(pacotes_relatorios)         # módulo 5
 
 # r5r exige Java 21; verifique com:
 # rJava::.jinit(); rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")

@@ -1,0 +1,329 @@
+# Roteamento de transporte público com `r5r` {#sec-m4-gtfs}
+
+No automóvel (@sec-m3-roteamento), o custo de uma aresta é fixo: comprimento dividido pela
+velocidade. No transporte público, não. Uma viagem de ônibus é feita de etapas, e o tempo de
+cada uma depende do relógio:
+
+1. **caminhar** da origem até a parada, pela malha viária;
+2. **esperar** o ônibus, o que depende de quando ele passa;
+3. **viajar** na linha, no tempo da tabela horária;
+4. eventualmente **transferir**: caminhar até outra parada e esperar de novo;
+5. **caminhar** da última parada até o destino.
+
+Por isso o roteador de transporte público precisa de duas coisas: a malha viária, para as
+caminhadas, e a **programação das linhas**, para o resto. O `r5r` é a interface em R do R5, o
+motor da Conveyal que faz exatamente isso.
+
+::: {.callout-important}
+## O que roda e o que não roda na construção do site
+
+Os blocos que chamam o `r5r` exigem o **JDK 21** (ver @sec-m4) e não são executados na
+construção do site. Mas o exemplo inteiro usa os dados de **Porto Alegre que vêm dentro do
+próprio pacote**: não é preciso baixar nada, e o código roda na sua máquina assim que o Java
+estiver instalado. A exploração do GTFS, que não precisa de Java, é executada normalmente.
+:::
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+# mapa-base padrão dos mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+## O insumo: uma pasta com `.pbf` e GTFS
+
+O `r5r` trabalha com uma **pasta de dados**: basta colocar nela o `.pbf` do OSM (o mesmo do
+@sec-m3-osm) e um ou mais arquivos GTFS, e ele monta a rede. A pasta de exemplo do pacote:
+
+```{r}
+pasta_poa <- system.file("extdata/poa", package = "r5r")
+
+list.files(pasta_poa, pattern = "\\.(pbf|zip)$")
+```
+
+São a malha viária de um recorte de Porto Alegre (`poa_osm.pbf`) e dois GTFS: os ônibus da
+EPTC e o trem metropolitano da Trensurb.
+
+## O GTFS por dentro
+
+O GTFS (*General Transit Feed Specification*) é o formato-padrão para publicar a programação de
+transporte público. É um `.zip` com várias tabelas em texto, ligadas por chaves. O
+`gtfstools` lê tudo de uma vez:
+
+```{r}
+gtfs <- gtfstools::read_gtfs(file.path(pasta_poa, "poa_eptc.zip"))
+
+names(gtfs)
+```
+
+As tabelas que importam para o roteamento:
+
+| Tabela | O que tem | Chave que a liga às outras |
+|:--|:--|:--|
+| `routes` | as linhas (número, nome, tipo de veículo) | `route_id` |
+| `trips` | cada viagem de cada linha, num sentido | `trip_id`, `route_id`, `service_id` |
+| `stops` | as paradas, com coordenadas | `stop_id` |
+| `stop_times` | o horário de cada viagem em cada parada | `trip_id`, `stop_id` |
+| `calendar` | em que dias cada serviço opera, e o período de validade | `service_id` |
+| `shapes` | o traçado das linhas, para desenhar | `shape_id` |
+
+As linhas:
+
+```{r}
+gtfs$routes |>
+  dplyr::select(route_id, route_short_name, route_long_name, route_type) |>
+  head()
+
+nrow(gtfs$routes)
+```
+
+O `route_type` 3 é ônibus. O coração do GTFS é a `stop_times`, a tabela horária propriamente
+dita:
+
+```{r}
+gtfs$stop_times |>
+  dplyr::select(trip_id, stop_sequence, stop_id, arrival_time, departure_time) |>
+  head(8)
+
+nrow(gtfs$stop_times)
+```
+
+Repare nos horários em branco: o GTFS só exige o horário nas paradas de controle. Entre elas,
+o R5 interpola. E repare no tamanho: são mais de 130 mil linhas só para as viagens deste
+recorte.
+
+O `calendar` guarda a informação que mais causa erro:
+
+```{r}
+gtfs$calendar |> head(3)
+```
+
+Este GTFS vale de **15/04/2019 a 15/07/2019**, de segunda a sexta. Uma consulta para um
+sábado, ou para 2026, não encontra nenhum ônibus: o R5 devolve só caminhada, sem aviso. O
+`departure_datetime` de toda consulta precisa cair dentro da validade e num dia de operação.
+
+Uma olhada nas paradas e nos traçados:
+
+```{r}
+paradas   <- gtfstools::convert_stops_to_sf(gtfs)
+tracados  <- gtfstools::convert_shapes_to_sf(gtfs)
+
+c(paradas = nrow(paradas), tracados = nrow(tracados))
+
+mapview::mapview(tracados, color = "#1a5b8a", lwd = 1.5, layer.name = "Traçados") +
+  mapview::mapview(paradas, cex = 1.5, col.regions = "#b3402a", layer.name = "Paradas")
+```
+
+### Por que o horário de partida importa
+
+Contando quantas viagens começam em cada hora do dia:
+
+```{r}
+#| label: fig-viagens-hora
+#| fig-cap: "Viagens de ônibus iniciadas por hora do dia, GTFS da EPTC (amostra do r5r)"
+#| fig-height: 3.4
+inicio_viagens <- gtfs$stop_times |>
+  dplyr::filter(stop_sequence == 1) |>
+  dplyr::mutate(hora = as.integer(substr(departure_time, 1, 2)))
+
+ggplot(inicio_viagens, aes(factor(hora))) +     # cada hora como uma categoria
+  geom_bar(fill = "#1a5b8a") +
+  labs(x = "Hora de início da viagem", y = "Viagens") +
+  theme_minimal(base_size = 10)
+```
+
+A figura traz uma surpresa: só há ônibus entre 11h e 17h50. Não é a operação real de Porto
+Alegre, e sim um recorte que o pacote faz para caber no tamanho de um exemplo. Mas é uma
+lição útil, porque o `r5r` não avisa quando você consulta um horário sem oferta: uma matriz
+calculada para as 8h com este GTFS sairia só com tempos de caminhada, sem nenhum erro. Por isso
+os exemplos abaixo usam as 14h.
+
+Num GTFS completo, a figura mostraria o padrão típico, com picos de manhã e no fim da tarde e
+pouca oferta à noite. A mesma viagem, entre os mesmos dois pontos, tem tempos de espera
+diferentes conforme a hora. É por isso que todo resultado do `r5r` precisa dizer **para que dia
+e horário** foi calculado, e por que vale olhar esta figura antes de escolher o horário.
+
+## Montar a rede
+
+```{r}
+#| eval: false
+options(java.parameters = "-Xmx4G")    # memória para o Java, ANTES de carregar o pacote
+library(r5r)
+
+# copiar a pasta de exemplo: o R5 grava a rede montada (network.dat) dentro dela
+pasta <- "dados/brutos/poa"
+dir.create(pasta, recursive = TRUE, showWarnings = FALSE)
+file.copy(list.files(pasta_poa, full.names = TRUE), pasta, recursive = TRUE)
+
+rede <- r5r::build_network(data_path = pasta)
+```
+
+::: {.callout-note}
+## `setup_r5()` ou `build_network()`?
+
+Até a versão 2.3, a função se chamava `setup_r5()`. As versões atuais usam
+`build_network()`, com o mesmo comportamento. Se o seu R disser que a função não existe, troque
+o nome e confira com `packageVersion("r5r")`.
+:::
+
+Na primeira vez, o R5 monta a rede e grava `network.dat` na pasta, o que pode levar alguns
+minutos numa cidade grande. Nas seguintes, reaproveita. Antes de calcular qualquer coisa,
+confira se o GTFS entrou:
+
+```{r}
+#| eval: false
+r5r::street_network_to_sf(rede)$edges |> nrow()      # trechos de via
+r5r::transit_network_to_sf(rede)$routes |> nrow()    # linhas de transporte público
+```
+
+Se a segunda linha der zero, o GTFS não foi reconhecido: estava descompactado, fora da pasta
+ou com erro de formato.
+
+## Matriz de tempos de viagem
+
+Os pontos de origem e destino precisam de três colunas: `id`, `lon` e `lat`. O exemplo do
+pacote traz alguns lugares conhecidos de Porto Alegre:
+
+```{r}
+pontos <- read.csv(file.path(pasta_poa, "poa_points_of_interest.csv"))
+head(pontos)
+```
+
+```{r}
+#| eval: false
+ttm <- r5r::travel_time_matrix(
+  rede,
+  origins            = pontos,
+  destinations       = pontos,
+  mode               = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2019-05-13 14:00:00",     # segunda-feira, dentro da
+                                  tz = "America/Sao_Paulo"),  # validade do GTFS
+  time_window        = 30,           # simula 30 partidas, minuto a minuto, a partir das 14h
+  percentiles        = c(25, 50, 75),
+  max_walk_time      = 20,           # minutos de caminhada, no máximo, em cada ponta
+  max_trip_duration  = 90
+)
+
+head(ttm)
+```
+
+O resultado vem no **formato longo**: uma linha por par origem–destino, com uma coluna de
+tempo por percentil (`travel_time_p25`, `travel_time_p50`, `travel_time_p75`).
+
+Os argumentos que mudam o resultado, e que precisam estar no relatório:
+
+- **`mode`**: o modo principal e o de acesso. `c("WALK", "TRANSIT")` é ônibus com acesso a pé;
+  `c("BICYCLE", "TRANSIT")`, com acesso de bicicleta; `"CAR"` e `"WALK"` sozinhos também
+  funcionam.
+- **`departure_datetime`**: dia e hora. Dentro da validade do GTFS, e num dia em que o serviço
+  opera.
+- **`time_window` e `percentiles`**: em vez de um único horário de partida, o R5 simula todas
+  as partidas da janela e devolve a distribuição dos tempos. Isso captura a sorte de chegar à
+  parada logo antes ou logo depois do ônibus. O percentil 50 é a escolha usual; o 75 é mais
+  honesto para quem depende de linha de baixa frequência.
+- **`max_walk_time`** e **`walk_speed`** (padrão de 3,6 km/h): limitam e definem a caminhada
+  de acesso. Um limite baixo demais deixa pontos sem atendimento.
+- **`max_rides`**: o número máximo de embarques, ou seja, de transferências mais um.
+- **`max_trip_duration`**: corta a matriz e acelera muito o cálculo.
+
+Para ver o efeito do horário, basta repetir a consulta às 18h30, quando os ônibus deste GTFS
+já pararam e só resta o trem, e comparar:
+
+```{r}
+#| eval: false
+ttm_noite <- r5r::travel_time_matrix(
+  rede, origins = pontos, destinations = pontos,
+  mode = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2019-05-13 18:30:00", tz = "America/Sao_Paulo"),
+  time_window = 30, percentiles = 50, max_walk_time = 20, max_trip_duration = 90
+)
+
+dplyr::inner_join(ttm, ttm_noite, by = c("from_id", "to_id"),
+                  suffix = c("_14h", "_18h30")) |>
+  dplyr::mutate(diferenca_min = travel_time_p50_18h30 - travel_time_p50_14h) |>
+  dplyr::arrange(dplyr::desc(diferenca_min)) |>
+  head()
+```
+
+## Itinerários detalhados
+
+A matriz diz quanto tempo leva; `detailed_itineraries()` diz **como**: cada etapa da viagem,
+com modo, linha, duração e geometria.
+
+```{r}
+#| eval: false
+det <- r5r::detailed_itineraries(
+  rede,
+  origins            = pontos[pontos$id == "farrapos_station", ],
+  destinations       = pontos[pontos$id == "pucrs", ],
+  mode               = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2019-05-13 14:00:00", tz = "America/Sao_Paulo"),
+  shortest_path      = FALSE        # devolve as alternativas, não só a mais rápida
+)
+
+det |>
+  sf::st_drop_geometry() |>
+  dplyr::select(option, segment, mode, route, segment_duration, wait, distance)
+
+mapview::mapview(det, zcol = "mode", lwd = 4)
+```
+
+É olhando as etapas (caminhada, espera, linha, transferência) que se explica um tempo de viagem
+que parece alto demais. Quase sempre o culpado é a espera ou uma caminhada longa até a parada.
+
+## Isócronas
+
+Até onde se chega a partir de um ponto em 15, 30 e 45 minutos:
+
+```{r}
+#| eval: false
+iso <- r5r::isochrone(
+  rede,
+  origins            = pontos[pontos$id == "bus_central_station", ],
+  mode               = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2019-05-13 14:00:00", tz = "America/Sao_Paulo"),
+  cutoffs            = c(15, 30, 45)
+)
+
+ggplot(iso) +
+  geom_sf(aes(fill = factor(isochrone)), alpha = 0.5, colour = NA) +
+  scale_fill_brewer(palette = "YlOrRd", direction = -1, name = "minutos") +
+  theme_void()
+```
+
+## Automóvel no `r5r`?
+
+O `r5r` também roteia carro (`mode = "CAR"`), sobre a mesma malha. Mas, como o `dodgr`, usa
+velocidades de fluxo livre, e exige o Java e a montagem da rede. Para o automóvel e para a
+carga, o `dodgr` do módulo 3 (@sec-m3-roteamento) costuma ser mais simples e mais rápido.
+
+| Para... | Use |
+|:--|:--|
+| Distâncias e tempos rodoviários, carga, matrizes grandes entre municípios | `dodgr` |
+| Transporte público, acessibilidade urbana, isócronas, cenários de GTFS | `r5r` |
+| Uma rota específica para ilustrar um mapa | qualquer um dos dois |
+
+Mais adiante neste módulo (@sec-m4-r5r), o `r5r` volta para um estudo completo: Fortaleza, com edição do GTFS
+para simular uma intervenção e cálculo de acessibilidade.
+
+## Da matriz à acessibilidade
+
+A matriz de tempos diz quanto se leva de cada lugar a cada outro. Sozinha, ela ainda não diz
+se isso é bom ou ruim: falta saber **o que existe em cada destino**. O exemplo de Porto Alegre
+traz exatamente essa outra metade, uma grade hexagonal com população e oportunidades em cada
+hexágono:
+
+```{r}
+hex <- read.csv(file.path(pasta_poa, "poa_hexgrid.csv"))
+
+head(hex)
+
+c(hexagonos = nrow(hex),
+  pares_od  = nrow(hex)^2)
+```
+
+Juntar as duas coisas (quanto tempo leva de cada hexágono a cada outro, e quantos empregos,
+escolas ou serviços de saúde existem em cada um) é calcular **acessibilidade**: quantas
+oportunidades uma pessoa alcança a partir de onde mora. É o assunto do próximo capítulo.

@@ -1,9 +1,25 @@
 # SQL e DuckDB no R {#sec-m3-duckdb}
 
-Bases de roteamento, GPS, GTFS e comércio exterior têm milhões de linhas. Carregar tudo na
-memória para depois filtrar é o caminho mais lento. E é frequentemente impossível. O DuckDB
-resolve isso: é um banco analítico que roda **dentro** do processo do R, sem servidor, sem
-instalação separada, lendo CSV e Parquet direto do disco.
+Os capítulos anteriores seguiram uma sequência: os endereços viraram pontos, a malha do OSM
+virou grafo, e o roteamento ligou uns aos outros. O produto final do roteamento, seja de
+automóvel com o `dodgr`, seja de transporte público com o `r5r` (módulo 4), é sempre o mesmo:
+uma **tabela de pares origem–destino**, com distância, tempo ou custo. E essa tabela cresce com
+o quadrado do número de zonas:
+
+| Zonas | Pares OD |
+|:--|--:|
+| 2 pontos: São Paulo e Santos (@sec-m3-roteamento) | 4 |
+| 645 municípios de São Paulo | 416 mil |
+| 1.227 hexágonos de Porto Alegre (@sec-m4-gtfs) | 1,5 milhão |
+| 5.570 municípios do Brasil | 31 milhões |
+
+Some a isso os outros atributos de um estudo de carga (modo, mercadoria, toneladas) e mais de
+um cenário, e a tabela deixa de caber confortavelmente na memória. O mesmo vale para as outras
+bases do dia a dia do Ministério: GTFS, GPS de frota, Comex Stat.
+
+Carregar tudo na memória para depois filtrar é o caminho mais lento, e frequentemente
+impossível. O DuckDB resolve isso: é um banco analítico que roda **dentro** do processo do R,
+sem servidor, sem instalação separada, lendo CSV e Parquet direto do disco.
 
 ```{r}
 library(dplyr)
@@ -20,9 +36,10 @@ arquivo no meio do render.
 
 ## Uma base grande para o exemplo
 
-Para que o capítulo seja reprodutível sem *download*, vamos gerar uma matriz de roteamento
-sintética com 2 milhões de pares OD. É a ordem de grandeza de uma matriz de tempos de viagem
-entre setores censitários de uma região metropolitana.
+Para que o capítulo seja reprodutível sem *download*, vamos gerar uma matriz OD de carga
+sintética com 2 milhões de pares: a ordem de grandeza da matriz de 1,5 milhão de pares de Porto
+Alegre, com o que um estudo de carga acrescentaria a ela. Cada linha é um par de zonas, com a
+distância de rede (o que o roteamento entrega), o modo e as toneladas transportadas.
 
 ```{r}
 arquivo <- "dados/brutos/od_sintetica.csv"
@@ -231,3 +248,7 @@ resultado <- DBI::dbGetQuery(con, "
 
 A junção espacial roda no banco, sem materializar nada no R. Para bases menores, `sf::st_join`
 continua sendo mais simples. E a simplicidade tem valor.
+
+A base deste capítulo foi sintética de propósito: limpa, com tipos certos, sem surpresas. O
+próximo capítulo leva o DuckDB para uma base real e grande, o Comex Stat, onde o problema
+deixa de ser só o tamanho e passa a ser também a **qualidade** do dado.

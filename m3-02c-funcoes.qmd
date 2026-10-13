@@ -1,8 +1,7 @@
 # De script a função {#sec-m3-funcoes}
 
 ::: {.modulo-meta}
-**Dados:** recorte do modelo quatro etapas (@sec-m1-modelo4etapas) e Comex Stat
-(@sec-m3-comexstat)
+**Dados:** recorte do modelo quatro etapas (@sec-m1-modelo4etapas)
 **Pacotes:** `purrr`, `dplyr`, `duckdb`
 **Pré-requisito:** a seção de funções de @sec-m1-linguagem
 :::
@@ -154,97 +153,3 @@ purrr::map_int(cenarios, \(f) nrow(f(links)))   # vetor de inteiros, ou erro
 A vantagem do `purrr` não é velocidade: é que `map_int()`, `map_dbl()` e `map_chr()`
 **garantem o tipo** da saída. Se algum elemento não devolver um inteiro, a função para na
 hora, em vez de produzir um vetor misturado que quebra três passos adiante.
-
-## Aplicação real: baixar dez anos de Comex Stat
-
-O padrão de maior retorno no trabalho do dia a dia é este: **uma função que faz um caso, e um
-`map` que faz todos**.
-
-```{r}
-#| eval: false
-baixa_comex_ano <- function(ano, fluxo = c("EXP", "IMP"),
-                            destino = "dados/brutos/comexstat") {
-  fluxo <- match.arg(fluxo)
-  arquivo <- file.path(destino, sprintf("%s_%d_MUN.csv", fluxo, ano))
-  if (file.exists(arquivo)) return(arquivo)
-
-  url <- sprintf(
-    "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/%s_%d_MUN.csv",
-    fluxo, ano)
-  utils::download.file(url, arquivo, mode = "wb", quiet = TRUE)
-
-  if (startsWith(readLines(arquivo, n = 1, warn = FALSE), "<")) {
-    file.remove(arquivo)
-    stop("Veio HTML em vez de CSV para ", ano)
-  }
-  arquivo
-}
-
-anos <- 2015:2024
-arquivos <- purrr::map_chr(anos, baixa_comex_ano)
-```
-
-Um problema: se o download de 2019 falhar, o `map` para e você perde os anos seguintes. Para
-tarefas em que uma falha não deve derrubar o conjunto, `purrr::possibly()` embrulha a função
-e devolve um valor padrão em caso de erro:
-
-```{r}
-#| eval: false
-baixa_com_tolerancia <- purrr::possibly(baixa_comex_ano, otherwise = NA_character_)
-
-arquivos <- purrr::map_chr(anos, baixa_com_tolerancia)
-anos[is.na(arquivos)]   # quais anos falharam, para tentar de novo
-```
-
-::: {.callout-important}
-## Tolerar a falha não é esconder a falha
-
-O `possibly()` evita que um erro derrube o resto. Ele **não** deve fazer o erro sumir. A
-última linha acima, que lista os anos que falharam, é obrigatória. Uma série histórica com um
-ano faltando, sem que ninguém saiba, é o pior resultado possível.
-:::
-
-## Onde guardar as funções
-
-Uma função útil vai ser usada em mais de um script. Ela não deve ficar escondida no meio de
-uma análise. A convenção é uma pasta `R/` na raiz do projeto:
-
-```
-meu-projeto/
-├── R/
-│   ├── funcoes_rede.R       # indicadores_rede(), ...
-│   └── funcoes_comex.R      # baixa_comex_ano(), co_mun_comex_para_ibge(), ...
-└── scripts/
-    ├── 01-baixa-dados.R
-    └── 02-analise.R
-```
-
-E no início de cada script:
-
-```{r}
-#| eval: false
-source("R/funcoes_rede.R")
-source("R/funcoes_comex.R")
-```
-
-Quando o conjunto de funções crescer e começar a ser usado por outras equipes, o passo
-seguinte é transformá-lo num **pacote** interno. Mas isso fica para depois do curso.
-
-::: {.callout-note}
-## Paralelizar
-
-Quando cada caso demora (rotear uma matriz OD, processar um raster grande), o pacote `furrr`
-oferece as mesmas funções do `purrr` rodando em vários núcleos. Troca-se `purrr::map()` por
-`furrr::future_map()`, depois de `future::plan(future::multisession)`. Não é o primeiro
-recurso: meça antes (@sec-m3-duckdb) e confirme que o gargalo é mesmo o cálculo, e não a
-leitura do disco.
-:::
-
-## Exercício
-
-1. Escreva uma função `participacao_classe(links, classe)` que devolva a participação de uma
-   classe de via no veículo-quilômetro e no atraso totais.
-2. Use `purrr::map()` para aplicá-la às seis classes do @sec-m1-modelo4etapas e empilhe o
-   resultado numa tabela.
-3. Confira que a soma das participações dá 100% nas duas colunas. Se não der, descubra por
-   quê antes de seguir.

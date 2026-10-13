@@ -75,7 +75,7 @@ ingenuo <- readr::read_delim(arq_exp, delim = ";", show_col_types = FALSE,
                              locale = readr::locale(encoding = "latin1"))
 
 ingenuo |> dplyr::select(CO_ANO, CO_MES, SH4, CO_PAIS, SG_UF_MUN, CO_MUN) |>
-  dplyr::slice_head(n = 3)
+  head(3)
 ```
 
 `CO_MES`, `SH4` e `CO_MUN` viraram números. Parece inofensivo. Não é:

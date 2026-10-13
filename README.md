@@ -11,8 +11,8 @@ ofertado à Subsecretaria de Fomento e Planejamento do **Ministério dos Transpo
 |:--:|:--|:--|
 | 1 | Fundamentos de R e manipulação de dados | TKU da cabotagem (ANTAQ) |
 | 2 | Objetos espaciais: vetores e rasters | Faixa de influência da BR-116 (Serra do Mar) |
-| 3 | Integração de bases, roteamento e matrizes OD | Fluxos de cabotagem no mapa do Brasil |
-| 4 | Geoestatística, sensoriamento remoto e acessibilidade | Declividade × traçado; acessibilidade em Fortaleza |
+| 3 | Integração de bases, roteamento e matrizes OD | Declividade × traçado; fluxos de cabotagem no mapa do Brasil |
+| 4 | Sensoriamento remoto e acessibilidade | Acessibilidade em Fortaleza |
 | 5 | Mapas temáticos, relatórios reproduzíveis e projeto final | Relatório parametrizado; projeto final |
 
 ## Estrutura do repositório
@@ -24,8 +24,7 @@ ofertado à Subsecretaria de Fomento e Planejamento do **Ministério dos Transpo
 ├── m1-*.qmd                 # capítulos do módulo 1
 ├── m2-*.qmd … m5-*.qmd      # capítulos dos módulos 2 a 5
 ├── a-dados.qmd              # dicionário e fontes dos dados
-├── a-slides.qmd             # slides e gravações
-├── a-recursos.qmd           # referências
+├── a-recursos.qmd           # recursos e referências
 ├── dados/                   # bases de exemplo (pequenas)
 ├── slides/                  # apresentações das aulas
 ├── R/                       # scripts auxiliares

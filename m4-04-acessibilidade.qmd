@@ -6,6 +6,11 @@ indicador que reúne, em um número por lugar, a **distribuição das oportunida
 **desempenho do sistema de transporte**. É a medida que responde à pergunta "esta obra melhora
 a vida de quem?".
 
+A introdução conceitual deste capítulo segue o livro *Introdução à acessibilidade urbana*, do
+Ipea (Pereira e Herszenhut, 2023), disponível gratuitamente em
+<https://ipeagit.github.io/intro_access_book/pt/>. Vale a leitura completa, principalmente os
+capítulos 2 (medidas) e 3 (cálculo em R).
+
 ```{r}
 library(sf)
 library(dplyr)
@@ -13,25 +18,11 @@ library(ggplot2)
 library(accessibility)
 ```
 
-## As medidas
+## Os dois ingredientes: onde as pessoas moram, onde estão as oportunidades
 
-| Medida | Pergunta que responde | Função |
-|:--|:--|:--|
-| Oportunidades cumulativas | quantos empregos alcanço em até 30 minutos? | `cumulative_cutoff()` |
-| Tempo mínimo | quanto tempo até o hospital mais próximo? | `cost_to_closest()` |
-| Gravitacional | quantas oportunidades, descontando as mais distantes? | `gravity()` |
-| Concorrência (2SFCA) | quantas oportunidades por pessoa, considerando a disputa? | `floating_catchment_area()` |
-
-A cumulativa é a mais usada porque é a mais fácil de comunicar ("empregos acessíveis em 30
-minutos de transporte público"); a de tempo mínimo é a mais adequada para serviços raros e
-essenciais (hospital de alta complexidade); a gravitacional é a mais defensável
-tecnicamente, e a mais difícil de explicar em uma reunião.
-
-## Dados prontos: `aopdata`
-
-O projeto Acesso a Oportunidades (Ipea) publica, para 20 cidades brasileiras, os indicadores
-já calculados em grade hexagonal, com população, renda, raça e oportunidades por hexágono.
-Para diagnóstico, é o caminho mais rápido.
+O exemplo do capítulo é Fortaleza, com os dados do projeto Acesso a Oportunidades, do Ipea: a
+cidade dividida em hexágonos de cerca de 0,1 km², com população, renda e oportunidades em cada
+um.
 
 ```{r}
 arquivo <- "dados/brutos/aop_fortaleza.rds"
@@ -49,7 +40,178 @@ if (!file.exists(arquivo)) {
 }
 
 aop <- readRDS(arquivo)
+```
 
+Antes de qualquer medida, os dois mapas que toda análise de acessibilidade cruza:
+
+```{r}
+#| label: fig-ingredientes
+#| fig-cap: "População residente (esquerda) e empregos formais (direita) por hexágono, Fortaleza"
+#| fig-height: 4.2
+mapa_hex <- function(dados, coluna, titulo, paleta) {
+  ggplot(dados) +
+    geom_sf(aes(fill = .data[[coluna]]), colour = NA) +
+    scale_fill_viridis_c(option = paleta, direction = -1, transform = "sqrt",
+                         breaks = scales::breaks_pretty(n = 3),
+                         labels = scales::label_number(big.mark = "."), name = NULL) +
+    labs(title = titulo) +
+    theme_void(base_size = 9) +
+    theme(legend.position = "bottom", legend.key.width = unit(1.6, "cm"))
+}
+
+patchwork::wrap_plots(
+  mapa_hex(aop, "P001", "Onde as pessoas moram", "mako"),
+  mapa_hex(aop, "T001", "Onde estão os empregos", "rocket"),
+  nrow = 1
+)
+```
+
+O descompasso é visível: a população se espalha pela cidade inteira, os empregos se concentram
+no centro e em poucos corredores. **Acessibilidade é a medida desse descompasso, atravessado
+pelo sistema de transporte**: quanto do mapa da direita alguém consegue alcançar a partir de
+cada ponto do mapa da esquerda, dentro de um tempo razoável.
+
+## A mesma régua em dois lugares
+
+A forma mais direta de ver isso é escolher dois pontos de partida e perguntar: **quantos
+empregos estão a até 30 minutos daqui?**
+
+Para este exemplo, o tempo de viagem é **aproximado**: distância em linha reta dividida por
+uma velocidade porta a porta de 18 km/h, típica de transporte público urbano. É uma
+simplificação, e a seção sobre o pacote `accessibility`, mais abaixo, volta a ela. Mas basta
+para mostrar a ideia.
+
+```{r}
+centros_hex <- sf::st_point_on_surface(sf::st_transform(aop, 31984))   # UTM 24S
+
+# dois pontos de partida: o hexágono com mais empregos (o centro) e, entre os 10% mais
+# populosos, o mais distante dele (um bairro populoso da periferia)
+i_centro <- which.max(aop$T001)
+dist_ao_centro <- as.numeric(sf::st_distance(centros_hex, centros_hex[i_centro, ]))
+populosos <- which(aop$P001 >= quantile(aop$P001[aop$P001 > 0], 0.9))
+i_periferia <- populosos[which.max(dist_ao_centro[populosos])]
+
+tempo_a_partir_de <- function(i, velocidade_kmh = 18) {
+  dist_km <- as.numeric(sf::st_distance(centros_hex, centros_hex[i, ])) / 1000
+  dist_km / velocidade_kmh * 60
+}
+
+origens <- dplyr::bind_rows(
+  aop |> dplyr::mutate(origem = "Centro", tempo_min = tempo_a_partir_de(i_centro)),
+  aop |> dplyr::mutate(origem = "Periferia", tempo_min = tempo_a_partir_de(i_periferia))
+)
+
+empregos_30 <- origens |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(empregos = sum(T001[tempo_min <= 30]), .by = origem)
+empregos_30
+```
+
+```{r}
+#| label: fig-regua
+#| fig-cap: "Tempo de viagem aproximado a partir de dois pontos de Fortaleza. Os hexágonos destacados ficam a até 30 minutos."
+#| fig-height: 4.4
+rotulos <- setNames(
+  paste0(empregos_30$origem, ": ",
+         scales::label_number(big.mark = ".")(empregos_30$empregos),
+         " empregos em até 30 min"),
+  empregos_30$origem
+)
+
+pontos_partida <- dplyr::bind_rows(
+  aop[i_centro, ] |> dplyr::mutate(origem = "Centro"),
+  aop[i_periferia, ] |> dplyr::mutate(origem = "Periferia")
+) |>
+  sf::st_point_on_surface()
+
+ggplot(origens) +
+  geom_sf(aes(fill = cut(tempo_min, c(0, 15, 30, 45, 60, Inf),
+                         labels = c("até 15", "15 a 30", "30 a 45", "45 a 60", "mais de 60"),
+                         include.lowest = TRUE)),
+          colour = NA) +
+  geom_sf(data = pontos_partida, shape = 21, size = 3, fill = "white", stroke = 1.2) +
+  facet_wrap(~origem, labeller = labeller(origem = rotulos)) +
+  scale_fill_manual(values = c("#1a5b8a", "#5b9bc8", "#e8e8e8", "#f2f2f2", "#fafafa"),
+                    name = "minutos") +
+  theme_void(base_size = 9) +
+  theme(legend.position = "bottom")
+```
+
+A régua é a mesma, 30 minutos; o resultado não. Quem mora no centro alcança algo como três
+vezes mais empregos do que quem mora no bairro da periferia. E na prática a diferença é ainda
+maior, porque o transporte público na periferia costuma ser mais lento e menos frequente do
+que os 18 km/h supostos aqui. Fazer essa conta para **todos** os hexágonos é calcular uma medida de
+acessibilidade.
+
+## Medidas baseadas em lugares e em pessoas
+
+O livro do Ipea organiza as medidas em dois grandes grupos:
+
+- **Baseadas em lugares**: atribuem um nível de acesso a cada lugar (hexágono, setor, zona), e
+  todas as pessoas que moram ali recebem o mesmo valor. Respondem à distribuição das
+  oportunidades e ao desempenho da rede, mas não às características de cada pessoa. Exigem
+  poucos dados, são fáceis de calcular e de comunicar. São as que se usam em planejamento, e as
+  deste capítulo.
+- **Baseadas em pessoas**: consideram idade, renda, deficiência, a agenda de atividades do dia.
+  São mais realistas, mas exigem diários de viagem ou pesquisa origem–destino, são pesadas de
+  calcular e difíceis de resumir em um indicador.
+
+## As medidas baseadas em lugares
+
+| Medida | Pergunta que responde | Em palavras | Função |
+|:--|:--|:--|:--|
+| Tempo mínimo | quanto tempo até o hospital mais próximo? | o menor tempo até a oportunidade mais próxima | `cost_to_closest()` |
+| Oportunidades cumulativas | quantos empregos alcanço em até 30 minutos? | soma das oportunidades dentro do limite de tempo | `cumulative_cutoff()` |
+| Gravitacional | quantas oportunidades, descontando as mais distantes? | soma das oportunidades, cada uma com um peso que cai com o tempo | `gravity()` |
+| Concorrência (2SFCA, BFCA) | quantas oportunidades por pessoa, considerando a disputa? | como a gravitacional, dividindo cada oportunidade por quem também a alcança | `floating_catchment_area()` |
+
+A figura anterior era uma medida **cumulativa** para dois pontos. A diferença entre as medidas
+está no **peso** que cada uma dá a uma oportunidade conforme o tempo para chegar até ela:
+
+```{r}
+#| label: fig-decaimento
+#| fig-cap: "Funções de decaimento: o peso dado a uma oportunidade conforme o tempo de viagem"
+#| fig-height: 3.4
+t <- 0:90
+data.frame(
+  minutos = rep(t, 3),
+  peso = c(exp(-0.05 * t),
+           as.numeric(t <= 30),
+           pmax(0, 1 - t / 60)),
+  funcao = rep(c("exponencial (0,05)", "cumulativa (30 min)", "linear (60 min)"),
+               each = length(t))
+) |>
+  ggplot(aes(minutos, peso, colour = funcao)) +
+  geom_line(linewidth = 0.8) +
+  scale_colour_manual(values = c("#1a5b8a", "#b3402a", "#e0a03f"), name = NULL) +
+  labs(x = "Tempo de viagem (min)", y = "Peso da oportunidade") +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "top")
+```
+
+- A **cumulativa** é o degrau vermelho: peso 1 até 30 minutos, zero depois. É a mais usada
+  porque é a mais fácil de comunicar ("empregos acessíveis em 30 minutos"). O custo é tratar um
+  emprego a 29 minutos como plenamente acessível e um a 31 como inacessível, e um emprego a 5
+  minutos igual a um a 29.
+- A **gravitacional** suaviza o degrau: a exponencial dá muito peso ao que está perto e pouco
+  ao que está longe. É a mais defensável tecnicamente, mas o parâmetro de decaimento precisa
+  ser calibrado com dados de viagem, e o número final é difícil de explicar em uma reunião.
+- O **tempo mínimo** não soma nada: só olha a oportunidade mais próxima. É a mais adequada
+  para serviços essenciais e raros (hospital de alta complexidade), mas ignora quantas
+  oportunidades existem e se a mais próxima está sobrecarregada.
+- As de **concorrência** levam em conta que um leito de UTI ou uma vaga de escola é disputado
+  por todos que o alcançam. São as mais completas para serviços com capacidade limitada, e as
+  mais difíceis de interpretar.
+
+A escolha muda o resultado, e por isso precisa estar declarada no relatório.
+
+## Dados prontos: `aopdata`
+
+O projeto Acesso a Oportunidades (Ipea) publica, para 20 cidades brasileiras, os indicadores
+já calculados em grade hexagonal, com população, renda, raça e oportunidades por hexágono. É o
+objeto `aop` que carregamos no início. Para diagnóstico, é o caminho mais rápido.
+
+```{r}
 dim(aop)
 names(aop) |> head(30)
 ```
@@ -201,32 +363,6 @@ grav <- accessibility::gravity(
 
 head(grav, 4)
 ```
-
-```{r}
-#| label: fig-decaimento
-#| fig-cap: "Funções de decaimento: o peso dado a uma oportunidade conforme o tempo de viagem"
-#| fig-height: 3.4
-t <- 0:90
-data.frame(
-  minutos = rep(t, 3),
-  peso = c(exp(-0.05 * t),
-           as.numeric(t <= 30),
-           pmax(0, 1 - t / 60)),
-  funcao = rep(c("exponencial (0,05)", "cumulativa (30 min)", "linear (60 min)"),
-               each = length(t))
-) |>
-  ggplot(aes(minutos, peso, colour = funcao)) +
-  geom_line(linewidth = 0.8) +
-  scale_colour_manual(values = c("#1a5b8a", "#b3402a", "#e0a03f"), name = NULL) +
-  labs(x = "Tempo de viagem (min)", y = "Peso da oportunidade") +
-  theme_minimal(base_size = 9) +
-  theme(legend.position = "top")
-```
-
-Esse gráfico é a melhor forma de explicar a escolha da medida em uma reunião técnica: a
-cumulativa trata um emprego a 29 minutos como plenamente acessível e um a 31 minutos como
-inacessível; as funções contínuas suavizam esse degrau. A escolha muda o resultado, e por isso
-precisa estar declarada.
 
 ## Comparação de cenários
 

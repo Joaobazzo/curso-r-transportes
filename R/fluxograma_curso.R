@@ -65,7 +65,7 @@ titulos_modulo <- c(
   "1" = "Módulo 1\nFundamentos de R",
   "2" = "Módulo 2\nVetores e rasters",
   "3" = "Módulo 3\nBases, roteamento,\nmatrizes OD",
-  "4" = "Módulo 4\nGeoestatística e\nacessibilidade",
+  "4" = "Módulo 4\nSensoriamento remoto\ne acessibilidade",
   "5" = "Módulo 5\nRelatórios e\nprojeto final"
 )
 

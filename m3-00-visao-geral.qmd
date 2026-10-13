@@ -5,20 +5,24 @@
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
 **Datas:** 13/10 e 14/10 (síncronas); 16/10 (assíncrono)\
-**Pacotes:** `osmdata`, `osmextract`, `duckdb`, `duckplyr`, `geocodebr`, `dodgr`, `r5r`, `Matrix`, `sf`\
-**Estudo de caso:** matriz OD e fluxos espaciais da cabotagem, com cálculo de TKU\
+**Pacotes:** `purrr`, `terra`, `elevatr`, `geocodebr`, `enderecobr`, `osmdata`, `osmextract`, `sfnetworks`, `dodgr`, `duckdb`, `duckplyr`, `Matrix`, `sf`\
+**Estudos de caso:** declividade × traçado na BR-116 (Serra do Mar); matriz OD e fluxos espaciais da cabotagem, com cálculo de TKU\
 **Também:** Comex Stat (MDIC), bases por NCM e municipal
 :::
 
 ## O que você vai conseguir fazer no fim do módulo
 
-- Extrair do OpenStreetMap a malha viária e os pontos de interesse de uma área de estudo.
+- Transformar trechos de código repetidos em funções e aplicá-las a muitos casos com `purrr`.
+- Extrair perfis de terreno e declividade ao longo de traçados, comparar alternativas de
+  projeto por critérios quantitativos e apontar trechos de rodovia junto a encostas íngremes.
+- Transformar listas de endereços em coordenadas (geocodificação) e avaliar a qualidade do
+  resultado.
+- Extrair do OpenStreetMap a malha viária de uma área de estudo e transformá-la numa rede
+  topológica, pronta para roteamento.
+- Calcular rotas, distâncias e tempos de viagem de automóvel e carga sobre a malha viária.
 - Consultar bases grandes com SQL, direto do R, sem carregar tudo na memória.
 - Integrar bases federais com códigos que **não** são os do IBGE, e detectar quando um `join`
   está perdendo linhas em silêncio.
-- Transformar listas de endereços em coordenadas (geocodificação) e avaliar a qualidade do
-  resultado.
-- Calcular rotas, distâncias e tempos de viagem sobre uma rede real.
 - Representar matrizes origem–destino de forma eficiente e convertê-las em **fluxos
   espaciais**: as linhas de desejo que aparecem nos mapas de carga.
 - Calcular indicadores de transporte (TKU) a partir de uma matriz OD.
@@ -29,55 +33,79 @@
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 1 | Extração de dados do OpenStreetMap | @sec-m3-osm |
-| 2 | Processamento com SQL via DuckDB; comparação de desempenho | @sec-m3-duckdb |
-| 2b | Comex Stat: tipos, zeros à esquerda e o `join` que apaga São Paulo | @sec-m3-comexstat |
-| 2c | De script a função: funções próprias e iteração com `purrr` | @sec-m3-funcoes |
-| 3 | Geocodificação de endereços com `geocodebr` | @sec-m3-geocodificacao |
-| 4 | Roteamento com `dodgr` e `r5r` | @sec-m3-roteamento |
+| 1 | Geocodificação de endereços com `geocodebr` | @sec-m3-geocodificacao |
+| 2 | Dados do OpenStreetMap: malha viária e rede topológica | @sec-m3-osm |
+| 3 | Roteamento de automóvel e carga com `dodgr` | @sec-m3-roteamento |
+| 4 | Processamento com SQL via DuckDB; comparação de desempenho | @sec-m3-duckdb |
+| 5 | Comex Stat: tipos, zeros à esquerda e o `join` que apaga São Paulo | @sec-m3-comexstat |
+
+O roteamento de transporte público, com `r5r` e GTFS, fica para o módulo 4 (@sec-m4-gtfs), onde
+ele é a base do cálculo de acessibilidade.
 
 ### Conteúdo assíncrono (3h)
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 5 | Matrizes OD, matrizes esparsas e fluxos espaciais | @sec-m3-matrizes |
-| 6 | Estudo de caso: fluxos e TKU da cabotagem no mapa do Brasil | @sec-m3-estudo-de-caso |
-| 7 | Exercícios | @sec-m3-exercicios |
+| 6 | De script a função: funções próprias e iteração com `purrr` | @sec-m3-funcoes |
+| 7 | Estudo de caso: declividade × traçado e encostas ao longo das rodovias da Serra do Mar | @sec-m3-declividade |
+| 8 | Matrizes OD, matrizes esparsas e fluxos espaciais | @sec-m3-matrizes |
+| 9 | Estudo de caso: fluxos e TKU da cabotagem no mapa do Brasil | @sec-m3-estudo-de-caso |
+| 10 | Exercícios | @sec-m3-exercicios |
 
-## Pacotes do módulo
+## Antes da aula: pacotes e dados
 
-A lista abaixo é só o que é **novo** neste módulo. `osmdata`, `osmextract`, `duckplyr` e
-`data.table` já foram instalados nos módulos 1 e 2 e continuam em uso, sem reinstalar.
+Rode o script de preparação do módulo **antes do primeiro encontro**: ele baixa arquivos
+grandes, e a rede do Ministério pode deixar isso lento. Abra o projeto do curso no RStudio e
+cole no console:
 
 ```{r}
 #| eval: false
-pacotes <- c("duckdb", "DBI", "dbplyr", "purrr",
-             "arrow", "geocodebr", "dodgr", "r5r", "Matrix", "sfnetworks")
+source("https://raw.githubusercontent.com/Joaobazzo/curso-r-transportes/main/R/preparar_modulo3.R")
+```
+
+Ele faz três coisas, e termina com a mensagem **Tudo pronto para o Módulo 3**:
+
+1. **Instala os pacotes que faltam**, da lista abaixo.
+2. **Baixa o pacote de dados do módulo** (`dados_modulo3.zip`, da página de
+   [Releases](https://github.com/Joaobazzo/curso-r-transportes/releases)) para `dados/brutos/`.
+   É o que evita baixar do OpenStreetMap, ao vivo, a malha viária São Paulo–Santos, uma
+   consulta que leva vários minutos e às vezes falha.
+3. **Baixa os dados do Comex Stat** direto do servidor do MDIC, para
+   `dados/brutos/comexstat/`: as exportações municipais de 2024 (cerca de 60 MB) e a tabela
+   de municípios.
+
+Pode rodar mais de uma vez: o que já estiver instalado ou baixado é pulado.
+
+Os pacotes do módulo, para quem preferir instalar à mão:
+
+```{r}
+#| eval: false
+pacotes <- c(
+  # OSM e redes
+  "sf", "osmdata", "osmextract", "sfnetworks", "tidygraph", "dodgr",
+  # geocodificação
+  "geocodebr", "enderecobr", "geobr",
+  # bases grandes e SQL
+  "duckdb", "duckplyr", "duckspatial", "DBI", "dbplyr", "arrow", "data.table",
+  # funções, matrizes e fluxos
+  "purrr", "Matrix", "stplanr",
+  # relevo e declividade
+  "terra", "tidyterra", "elevatr", "ggspatial",
+  # manipulação, leitura e gráficos (já vêm dos módulos anteriores)
+  "dplyr", "tidyr", "stringr", "stringi", "readr", "readxl", "writexl", "units",
+  "ggplot2", "scales", "patchwork", "mapview", "knitr"
+)
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))
 if (length(faltando) > 0) install.packages(faltando)
 ```
 
-::: {.callout-important}
-## O `r5r` precisa de Java 21
+::: {.callout-note}
+## O `geocodebr` baixa os próprios dados
 
-O `r5r` é uma interface para o R5, o motor de roteamento da Conveyal, escrito em Java. Sem o
-**JDK 21** instalado, o pacote carrega mas falha ao construir a rede. Verifique antes do
-encontro:
-
-```{r}
-#| eval: false
-# no terminal do sistema
-# java -version    -> deve responder "21"
-
-# dentro do R
-rJava::.jinit()
-rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")
-```
-
-Se a instalação depender da TI do Ministério, peça o **JDK 21 (Temurin ou Oracle)** no mesmo
-chamado do R e do Rtools. Enquanto isso, o `dodgr` roda em R puro e cobre boa parte dos
-exemplos.
+Na primeira geocodificação, o `geocodebr` baixa os dados do CNEFE (o cadastro de endereços do
+IBGE) para uma pasta de cache no seu computador. Isso acontece uma vez só, mas pode levar
+alguns minutos. Se puder, rode o primeiro exemplo do @sec-m3-geocodificacao antes da aula.
 :::
 
 ## Uma observação sobre escala

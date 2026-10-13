@@ -196,3 +196,23 @@ Os valores são ilustrativos: o exercício é sobre a **estrutura** do cálculo 
 as premissas de forma que outra pessoa possa contestá-las. É o que distingue uma análise
 de uma opinião.
 :::
+
+## 7. Rampa máxima
+
+No estudo de caso da declividade (@sec-m3-declividade), quantos quilômetros de cada
+alternativa excedem 8% de rampa? E qual a rampa do percentil 95?
+
+::: {.callout-note collapse="true"}
+## Solução
+
+```{r}
+#| eval: false
+segmentos |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(
+    km_acima_8 = sum(comp_m[abs(rampa_pct) > 8], na.rm = TRUE) / 1000,
+    p95_rampa  = quantile(abs(rampa_pct), 0.95, na.rm = TRUE),
+    .by = alternativa
+  )
+```
+:::

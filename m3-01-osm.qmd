@@ -20,6 +20,34 @@ mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "E
 A regra prática: se a resposta cabe em alguns milhares de feições, `osmdata`; se você quer
 "todas as vias de um estado", `osmextract`.
 
+::: {.callout-important}
+## No Brasil, use o OSM para a malha viária, e quase só para ela
+
+A **rede viária** é a camada mais bem mapeada do OSM no Brasil: a cobertura de ruas e
+rodovias é ampla, a geometria é boa e a conectividade é a que os motores de roteamento
+esperam. É para isso que este módulo usa o OSM: como insumo do roteamento com `dodgr`
+(@sec-m3-roteamento) e `r5r` (@sec-m4-gtfs).
+
+As **demais feições** são outra história. Portos, terminais, aeródromos, pontes, restrições
+de peso e altura, uso do solo e pontos de interesse dependem de quem mapeou cada lugar: a
+cobertura é irregular, os atributos são parciais e a classificação muda de uma cidade para
+outra. Os exemplos com portos e pontes deste capítulo mostram justamente isso. Para essas
+camadas, prefira as fontes oficiais:
+
+| O que você precisa | Fonte mais adequada |
+|:--|:--|
+| Rodovias federais, com código, trecho e situação | SNV, do DNIT |
+| Instalações portuárias | ANTAQ |
+| Ferrovias, hidrovias e terminais | bases geoespaciais do Ministério dos Transportes e da Infra S.A. (ONTL) |
+| Aeródromos | ANAC |
+| Base cartográfica contínua (vias, hidrografia, localidades) | IBGE, BC250 |
+| Endereços e estabelecimentos | IBGE, CNEFE (é o que o `geocodebr` usa, @sec-m3-geocodificacao) |
+| Catálogo geral de dados geoespaciais oficiais | INDE |
+
+O OSM continua útil para essas camadas como **conferência rápida** ou quando não há fonte
+oficial, mas nesse caso o relatório precisa dizer que o dado é colaborativo e incompleto.
+:::
+
 ## `osmdata`: consultas à Overpass
 
 Toda consulta tem a mesma estrutura: uma área (`opq`), um ou mais filtros de etiqueta
@@ -75,21 +103,6 @@ add_osm_feature(key = "highway", value = c("motorway", "trunk", "primary"))
 
 # uma rodovia específica pelo código
 add_osm_feature(key = "ref", value = "BR-116")
-
-# infraestrutura logística
-add_osm_feature(key = "landuse",  value = "industrial")
-add_osm_feature(key = "railway",  value = "rail")
-add_osm_feature(key = "aeroway",  value = "aerodrome")
-add_osm_feature(key = "amenity",  value = "fuel")
-
-# transporte público
-add_osm_feature(key = "highway", value = "bus_stop")
-add_osm_feature(key = "public_transport", value = "platform")
-
-# restrições relevantes para carga
-add_osm_feature(key = "maxweight")
-add_osm_feature(key = "maxheight")
-add_osm_feature(key = "bridge", value = "yes")
 ```
 
 `osmdata::available_tags("highway")` lista todos os valores possíveis de uma chave — útil
@@ -153,7 +166,7 @@ library(osmextract)
 oe_match("Ceará")
 oe_match("Paraná")
 
-# 2. baixar só o arquivo .pbf (é o que o r5r consome, no módulo 4)
+# 2. baixar só o arquivo .pbf (é o que o r5r consome, @sec-m4-gtfs)
 oe_download(
   file_url = oe_match("Ceará")$url,
   download_directory = "dados/brutos/osm"
@@ -191,17 +204,25 @@ resolve; para roteamento de carga interestadual, o estado. O `.pbf` do Brasil in
 ## Preparar a malha para roteamento
 
 Uma malha viária baixada crua ainda não é uma rede navegável. Para acompanhar os passos sem
-baixar o extrato de um estado inteiro, vamos usar uma rede pequena: as vias principais do
-corredor Curitiba–Paranaguá, via `osmdata`. As colunas são as mesmas do `oe_get()` acima.
+baixar o extrato de um estado inteiro, vamos usar o principal corredor de carga do país: as
+vias principais entre a cidade de **São Paulo e o Porto de Santos**, com as duas rodovias que
+descem a serra, a Anchieta e a Imigrantes. As colunas são as mesmas do `oe_get()` acima.
+
+O arquivo vem no pacote de dados do módulo (@sec-m3). O bloco abaixo só baixa do OSM se ele
+não estiver em `dados/brutos/`, e esse download é lento: a malha de São Paulo é grande, e o
+servidor Overpass pode levar vários minutos ou recusar a consulta (erro 504).
 
 ```{r}
-arquivo_rede <- "dados/brutos/rede_curitiba_paranagua.gpkg"
+arquivo_rede <- "dados/brutos/rede_sao_paulo_santos.gpkg"
 
 if (!file.exists(arquivo_rede)) {
-  res <- osmdata::opq(bbox = c(-49.35, -25.62, -48.45, -25.35), timeout = 180) |>
+  # servidor espelho do Overpass, menos congestionado que o principal
+  osmdata::set_overpass_url("https://overpass.kumi.systems/api/interpreter")
+
+  res <- osmdata::opq(bbox = c(-46.80, -24.02, -46.25, -23.45), timeout = 300) |>
     osmdata::add_osm_feature(key = "highway", value = c(
       "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
-      "secondary", "secondary_link", "tertiary")) |>
+      "secondary", "secondary_link")) |>
     osmdata::osmdata_sf()
 
   res$osm_lines |>
@@ -249,36 +270,157 @@ rede_limpa |>
 ```
 
 E confira o mapa: a cor mostra a velocidade atribuída a cada trecho, mapeada ou preenchida
-pela regra. São cerca de 12 mil trechos, pesados demais para um mapa interativo; para
-conferir, basta a malha principal (no seu computador, o `leafgl` do @sec-m2-sf dá conta da
-rede inteira).
+pela regra. São `r format(nrow(rede_limpa), big.mark = ".")` trechos, pesados demais para um
+mapa interativo; para conferir, bastam as rodovias, as vias `motorway` e `trunk` (no seu
+computador, o `leafgl` do @sec-m2-sf dá conta da rede inteira).
 
 ```{r}
+# só para visualizar (os cálculos usam a malha completa): juntar os trechos da mesma
+# rodovia com a mesma velocidade deixa o mapa leve sem mudar o desenho
 rede_principal <- rede_limpa |>
-  filter(highway %in% c("motorway", "trunk", "primary"))
+  filter(highway %in% c("motorway", "trunk")) |>
+  group_by(ref, velocidade) |>
+  summarise(trechos = n(), .groups = "drop")
+
+nrow(rede_principal)
 
 mapview::mapview(rede_principal, zcol = "velocidade", layer.name = "Velocidade (km/h)")
 ```
 
-::: {.callout-note}
 ## Rede geométrica × rede topológica
 
-Um `sf` de linhas é uma coleção de geometrias: duas ruas que se cruzam na tela não estão
-necessariamente **conectadas** no grafo. Para roteamento é preciso uma rede topológica, com
-nós e arestas. É isso que o `dodgr`, o `r5r` e o pacote `sfnetworks` constroem a partir da
-geometria — e é por isso que o resultado depende da qualidade da malha de origem.
-:::
+A malha limpa ainda é uma **rede geométrica**: uma coleção de linhas, cada uma com suas
+coordenadas. Ela serve para desenhar e para medir, mas não para rotear. Para o computador, duas
+ruas que se cruzam na tela não estão ligadas: nada na tabela diz que dá para sair de uma e
+entrar na outra.
+
+Rotear exige uma **rede topológica**, ou grafo: um conjunto de **nós** (cruzamentos, pontas de
+via) e de **arestas** (os trechos entre dois nós), em que estar conectado significa
+**compartilhar um nó**. A geometria vira atributo da aresta; o que importa é quem se liga a
+quem.
+
+### Um exemplo de brinquedo
+
+Três vias, desenhadas à mão:
+
+- a **Rua A** (horizontal) e a **Rua B** (vertical) se cruzam **em nível**: as duas têm um
+  vértice no ponto de cruzamento;
+- o **Viaduto C** passa por cima da Rua A: as linhas se cruzam no desenho, mas não há vértice
+  comum, e não deve haver ligação.
+
+```{r}
+library(sfnetworks)
+
+ruas <- st_sf(
+  nome = c("Rua A", "Rua B", "Viaduto C"),
+  geometry = st_sfc(
+    st_linestring(rbind(c(0, 1), c(1, 1), c(2, 1))),    # vértice no meio, em (1, 1)
+    st_linestring(rbind(c(1, 0), c(1, 1), c(1, 2))),    # mesmo vértice (1, 1)
+    st_linestring(rbind(c(0.2, 0), c(0.6, 2)))          # cruza A em (0.4, 1), sem vértice
+  )
+)
+ruas
+```
+
+A conversão mais direta, `as_sfnetwork()`, cria um nó em cada **ponta** de linha e uma aresta
+por linha:
+
+```{r}
+rede_ingenua <- as_sfnetwork(ruas, directed = FALSE)
+rede_ingenua
+```
+
+São 6 nós e 3 arestas, e o resumo já avisa: uma "floresta com 3 árvores", ou seja, três
+pedaços soltos. O cruzamento das ruas A e B **não virou nó**, porque o vértice (1, 1) fica no
+meio das duas linhas, não na ponta. É exatamente o que acontece com o OSM: uma via costuma
+atravessar vários cruzamentos sem ser cortada neles.
+
+A correção é **subdividir** as linhas nos vértices que elas compartilham:
+
+```{r}
+rede_topologica <- tidygraph::convert(rede_ingenua, to_spatial_subdivision)
+rede_topologica
+```
+
+Agora são 7 nós e 5 arestas: o cruzamento (1, 1) virou nó, e A e B foram cortadas em dois
+trechos cada. O viaduto continua separado, como deve ser, porque não compartilha vértice com
+ninguém. As três versões lado a lado:
+
+```{r}
+#| label: fig-rede-topologica
+#| fig-cap: "A mesma malha como geometria (esquerda), como grafo ingênuo (centro) e como grafo subdividido (direita). Os pontos são os nós."
+#| fig-height: 3.4
+#| fig-width: 9
+desenhar_rede <- function(rede, titulo) {
+  nos     <- st_as_sf(rede, "nodes")
+  arestas <- st_as_sf(rede, "edges")
+
+  ggplot() +
+    geom_sf(data = arestas, aes(colour = nome), linewidth = 1.2) +
+    geom_sf(data = nos, size = 2.5) +
+    geom_sf_text(data = nos, aes(label = seq_len(nrow(nos))),
+                 nudge_x = 0.12, nudge_y = 0.12, size = 3) +
+    labs(title = titulo,
+         subtitle = paste(nrow(nos), "nós,", nrow(arestas), "arestas"),
+         colour = NULL) +
+    theme_void(base_size = 9) +
+    theme(legend.position = "bottom")
+}
+
+geometrica <- ggplot(ruas) +
+  geom_sf(aes(colour = nome), linewidth = 1.2) +
+  labs(title = "Rede geométrica", subtitle = "só linhas, sem ligações", colour = NULL) +
+  theme_void(base_size = 9) +
+  theme(legend.position = "bottom")
+
+patchwork::wrap_plots(
+  geometrica,
+  desenhar_rede(rede_ingenua, "Grafo ingênuo"),
+  desenhar_rede(rede_topologica, "Grafo subdividido"),
+  nrow = 1, guides = "collect"
+) & theme(legend.position = "bottom")
+```
+
+A prova de que a topologia mudou o resultado: pedir um caminho da ponta esquerda da Rua A até
+a ponta de cima da Rua B.
+
+```{r}
+# no grafo ingênuo: nó 1 = (0, 1), nó 4 = (1, 2). Não há caminho.
+st_network_paths(rede_ingenua, from = 1, to = 4)$node_paths
+
+# no grafo subdividido: nó 1 = (0, 1), nó 5 = (1, 2). O caminho passa pelo cruzamento, nó 2.
+st_network_paths(rede_topologica, from = 1, to = 5)$node_paths
+```
+
+### O que isso significa na malha real
+
+O `dodgr` e o `r5r` fazem essa conversão sozinhos, a partir dos identificadores de nó do
+próprio OSM, que já marcam onde as vias se cruzam. Mas a lógica é a mesma, e os mesmos
+problemas aparecem:
+
+- **Vias que deveriam se ligar e não se ligam**, porque o mapeador não colocou o nó comum.
+  O grafo fica partido em **componentes** isolados, e um par de pontos em componentes
+  diferentes "não se alcança". No próximo capítulo, a malha do corredor São Paulo–Santos
+  vira um grafo com algumas dezenas de componentes, e só o maior deles serve para rotear.
+- **Vias que não deveriam se ligar e se ligam**, como um viaduto mapeado com um nó em comum
+  com a rua de baixo. O roteador passa a "descer" do viaduto onde não há acesso. No OSM, a
+  etiqueta `layer` existe para evitar isso.
+- **Sentido de circulação**: num grafo dirigido (`directed = TRUE`), uma via de mão única
+  vira uma aresta só, e uma via de mão dupla vira duas, uma em cada sentido. A etiqueta
+  `oneway` do OSM é o que define isso.
+
+Para uma malha inteira com o `sfnetworks`, o código é o mesmo do exemplo, aplicado à
+`rede_limpa`:
 
 ```{r}
 #| eval: false
-# sfnetworks: rede topológica com sintaxe de tidyverse
-library(sfnetworks)
-
 net <- as_sfnetwork(rede_limpa, directed = FALSE) |>
   tidygraph::convert(sfnetworks::to_spatial_subdivision) |>
   tidygraph::activate("edges") |>
   mutate(peso = comprimento_m)
 ```
 
-No próximo capítulo saímos do OSM e vamos para o outro gargalo do módulo: consultar tabelas
-grandes sem estourar a memória.
+Agora temos os dois insumos de qualquer roteamento: os pontos de origem e destino, com
+coordenadas conferidas (@sec-m3-geocodificacao), e a malha viária, limpa e pronta para virar
+grafo. O próximo capítulo liga uma coisa à outra: calcula distâncias, tempos e caminhos de
+automóvel sobre a malha São Paulo–Santos.

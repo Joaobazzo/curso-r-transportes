@@ -6,21 +6,16 @@
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
 **Datas:** 19/10 e 21/10 (síncronas); 22/10 (assíncrono)\
-**Pacotes:** `spdep`, `gstat`, `terra`, `r5r`, `accessibility`, `aopdata`, `gtfstools`, `flownet`\
-**Estudos de caso:** declividade × traçado na BR-116 (Serra do Mar) e acessibilidade em Fortaleza
+**Pacotes:** `accessibility`, `aopdata`, `r5r`, `gtfstools`, `flownet`\
+**Estudo de caso:** acessibilidade em Fortaleza
 :::
 
 ## O que você vai conseguir fazer no fim do módulo
 
-- Testar se um fenômeno se distribui no espaço de forma aleatória ou concentrada
-  (autocorrelação espacial) e identificar os agrupamentos.
-- Estimar valores onde não há medição, a partir de pontos observados (interpolação), e
-  **avaliar o erro** dessa estimativa.
-- Extrair perfis de terreno e declividade ao longo de traçados, e comparar alternativas de
-  projeto por critérios quantitativos.
-- Calcular matrizes de tempo de viagem multimodais e isócronas.
-- Calcular e interpretar indicadores de acessibilidade a oportunidades, e comparar cenários
-  de rede de transporte público.
+- Calcular e interpretar indicadores de acessibilidade a oportunidades, e entender o que cada
+  medida (tempo mínimo, cumulativa, gravitacional, com concorrência) captura.
+- Calcular matrizes de tempo de viagem multimodais e isócronas, e comparar cenários de rede de
+  transporte público.
 
 ## Roteiro
 
@@ -28,25 +23,22 @@
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 1 | Autocorrelação espacial: vizinhança, I de Moran, LISA | @sec-m4-autocorrelacao |
-| 2 | Interpolação: IDW, variograma e krigagem, com validação | @sec-m4-interpolacao |
-| 3 | Roteamento multimodal e isócronas com `r5r` | @sec-m4-r5r |
+| 1 | Roteamento de transporte público com `r5r` e GTFS | @sec-m4-gtfs |
+| 2 | Acessibilidade a oportunidades: conceito, medidas e interpretação | @sec-m4-acessibilidade |
+| 3 | Roteamento multimodal, cenários e isócronas com `r5r` | @sec-m4-r5r |
 | 4 | Redes de fluxo e alocação (`flownet`, `stplanr`) | @sec-m4-r5r |
 
 ### Conteúdo assíncrono (3h)
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 5 | Estudo de caso: declividade × traçado na Serra do Mar | @sec-m4-declividade |
-| 6 | Acessibilidade a oportunidades: medidas e interpretação | @sec-m4-acessibilidade |
-| 7 | Exercícios | @sec-m4-exercicios |
+| 5 | Exercícios | @sec-m4-exercicios |
 
 ## Pacotes do módulo
 
 ```{r}
 #| eval: false
-pacotes <- c("spdep", "gstat", "sp", "terra", "tidyterra",
-             "r5r", "accessibility", "aopdata", "gtfstools", "h3jsr")
+pacotes <- c("r5r", "accessibility", "aopdata", "gtfstools", "h3jsr")
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))
 if (length(faltando) > 0) install.packages(faltando)
@@ -54,6 +46,27 @@ if (length(faltando) > 0) install.packages(faltando)
 # flownet ainda não está no CRAN
 # remotes::install_github("SebKrantz/flownet")
 ```
+
+::: {.callout-important}
+## O `r5r` precisa de Java 21
+
+O `r5r` é uma interface para o R5, o motor de roteamento da Conveyal, escrito em Java. Sem o
+**JDK 21** instalado, o pacote carrega mas falha ao construir a rede. Verifique antes do
+encontro:
+
+```{r}
+#| eval: false
+# no terminal do sistema
+# java -version    -> deve responder "21"
+
+# dentro do R
+rJava::.jinit()
+rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")
+```
+
+Se a instalação depender da TI do Ministério, peça o **JDK 21 (Temurin ou Oracle)** no mesmo
+chamado do R e do Rtools.
+:::
 
 ## Sobre os blocos que este site não executa
 
@@ -78,5 +91,6 @@ osmextract::oe_download(
 #    e salve o .zip na mesma pasta, sem descompactar
 ```
 
-O resto do módulo (autocorrelação, interpolação, declividade e acessibilidade com `aopdata`)
-roda sem Java e sem *download* manual.
+O primeiro capítulo (@sec-m4-gtfs) não precisa dessa pasta: ele usa os dados de Porto Alegre
+que vêm dentro do próprio `r5r`. A acessibilidade com `aopdata` roda sem Java e sem *download*
+manual.
