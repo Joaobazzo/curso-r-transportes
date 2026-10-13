@@ -2,8 +2,9 @@
 # preparar_modulo3.R
 # Deixa tudo pronto para o Módulo 3:
 #   1. instala os pacotes que faltam;
-#   2. baixa os dados do módulo da Release do GitHub para a pasta dados/;
-#   3. baixa os arquivos do Comex Stat direto do servidor do MDIC.
+#   2. baixa os dados do módulo da Release do GitHub para a pasta dados/, inclusive
+#      os arquivos do Comex Stat;
+#   3. se ainda faltar algum arquivo do Comex Stat, tenta o servidor do MDIC.
 #
 # Abra o projeto do curso no RStudio e cole no console:
 #   source("https://raw.githubusercontent.com/Joaobazzo/curso-r-transportes/main/R/preparar_modulo3.R")
@@ -42,10 +43,13 @@ local({
   # arquivos que o zip do módulo traz; se todos existem, o download é pulado
   arquivos <- file.path("dados", "brutos", c(
     "rede_sao_paulo_santos.gpkg", "portos_osm.gpkg", "pontes_br116.gpkg",
-    "uf_br.gpkg", "muni_br.gpkg"
+    "uf_br.gpkg", "muni_br.gpkg",
+    "br116_serra.gpkg", "rodovias_serra_pr.gpkg", "dem_serra.tif",
+    "comexstat/EXP_2024_MUN.csv", "comexstat/tab_UF_MUN.csv"
   ))
 
-  # Comex Stat: baixados do servidor do MDIC, não da Release (são públicos e grandes)
+  # Comex Stat: vêm no zip da Release. O servidor do MDIC fica só como plano B, porque
+  # já esteve fora do ar e com o certificado de segurança vencido
   comex <- c(
     "EXP_2024_MUN.csv" = "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/EXP_2024_MUN.csv",
     "tab_UF_MUN.csv"   = "https://balanca.economia.gov.br/balanca/bd/tabelas/UF_MUN.csv"
@@ -140,7 +144,8 @@ local({
               call. = FALSE, immediate. = TRUE)
     }
   }
-  faltam_dados <- arquivos[!file.exists(arquivos)]
+  # o Comex Stat é conferido à parte, depois do plano B do passo 3
+  faltam_dados <- arquivos[!file.exists(arquivos) & !grepl("comexstat", arquivos)]
 
   # 3. Comex Stat (servidor do MDIC) ----
   titulo("Comex Stat")

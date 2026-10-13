@@ -2,7 +2,7 @@
 
 ::: {.modulo-meta}
 **Dados:** Comex Stat (MDIC), base municipal de exportações e tabelas de correspondência
-**Baixados por:** `scripts/01-baixa-comexstat.R`
+**Baixados por:** `R/preparar_modulo3.R` (@sec-m3), no pacote de dados do módulo
 **Pré-requisitos:** @sec-m1-joins e @sec-m3-duckdb
 :::
 
@@ -65,6 +65,28 @@ round(file.size(c(arq_exp, arq_mun)) / 1024^2, 1)
 
 Repare que as tabelas de correspondência **não** ficam sob `comexstat-bd/`, e sim direto em
 `bd/tabelas/`. É um detalhe que custa meia hora a quem não sabe.
+
+::: {.callout-warning}
+## Quando o servidor do MDIC falha
+
+Em outubro de 2026, o certificado de segurança do `balanca.economia.gov.br` estava vencido, e
+o `download.file()` falhava com um erro de SSL (no Windows, `SEC_E_CERT_EXPIRED`). Por isso, os
+dois arquivos deste capítulo vêm no pacote de dados do módulo, copiados do servidor sem
+alteração. Com eles em `dados/brutos/comexstat/`, a função acima não baixa nada: só devolve o
+caminho.
+
+Fora do curso, se precisar de outro ano e o servidor continuar assim, dá para baixar sem
+verificar o certificado. Só faça isso com dados públicos, nunca com login ou dados sigilosos:
+
+```{r}
+#| eval: false
+curl::curl_download(
+  "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/EXP_2023_MUN.csv",
+  "dados/brutos/comexstat/EXP_2023_MUN.csv",
+  handle = curl::new_handle(ssl_verifypeer = 0L, ssl_verifyhost = 0L)
+)
+```
+:::
 
 ## Passo 2: Ler preservando os zeros à esquerda
 

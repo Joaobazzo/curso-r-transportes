@@ -69,10 +69,11 @@ Ele faz três coisas, e termina com a mensagem **Tudo pronto para o Módulo 3**:
 2. **Baixa o pacote de dados do módulo** (`dados_modulo3.zip`, da página de
    [Releases](https://github.com/Joaobazzo/curso-r-transportes/releases)) para `dados/brutos/`.
    É o que evita baixar do OpenStreetMap, ao vivo, a malha viária São Paulo–Santos, uma
-   consulta que leva vários minutos e às vezes falha.
-3. **Baixa os dados do Comex Stat** direto do servidor do MDIC, para
-   `dados/brutos/comexstat/`: as exportações municipais de 2024 (cerca de 60 MB) e a tabela
-   de municípios.
+   consulta que leva vários minutos e às vezes falha. O pacote traz também os dados do
+   Comex Stat, em `dados/brutos/comexstat/`: as exportações municipais de 2024 e a tabela de
+   municípios.
+3. **Se ainda faltar algum arquivo do Comex Stat**, tenta baixá-lo direto do servidor do
+   MDIC.
 
 Pode rodar mais de uma vez: o que já estiver instalado ou baixado é pulado.
 

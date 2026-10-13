@@ -127,8 +127,11 @@ para o repositório. Nas execuções seguintes, leem do cache.
 
 ## Comex Stat (MDIC)
 
-Baixado por `scripts/01-baixa-comexstat.R`, com cache em `dados/brutos/comexstat/`. Usado no
-@sec-m3-comexstat.
+Vem no pacote de dados do módulo 3 (`R/preparar_modulo3.R`), em `dados/brutos/comexstat/`: as
+exportações municipais de 2024 (`EXP_2024_MUN.csv`) e a tabela de municípios
+(`tab_UF_MUN.csv`), copiadas do servidor do MDIC sem alteração. Usado no
+@sec-m3-comexstat. Para outros anos, a importação, a base por NCM e as demais tabelas de
+correspondência, use `scripts/01-baixa-comexstat.R`.
 
 **Os arquivos ficam em dois lugares diferentes**, o que é a primeira pegadinha:
 
