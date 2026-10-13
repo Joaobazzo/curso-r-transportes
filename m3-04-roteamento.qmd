@@ -27,6 +27,39 @@ library(dodgr)
 mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
 ```
 
+## Antes de começar: qual Java o R enxerga?
+
+O `dodgr` não precisa de Java, mas o `r5r` do módulo 4 precisa do **JDK 21**, e este é um bom
+momento para conferir. Há três perguntas diferentes, e as respostas podem não bater:
+
+```{r}
+#| eval: false
+# 1. qual java o sistema encontra no PATH? (a versão sai na primeira linha)
+system2("java", "-version")
+
+# 2. para qual pasta aponta a variável JAVA_HOME? ("" = não definida)
+Sys.getenv("JAVA_HOME")
+
+# 3. qual Java o rJava carrega de fato? É esta a que vale para o r5r
+rJava::.jinit()
+rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")
+```
+
+Pode haver mais de um Java instalado no computador. O que importa é a terceira resposta, que
+deve começar com `21`. Um erro como `JAVA_HOME cannot be determined from the Registry` quer
+dizer que o `rJava` não achou nenhum Java instalado.
+
+Se a versão não for a 21, o pacote `rJavaEnv` instala o JDK sem precisar de permissão de
+administrador e configura o projeto para usá-lo:
+
+```{r}
+#| eval: false
+install.packages("rJavaEnv")
+rJavaEnv::java_quick_install(version = 21)
+```
+
+Reinicie o R depois da instalação e rode a terceira verificação de novo.
+
 ## Da malha ao grafo
 
 O ponto de partida é a malha do corredor São Paulo–Santos, a mesma do @sec-m3-osm, que vem no

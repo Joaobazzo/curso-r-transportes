@@ -283,39 +283,7 @@ ggplot() +
   theme(legend.position = "right")
 ```
 
-## Passo 7: Movimento de terra, uma primeira aproximação
-
-Com o raster e o traçado é possível estimar, grosseiramente, o volume de corte e aterro,
-supondo um greide que suavize o perfil.
-
-```{r}
-greide <- perfil |>
-  dplyr::arrange(alternativa, dist_km) |>
-  dplyr::mutate(
-    greide_m = stats::predict(stats::loess(alt_ini ~ dist_km, span = 0.3)),
-    dif_m = alt_ini - greide_m,
-    .by = alternativa
-  )
-
-greide |>
-  dplyr::summarise(
-    corte_m3_aprox  = sum(pmax(dif_m, 0) * 20 * 200),   # 20 m de largura, 200 m de segmento
-    aterro_m3_aprox = sum(pmax(-dif_m, 0) * 20 * 200),
-    .by = alternativa
-  ) |>
-  dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) round(x / 1e6, 2))) |>
-  dplyr::rename(`Corte (Mm³)` = corte_m3_aprox, `Aterro (Mm³)` = aterro_m3_aprox) |>
-  knitr::kable()
-```
-
-::: {.callout-important}
-Esse número é uma **ordem de grandeza**, não um quantitativo. Ele supõe seção transversal
-constante, ignora obras de arte, taludes, empolamento e o próprio projeto geométrico. Serve
-para comparar alternativas em estudo preliminar. O relatório precisa dizer isso com todas
-as letras. O quantitativo real vem do projeto, não do raster.
-:::
-
-## Passo 8: Encostas íngremes ao longo das rodovias de serra
+## Passo 7: Encostas íngremes ao longo das rodovias de serra
 
 O mesmo raster de declividade responde a outra pergunta, de operação e não de projeto:
 
@@ -407,6 +375,19 @@ plot(faixas_decliv, type = "classes",
 plot(terra::vect(rodovias_serra), add = TRUE, lwd = 2.5, col = "#1a5b8a")
 ```
 
+Antes de medir, vale conferir no mapa interativo se o recorte está certo: a zona da serra, as
+faixas de declividade (mesmas cores da figura acima) e as duas rodovias. Troque o mapa-base
+para a imagem de satélite e compare as encostas com a mata:
+
+```{r}
+mapview::mapview(zona_serra, alpha.regions = 0, color = "black", lwd = 2,
+                 layer.name = "Zona da serra", legend = FALSE) +
+  mapview::mapview(faixas_decliv, col.regions = c("#f0f0f0", "#e0a03f", "#b3402a"),
+                   alpha.regions = 0.5, layer.name = "Declividade (faixas)", legend = FALSE) +
+  mapview::mapview(rodovias_serra, zcol = "ref", lwd = 3,
+                   color = c("#1a5b8a", "#7b3294"), layer.name = "Rodovias")
+```
+
 A medida para cada trecho da rodovia: dividimos cada pista em segmentos de 200 m, com a mesma
 função `segmentar()` do passo 3, e olhamos uma faixa de 150 m de cada lado. A pergunta é **que
 fração dessa faixa tem encosta acima de 30%**.
@@ -495,7 +476,7 @@ com a chuva acumulada e com o histórico de interdições de cada rodovia.
    pode atravessar terreno íngreme com rampa suave, que é o que faz um projeto bom.
 3. O resultado útil não é o mapa: é a tabela de extensão por faixa de rampa, que entra
    direto na comparação de alternativas.
-4. Toda premissa (limite de rampa, largura da plataforma, o *span* do greide) está escrita
+4. Toda premissa (limite de rampa, faixas de declividade) está escrita
    em uma variável no topo do bloco, e não escondida no meio de uma conta.
 5. O mesmo raster serve à operação: segmentar uma rodovia existente e medir a encosta ao lado
    de cada trecho aponta onde olhar primeiro. Mas uma análise só com declividade é
