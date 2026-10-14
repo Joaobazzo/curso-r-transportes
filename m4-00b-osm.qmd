@@ -1,4 +1,4 @@
-# Dados do OpenStreetMap {#sec-m3-osm}
+# Dados do OpenStreetMap {#sec-m4-osm}
 
 O OSM é a base viária mais completa e atualizada disponível livremente no Brasil, e é o
 insumo de qualquer roteamento. Há dois caminhos de acesso, para necessidades diferentes.
@@ -26,7 +26,7 @@ A regra prática: se a resposta cabe em alguns milhares de feições, `osmdata`;
 A **rede viária** é a camada mais bem mapeada do OSM no Brasil: a cobertura de ruas e
 rodovias é ampla, a geometria é boa e a conectividade é a que os motores de roteamento
 esperam. É para isso que este módulo usa o OSM: como insumo do roteamento com `dodgr`
-(@sec-m3-roteamento) e `r5r` (@sec-m4-gtfs).
+(@sec-m4-roteamento) e `r5r` (@sec-m4-gtfs).
 
 As **demais feições** são outra história. Portos, terminais, aeródromos, pontes, restrições
 de peso e altura, uso do solo e pontos de interesse dependem de quem mapeou cada lugar: a

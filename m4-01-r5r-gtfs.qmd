@@ -1,6 +1,6 @@
 # Roteamento de transporte público com `r5r` {#sec-m4-gtfs}
 
-No automóvel (@sec-m3-roteamento), o custo de uma aresta é fixo: comprimento dividido pela
+No automóvel (@sec-m4-roteamento), o custo de uma aresta é fixo: comprimento dividido pela
 velocidade. No transporte público, não. Uma viagem de ônibus é feita de etapas, e o tempo de
 cada uma depende do relógio:
 
@@ -35,7 +35,7 @@ mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "E
 ## O insumo: uma pasta com `.pbf` e GTFS
 
 O `r5r` trabalha com uma **pasta de dados**: basta colocar nela o `.pbf` do OSM (o mesmo do
-@sec-m3-osm) e um ou mais arquivos GTFS, e ele monta a rede. A pasta de exemplo do pacote:
+@sec-m4-osm) e um ou mais arquivos GTFS, e ele monta a rede. A pasta de exemplo do pacote:
 
 ```{r}
 pasta_poa <- system.file("extdata/poa", package = "r5r")
@@ -297,7 +297,8 @@ ggplot(iso) +
 
 O `r5r` também roteia carro (`mode = "CAR"`), sobre a mesma malha. Mas, como o `dodgr`, usa
 velocidades de fluxo livre, e exige o Java e a montagem da rede. Para o automóvel e para a
-carga, o `dodgr` do módulo 3 (@sec-m3-roteamento) costuma ser mais simples e mais rápido.
+carga, o `dodgr` do capítulo anterior (@sec-m4-roteamento) costuma ser mais simples e mais
+rápido.
 
 | Para... | Use |
 |:--|:--|
@@ -305,7 +306,7 @@ carga, o `dodgr` do módulo 3 (@sec-m3-roteamento) costuma ser mais simples e ma
 | Transporte público, acessibilidade urbana, isócronas, cenários de GTFS | `r5r` |
 | Uma rota específica para ilustrar um mapa | qualquer um dos dois |
 
-Mais adiante neste módulo (@sec-m4-r5r), o `r5r` volta para um estudo completo: Fortaleza, com edição do GTFS
+No próximo capítulo (@sec-m4-r5r), o `r5r` volta para um estudo completo: Fortaleza, com edição do GTFS
 para simular uma intervenção e cálculo de acessibilidade.
 
 ## Da matriz à acessibilidade
@@ -326,4 +327,5 @@ c(hexagonos = nrow(hex),
 
 Juntar as duas coisas (quanto tempo leva de cada hexágono a cada outro, e quantos empregos,
 escolas ou serviços de saúde existem em cada um) é calcular **acessibilidade**: quantas
-oportunidades uma pessoa alcança a partir de onde mora. É o assunto do próximo capítulo.
+oportunidades uma pessoa alcança a partir de onde mora. É o assunto do
+@sec-m4-acessibilidade, depois do estudo de cenário em Fortaleza.

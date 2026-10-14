@@ -254,4 +254,5 @@ não muda.
 
 Com os endereços transformados em pontos conferidos, temos o primeiro insumo de qualquer
 roteamento: **de onde e para onde**. Falta o segundo: **por onde**, a malha viária sobre a
-qual as viagens acontecem. É o que o próximo capítulo baixa do OpenStreetMap e prepara.
+qual as viagens acontecem. É o que o módulo 4 baixa do OpenStreetMap e prepara
+(@sec-m4-osm).

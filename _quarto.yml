@@ -57,8 +57,6 @@ book:
         - m3-02c-funcoes.qmd
         - m3-02d-declividade.qmd
         - m3-03-geocodificacao.qmd
-        - m3-01-osm.qmd
-        - m3-04-roteamento.qmd
         - m3-02-duckdb.qmd
         - m3-02b-comexstat.qmd
         - m3-05-matrizes.qmd
@@ -67,9 +65,11 @@ book:
     - part: "Módulo 4 — Sensoriamento remoto e acessibilidade"
       chapters:
         - m4-00-visao-geral.qmd
+        - m4-00b-osm.qmd
+        - m4-00c-roteamento.qmd
         - m4-01-r5r-gtfs.qmd
-        - m4-04-acessibilidade.qmd
         - m4-05-r5r.qmd
+        - m4-04-acessibilidade.qmd
         - m4-06-exercicios.qmd
     - part: "Módulo 5 — Mapas temáticos, relatórios reproduzíveis e projeto final"
       chapters:

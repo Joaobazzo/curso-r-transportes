@@ -6,12 +6,15 @@
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
 **Datas:** 19/10 e 21/10 (síncronas); 22/10 (assíncrono)\
-**Pacotes:** `accessibility`, `aopdata`, `r5r`, `gtfstools`, `flownet`\
+**Pacotes:** `osmdata`, `osmextract`, `sfnetworks`, `dodgr`, `r5r`, `gtfstools`, `accessibility`, `aopdata`, `flownet`\
 **Estudo de caso:** acessibilidade em Fortaleza
 :::
 
 ## O que você vai conseguir fazer no fim do módulo
 
+- Extrair do OpenStreetMap a malha viária de uma área de estudo e transformá-la numa rede
+  topológica, pronta para roteamento.
+- Calcular rotas, distâncias e tempos de viagem de automóvel e carga sobre a malha viária.
 - Calcular e interpretar indicadores de acessibilidade a oportunidades, e entender o que cada
   medida (tempo mínimo, cumulativa, gravitacional, com concorrência) captura.
 - Calcular matrizes de tempo de viagem multimodais e isócronas, e comparar cenários de rede de
@@ -23,22 +26,25 @@
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 1 | Roteamento de transporte público com `r5r` e GTFS | @sec-m4-gtfs |
-| 2 | Acessibilidade a oportunidades: conceito, medidas e interpretação | @sec-m4-acessibilidade |
-| 3 | Roteamento multimodal, cenários e isócronas com `r5r` | @sec-m4-r5r |
-| 4 | Redes de fluxo e alocação (`flownet`, `stplanr`) | @sec-m4-r5r |
+| 1 | Dados do OpenStreetMap: malha viária e rede topológica | @sec-m4-osm |
+| 2 | Roteamento de automóvel e carga com `dodgr` | @sec-m4-roteamento |
+| 3 | Roteamento de transporte público com `r5r` e GTFS | @sec-m4-gtfs |
+| 4 | Roteamento multimodal, cenários e isócronas com `r5r` | @sec-m4-r5r |
+| 5 | Redes de fluxo e alocação (`flownet`, `stplanr`) | @sec-m4-r5r |
+| 6 | Acessibilidade a oportunidades: conceito, medidas e interpretação | @sec-m4-acessibilidade |
 
 ### Conteúdo assíncrono (3h)
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 5 | Exercícios | @sec-m4-exercicios |
+| 7 | Exercícios | @sec-m4-exercicios |
 
 ## Pacotes do módulo
 
 ```{r}
 #| eval: false
-pacotes <- c("r5r", "accessibility", "aopdata", "gtfstools", "h3jsr")
+pacotes <- c("osmdata", "osmextract", "sfnetworks", "tidygraph", "dodgr",
+             "r5r", "accessibility", "aopdata", "gtfstools", "h3jsr")
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))
 if (length(faltando) > 0) install.packages(faltando)
@@ -91,6 +97,7 @@ osmextract::oe_download(
 #    e salve o .zip na mesma pasta, sem descompactar
 ```
 
-O primeiro capítulo (@sec-m4-gtfs) não precisa dessa pasta: ele usa os dados de Porto Alegre
-que vêm dentro do próprio `r5r`. A acessibilidade com `aopdata` roda sem Java e sem *download*
+O capítulo do `r5r` com Porto Alegre (@sec-m4-gtfs) não precisa dessa pasta: ele usa os dados
+que vêm dentro do próprio `r5r`. Os capítulos do OSM e do `dodgr` usam a malha São
+Paulo–Santos, que já vem no pacote de dados do módulo 3 (`R/preparar_modulo3.R`). A acessibilidade com `aopdata` roda sem Java e sem *download*
 manual.

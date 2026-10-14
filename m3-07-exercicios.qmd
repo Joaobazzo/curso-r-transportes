@@ -135,69 +135,7 @@ diferentes se somam no mesmo par de estados. Toda medida de concentração depen
 de agregação. Por isso, ela precisa estar dita junto com o número.
 :::
 
-## 5. Extração do OSM
-
-Extraia do OpenStreetMap todos os terminais ferroviários (`railway = station`) do estado do
-Paraná e conte quantos existem. Depois, marque no mapa os que estão a menos de 20 km do Porto
-de Paranaguá.
-
-::: {.callout-note collapse="true"}
-## Solução
-
-```{r}
-#| eval: false
-res <- osmdata::opq(bbox = c(-54.62, -26.72, -48.02, -22.52), timeout = 180) |>
-  osmdata::add_osm_feature(key = "railway", value = "station") |>
-  osmdata::osmdata_sf()
-
-estacoes <- res$osm_points |> dplyr::filter(!is.na(name)) |> dplyr::select(osm_id, name)
-nrow(estacoes)
-
-porto <- sf::st_sfc(sf::st_point(c(-48.5119, -25.5016)), crs = 4326)
-
-proximas <- estacoes[sf::st_is_within_distance(estacoes, porto, 20000, sparse = FALSE)[, 1], ]
-proximas$name
-```
-:::
-
-## 6. Custo generalizado
-
-Usando a função de custo generalizado do @sec-m3-roteamento, compare três alternativas de
-transporte para a mesma carga entre Manaus e Santos: cabotagem (2.800 km, 12 dias),
-rodoviário (3.900 km, 5 dias) e uma combinação (2.000 km de cabotagem + 400 km rodoviários).
-Assuma os custos por km que julgar razoáveis e **documente as premissas**.
-
-::: {.callout-note collapse="true"}
-## Solução
-
-```{r}
-premissas <- data.frame(
-  modo          = c("cabotagem", "rodoviario"),
-  custo_ton_km  = c(0.12, 0.42),
-  custo_ton_dia = c(1.50, 8.00)
-)
-
-alternativas <- data.frame(
-  alternativa = c("Cabotagem direta", "Rodoviário", "Combinado", "Combinado"),
-  modo        = c("cabotagem", "rodoviario", "cabotagem", "rodoviario"),
-  km          = c(2800, 3900, 2000, 400),
-  dias        = c(12, 5, 9, 1)
-)
-
-alternativas |>
-  dplyr::left_join(premissas, by = "modo") |>
-  dplyr::mutate(custo = km * custo_ton_km + dias * custo_ton_dia) |>
-  dplyr::summarise(custo_por_tonelada = round(sum(custo), 2), .by = alternativa) |>
-  dplyr::arrange(custo_por_tonelada) |>
-  knitr::kable()
-```
-
-Os valores são ilustrativos: o exercício é sobre a **estrutura** do cálculo e sobre registrar
-as premissas de forma que outra pessoa possa contestá-las. É o que distingue uma análise
-de uma opinião.
-:::
-
-## 7. Rampa máxima
+## 5. Rampa máxima
 
 No estudo de caso da declividade (@sec-m3-declividade), quantos quilômetros de cada
 alternativa excedem 8% de rampa? E qual a rampa do percentil 95?

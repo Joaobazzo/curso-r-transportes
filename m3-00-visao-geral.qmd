@@ -5,7 +5,7 @@
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
 **Datas:** 13/10 e 14/10 (síncronas); 16/10 (assíncrono)\
-**Pacotes:** `purrr`, `terra`, `elevatr`, `geocodebr`, `enderecobr`, `osmdata`, `osmextract`, `sfnetworks`, `dodgr`, `duckdb`, `duckplyr`, `Matrix`, `sf`\
+**Pacotes:** `purrr`, `terra`, `elevatr`, `geocodebr`, `enderecobr`, `duckdb`, `duckplyr`, `Matrix`, `sf`\
 **Estudos de caso:** declividade × traçado na BR-116 (Serra do Mar); matriz OD e fluxos espaciais da cabotagem, com cálculo de TKU\
 **Também:** Comex Stat (MDIC), bases por NCM e municipal
 :::
@@ -17,9 +17,6 @@
   projeto por critérios quantitativos e apontar trechos de rodovia junto a encostas íngremes.
 - Transformar listas de endereços em coordenadas (geocodificação) e avaliar a qualidade do
   resultado.
-- Extrair do OpenStreetMap a malha viária de uma área de estudo e transformá-la numa rede
-  topológica, pronta para roteamento.
-- Calcular rotas, distâncias e tempos de viagem de automóvel e carga sobre a malha viária.
 - Consultar bases grandes com SQL, direto do R, sem carregar tudo na memória.
 - Integrar bases federais com códigos que **não** são os do IBGE, e detectar quando um `join`
   está perdendo linhas em silêncio.
@@ -34,23 +31,22 @@
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
 | 1 | Geocodificação de endereços com `geocodebr` | @sec-m3-geocodificacao |
-| 2 | Dados do OpenStreetMap: malha viária e rede topológica | @sec-m3-osm |
-| 3 | Roteamento de automóvel e carga com `dodgr` | @sec-m3-roteamento |
-| 4 | Processamento com SQL via DuckDB; comparação de desempenho | @sec-m3-duckdb |
-| 5 | Comex Stat: tipos, zeros à esquerda e o `join` que apaga São Paulo | @sec-m3-comexstat |
+| 2 | Processamento com SQL via DuckDB; comparação de desempenho | @sec-m3-duckdb |
+| 3 | Comex Stat: tipos, zeros à esquerda e o `join` que apaga São Paulo | @sec-m3-comexstat |
 
-O roteamento de transporte público, com `r5r` e GTFS, fica para o módulo 4 (@sec-m4-gtfs), onde
-ele é a base do cálculo de acessibilidade.
+O OpenStreetMap e o roteamento, de automóvel com `dodgr` e de transporte público com `r5r`,
+ficam para o módulo 4 (@sec-m4-osm), onde são a base do cálculo de acessibilidade. Os dados do
+OSM usados lá já vêm no pacote de dados deste módulo.
 
 ### Conteúdo assíncrono (3h)
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 6 | De script a função: funções próprias e iteração com `purrr` | @sec-m3-funcoes |
-| 7 | Estudo de caso: declividade × traçado e encostas ao longo das rodovias da Serra do Mar | @sec-m3-declividade |
-| 8 | Matrizes OD, matrizes esparsas e fluxos espaciais | @sec-m3-matrizes |
-| 9 | Estudo de caso: fluxos e TKU da cabotagem no mapa do Brasil | @sec-m3-estudo-de-caso |
-| 10 | Exercícios | @sec-m3-exercicios |
+| 4 | De script a função: funções próprias e iteração com `purrr` | @sec-m3-funcoes |
+| 5 | Estudo de caso: declividade × traçado e encostas ao longo das rodovias da Serra do Mar | @sec-m3-declividade |
+| 6 | Matrizes OD, matrizes esparsas e fluxos espaciais | @sec-m3-matrizes |
+| 7 | Estudo de caso: fluxos e TKU da cabotagem no mapa do Brasil | @sec-m3-estudo-de-caso |
+| 8 | Exercícios | @sec-m3-exercicios |
 
 ## Antes da aula: pacotes e dados
 

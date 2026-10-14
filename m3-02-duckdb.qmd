@@ -1,14 +1,14 @@
 # SQL e DuckDB no R {#sec-m3-duckdb}
 
-Os capítulos anteriores seguiram uma sequência: os endereços viraram pontos, a malha do OSM
-virou grafo, e o roteamento ligou uns aos outros. O produto final do roteamento, seja de
-automóvel com o `dodgr`, seja de transporte público com o `r5r` (módulo 4), é sempre o mesmo:
-uma **tabela de pares origem–destino**, com distância, tempo ou custo. E essa tabela cresce com
-o quadrado do número de zonas:
+O capítulo anterior transformou endereços em pontos. No módulo 4, a malha do OSM vira grafo, e
+o roteamento liga os pontos uns aos outros. O produto final do roteamento, seja de automóvel com
+o `dodgr`, seja de transporte público com o `r5r`, é sempre o mesmo: uma **tabela de pares
+origem–destino**, com distância, tempo ou custo. E essa tabela cresce com o quadrado do número
+de zonas:
 
 | Zonas | Pares OD |
 |:--|--:|
-| 2 pontos: São Paulo e Santos (@sec-m3-roteamento) | 4 |
+| 2 pontos: São Paulo e Santos (@sec-m4-roteamento) | 4 |
 | 645 municípios de São Paulo | 416 mil |
 | 1.227 hexágonos de Porto Alegre (@sec-m4-gtfs) | 1,5 milhão |
 | 5.570 municípios do Brasil | 31 milhões |

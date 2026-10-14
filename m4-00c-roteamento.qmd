@@ -1,4 +1,4 @@
-# Roteamento de automóvel com `dodgr` {#sec-m3-roteamento}
+# Roteamento de automóvel com `dodgr` {#sec-m4-roteamento}
 
 Roteamento é calcular o caminho e o custo (distância, tempo) entre pares de pontos sobre uma
 rede. É o que substitui a distância em linha reta do módulo 2 por algo que corresponde ao
@@ -10,12 +10,12 @@ Há dois problemas de roteamento bem diferentes, e cada um tem a sua ferramenta:
 |:--|:--|:--|
 | O que se percorre | a malha viária | a malha viária **e** as linhas, com horários |
 | O tempo depende do horário de partida? | não, numa primeira aproximação | sim, muito: depende de quando passa o ônibus |
-| Insumo | `sf` de linhas (ex.: OSM, @sec-m3-osm) | `.pbf` do OSM + GTFS |
+| Insumo | `sf` de linhas (ex.: OSM, @sec-m4-osm) | `.pbf` do OSM + GTFS |
 | Pacote neste curso | `dodgr`: C++ dentro do R, instalação direta | `r5r`: motor R5, em Java (JDK 21) |
 | Uso típico | distâncias rodoviárias, carga, matrizes entre municípios | acessibilidade urbana, isócronas, cenários de linha |
 
-Este capítulo trata do automóvel e da carga; o transporte público fica para o módulo 4
-(@sec-m4-gtfs), onde ele é a base do cálculo de acessibilidade.
+Este capítulo trata do automóvel e da carga; o transporte público fica para o próximo capítulo
+(@sec-m4-gtfs), e é a base do cálculo de acessibilidade.
 
 ```{r}
 library(sf)
@@ -29,8 +29,8 @@ mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "E
 
 ## Antes de começar: qual Java o R enxerga?
 
-O `dodgr` não precisa de Java, mas o `r5r` do módulo 4 precisa do **JDK 21**, e este é um bom
-momento para conferir. Há três perguntas diferentes, e as respostas podem não bater:
+O `dodgr` não precisa de Java, mas o `r5r`, a partir do próximo capítulo, precisa do **JDK 21**,
+e este é um bom momento para conferir. Há três perguntas diferentes, e as respostas podem não bater:
 
 ```{r}
 #| eval: false
@@ -62,7 +62,7 @@ Reinicie o R depois da instalação e rode a terceira verificação de novo.
 
 ## Da malha ao grafo
 
-O ponto de partida é a malha do corredor São Paulo–Santos, a mesma do @sec-m3-osm, que vem no
+O ponto de partida é a malha do corredor São Paulo–Santos, a mesma do @sec-m4-osm, que vem no
 pacote de dados do módulo. Para um estado inteiro, troque a consulta por
 `osmextract::oe_get()`, como lá.
 
@@ -91,7 +91,7 @@ rede <- sf::st_read(arquivo_rede, quiet = TRUE) |>
 nrow(rede)    # trechos de via, como linhas sf
 ```
 
-`weight_streetnet()` faz a conversão de rede geométrica em rede topológica que o @sec-m3-osm
+`weight_streetnet()` faz a conversão de rede geométrica em rede topológica que o @sec-m4-osm
 mostrou com o exemplo de brinquedo, e atribui a cada aresta um peso segundo um **perfil**:
 
 ```{r}
@@ -138,7 +138,7 @@ Duas consequências práticas:
 
 1. **As velocidades são as do pacote, não as do Brasil.** Rodovia troncal a 85 km/h e via
    primária a 65 km/h são padrões genéricos. Para um estudo, ajuste o perfil com a regra de
-   velocidades que você documentou no @sec-m3-osm: exporte o perfil para um arquivo, edite e
+   velocidades que você documentou no @sec-m4-osm: exporte o perfil para um arquivo, edite e
    use-o no `weight_streetnet()`.
 2. **O caminho "mais curto" é o de menor `d_weighted`, não o de menor `d`.** Uma via com
    `value = 0.5` "pesa" o dobro do seu comprimento, então o roteador desvia dela sempre que há
@@ -162,7 +162,7 @@ muitas conversões. Em rodovia, o efeito é pequeno.
 
 ## Componentes conectados
 
-O @sec-m3-osm avisou que uma malha real raramente forma um único grafo conectado. Esta forma
+O @sec-m4-osm avisou que uma malha real raramente forma um único grafo conectado. Esta forma
 `r length(unique(grafo$component))` pedaços:
 
 ```{r}
@@ -317,7 +317,7 @@ localização exata de cada ponto importa, ou quando for desenhar o caminho.
 - **Perfil:** `wt_profile` define como cada tipo de via é penalizado: `"motorcar"`, `"foot"`,
   `"bicycle"`. As velocidades padrão não são brasileiras; documente as que você usou.
 - **Caminhão:** não há perfil pronto. O caminho é ajustar o perfil manualmente, penalizando
-  vias locais e excluindo as que têm restrição de peso ou altura (que, como o @sec-m3-osm
+  vias locais e excluindo as que têm restrição de peso ou altura (que, como o @sec-m4-osm
   mostrou, o OSM raramente traz).
 - **Snapping:** confira sempre a distância de ligação dos pontos à rede.
 - **Componentes:** filtre pelo componente principal (`component == 1`) para evitar `Inf` em
@@ -357,4 +357,4 @@ estudos de custo operacional do próprio Ministério.
 O roteamento terminou numa **matriz**: uma linha por par de origem e destino. Com dois pontos,
 ela cabe na tela. Com todos os municípios de um estado, passa de centenas de milhares de
 linhas, e cada cenário, modo ou horário multiplica isso. É o ponto em que o `data.frame` na
-memória deixa de ser confortável, e o assunto do próximo capítulo.
+memória deixa de ser confortável. Para isso, volte ao DuckDB do módulo 3 (@sec-m3-duckdb).

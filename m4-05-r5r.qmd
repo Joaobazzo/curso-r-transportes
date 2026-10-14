@@ -19,10 +19,24 @@ etapa, enquanto o seu próprio cálculo não roda.
 
 ```{r}
 # para os mapas de referência: a grade de Fortaleza com os resultados do Ipea,
-# a mesma baixada no @sec-m4-acessibilidade
+# a mesma usada no @sec-m4-acessibilidade
 library(sf)
 
-aop <- readRDS("dados/brutos/aop_fortaleza.rds") |>
+arquivo <- "dados/brutos/aop_fortaleza.rds"
+
+if (!file.exists(arquivo)) {
+  aop <- aopdata::read_access(
+    city = "Fortaleza",
+    mode = "public_transport",
+    year = 2019,
+    peak = TRUE,
+    geometry = TRUE,
+    showProgress = FALSE
+  )
+  saveRDS(aop, arquivo)
+}
+
+aop <- readRDS(arquivo) |>
   dplyr::filter(P001 > 0)
 
 mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
@@ -234,7 +248,8 @@ gtfstools::get_trip_geometry(gtfs, file = "shapes")              # traçado das 
 
 A comparação parte da acessibilidade do cenário atual. Para Fortaleza, o Ipea publica a
 quantidade de empregos acessíveis em até 60 minutos de transporte público, que é exatamente o
-indicador `atual` calculado abaixo:
+indicador `atual` calculado abaixo. É uma medida **cumulativa**; o próximo capítulo
+(@sec-m4-acessibilidade) explica essa e as outras medidas de acessibilidade.
 
 ```{r}
 mapview::mapview(dplyr::select(aop, id_hex, CMATT60), zcol = "CMATT60", lwd = 0, alpha.regions = 0.8,
