@@ -21,6 +21,25 @@ A regra prática: se a resposta cabe em alguns milhares de feições, `osmdata`;
 "todas as vias de um estado", `osmextract`.
 
 ::: {.callout-important}
+## Antes de começar: os dados do módulo
+
+Rode uma vez o script de preparação do módulo. Ele instala os pacotes que faltam, baixa o
+pacote de dados do módulo (`dados_modulo4.zip`, da página de
+[Releases](https://github.com/Joaobazzo/curso-r-transportes/releases)) para `dados/brutos/` e
+confere se o R enxerga o Java 21, que o `r5r` exige:
+
+```{r}
+#| eval: false
+source("https://raw.githubusercontent.com/Joaobazzo/curso-r-transportes/main/R/preparar_modulo4.R")
+```
+
+O pacote traz a malha São Paulo–Santos usada neste capítulo e no @sec-m4-roteamento, os
+resultados do Ipea para Fortaleza (`aopdata`) e a pasta `dados/brutos/fortaleza/`, com a malha
+do OSM e o GTFS que o `r5r` usa no @sec-m4-r5r. O script termina com a mensagem **Tudo pronto
+para o Módulo 4**.
+:::
+
+::: {.callout-important}
 ## No Brasil, use o OSM para a malha viária, e quase só para ela
 
 A **rede viária** é a camada mais bem mapeada do OSM no Brasil: a cobertura de ruas e

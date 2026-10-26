@@ -81,13 +81,15 @@ declarada: os blocos que dependem do **`r5r`** exigem o JDK 21 e uma pasta com o
 OpenStreetMap e o GTFS da cidade: arquivos que não cabem no repositório. Esses blocos estão
 marcados como não executados e trazem, no texto, o resultado esperado.
 
-Para rodá-los na sua máquina, monte a pasta uma vez:
+Para rodá-los na sua máquina, a pasta `dados/brutos/fortaleza/` já vem pronta no pacote de
+dados do módulo, baixado pelo script de preparação (@sec-m4-osm). Para montá-la à mão, ou para
+outra cidade:
 
 ```{r}
 #| eval: false
 dir.create("dados/brutos/fortaleza", recursive = TRUE, showWarnings = FALSE)
 
-# 1. rede viária (OSM) do recorte da cidade
+# 1. rede viária (OSM): não há extrato só do Ceará; vem o do Nordeste, com uns 450 MB
 osmextract::oe_download(
   file_url = osmextract::oe_match("Ceará")$url,
   download_directory = "dados/brutos/fortaleza"
@@ -99,5 +101,5 @@ osmextract::oe_download(
 
 O capítulo do `r5r` com Porto Alegre (@sec-m4-gtfs) não precisa dessa pasta: ele usa os dados
 que vêm dentro do próprio `r5r`. Os capítulos do OSM e do `dodgr` usam a malha São
-Paulo–Santos, que já vem no pacote de dados do módulo 3 (`R/preparar_modulo3.R`). A acessibilidade com `aopdata` roda sem Java e sem *download*
+Paulo–Santos, que vem no pacote de dados deste módulo (e também no do módulo 3). A acessibilidade com `aopdata` roda sem Java e sem *download*
 manual.
