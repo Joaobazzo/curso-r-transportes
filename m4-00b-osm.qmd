@@ -37,6 +37,22 @@ O pacote traz a malha São Paulo–Santos usada neste capítulo e no @sec-m4-rot
 resultados do Ipea para Fortaleza (`aopdata`) e a pasta `dados/brutos/fortaleza/`, com a malha
 do OSM e o GTFS que o `r5r` usa no @sec-m4-r5r. O script termina com a mensagem **Tudo pronto
 para o Módulo 4**.
+
+**Se o download for bloqueado pelo servidor.** Em redes com restrição, como a do Ministério, o
+servidor pode recusar downloads feitos pelo R. A mensagem costuma ter `HTTP 403`, `Forbidden`,
+`cannot open URL` ou "Não foi possível baixar os dados do módulo". Nesse caso, faça à mão:
+
+1. No navegador, baixe o
+   [`dados_modulo4.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo4/dados_modulo4.zip)
+   (cerca de 460 MB).
+2. Descompacte o arquivo **dentro da pasta do projeto**, a que tem o arquivo
+   `curso-r-transportes.Rproj`. Os arquivos vão para `dados/brutos/`.
+3. Rode o `source()` de novo. Ele encontra os dados, pula o download e confere o resto.
+
+Se o próprio `source()` falhar, baixe o script
+[`preparar_modulo4.R`](https://github.com/Joaobazzo/curso-r-transportes/blob/main/R/preparar_modulo4.R)
+pelo navegador (botão de download no canto superior direito), salve na pasta do projeto e rode
+`source("preparar_modulo4.R")`.
 :::
 
 ::: {.callout-important}

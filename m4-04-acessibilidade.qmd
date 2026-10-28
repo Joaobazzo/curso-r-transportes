@@ -367,20 +367,36 @@ head(grav, 4)
 ## Comparação de cenários
 
 A aplicação mais valiosa em planejamento não é o valor absoluto do indicador. É a
-**diferença entre dois cenários**:
+**diferença entre dois cenários**. Para o exemplo rodar, o cenário também é ilustrativo: uma
+linha nova, hipotética, que reduz em 40% o tempo das viagens que começam ou terminam na metade
+oeste da amostra. Com a rede real, as duas matrizes saem do `r5r`: a atual e a calculada com o
+GTFS editado, como no @sec-m4-r5r.
+
+O limite é de **30 minutos**, e não de 60, por um motivo que vale para qualquer estudo: com 60
+minutos, quase todos os hexágonos da amostra já alcançam quase todos os empregos, e nenhuma
+intervenção aparece no indicador. Uma medida cumulativa só mostra diferença quando o limite de
+tempo está abaixo do ponto em que ela satura.
 
 ```{r}
-#| eval: false
-# matriz do cenário atual e do cenário com a intervenção (ver @sec-m4-r5r)
-acesso_atual  <- accessibility::cumulative_cutoff(matriz_atual,  uso_solo, "empregos", "travel_time", 60)
-acesso_novo   <- accessibility::cumulative_cutoff(matriz_cenario, uso_solo, "empregos", "travel_time", 60)
+# cenário ilustrativo: a linha nova atende os hexágonos da metade oeste da amostra
+x <- sf::st_coordinates(centros)[, "X"]
+oeste <- hex$id_hex[x < stats::median(x)]
+
+matriz_atual   <- matriz
+matriz_cenario <- matriz |>
+  dplyr::mutate(travel_time = dplyr::if_else(from_id %in% oeste | to_id %in% oeste,
+                                             travel_time * 0.60, travel_time))
+
+acesso_atual  <- accessibility::cumulative_cutoff(matriz_atual,  uso_solo, "empregos", "travel_time", 30)
+acesso_novo   <- accessibility::cumulative_cutoff(matriz_cenario, uso_solo, "empregos", "travel_time", 30)
 
 comparacao <- acesso_atual |>
   dplyr::rename(acesso_atual = empregos) |>
   dplyr::left_join(dplyr::rename(acesso_novo, acesso_novo = empregos), by = "id") |>
   dplyr::mutate(
     variacao_abs = acesso_novo - acesso_atual,
-    variacao_pct = 100 * (acesso_novo / acesso_atual - 1)
+    # sem acesso no cenário atual, a variação percentual não existe
+    variacao_pct = dplyr::if_else(acesso_atual > 0, 100 * (acesso_novo / acesso_atual - 1), NA_real_)
   ) |>
   dplyr::left_join(uso_solo, by = "id")
 
