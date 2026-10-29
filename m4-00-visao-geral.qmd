@@ -89,7 +89,9 @@ outra cidade:
 #| eval: false
 dir.create("dados/brutos/fortaleza", recursive = TRUE, showWarnings = FALSE)
 
-# 1. rede viária (OSM): não há extrato só do Ceará; vem o do Nordeste, com uns 450 MB
+# 1. rede viária (OSM): não há extrato só do Ceará; vem o do Nordeste, com uns 450 MB.
+#    Para o r5r é pesado demais: o pacote do módulo traz só a região de Fortaleza,
+#    já recortada (fortaleza.osm.pbf, 54 MB)
 osmextract::oe_download(
   file_url = osmextract::oe_match("Ceará")$url,
   download_directory = "dados/brutos/fortaleza"

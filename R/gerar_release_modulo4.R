@@ -7,14 +7,18 @@
 #
 # Rode a partir da raiz do projeto:  source("R/gerar_release_modulo4.R")
 #
-# A malha do OSM é o extrato do Nordeste inteiro da Geofabrik (não há
-# extrato só do Ceará, e o R não grava .pbf para recortar):
+# A malha do OSM é um recorte da região de Fortaleza (lon -38,75 a -38,29;
+# lat -4,00 a -3,58: os hexágonos do AOP com uns 10 km de folga), tirado do
+# extrato do Nordeste da Geofabrik:
 #   https://download.geofabrik.de/south-america/brazil/nordeste-latest.osm.pbf
-# salvo como dados/brutos/fortaleza/nordeste.osm.pbf.
+# O Nordeste inteiro (444 MB) deixa o build_network() do r5r lento e pesado
+# demais. O R não grava .pbf; o recorte foi feito em Java, com o osm-lib que
+# vem dentro do jar do R5 (TileOSMSource + setBoundingBox), e salvo como
+# dados/brutos/fortaleza/fortaleza.osm.pbf (54 MB).
 # ------------------------------------------------------------------
 
 arquivos <- c(
-  "dados/brutos/fortaleza/nordeste.osm.pbf",
+  "dados/brutos/fortaleza/fortaleza.osm.pbf",
   "dados/brutos/fortaleza/gtfs_fortaleza.zip",
   "dados/brutos/aop_fortaleza.rds",
   "dados/brutos/rede_sao_paulo_santos.gpkg",
@@ -25,7 +29,7 @@ arquivos <- c(
 faltam <- arquivos[!file.exists(arquivos)]
 if (length(faltam) > 0) {
   stop("Faltam arquivos para o release:\n  ", paste(faltam, collapse = "\n  "),
-       "\nO .pbf do Nordeste vem da Geofabrik (endereço no topo deste script).", call. = FALSE)
+       "\nO .pbf de Fortaleza é um recorte do Nordeste da Geofabrik (veja o topo deste script).", call. = FALSE)
 }
 
 leia_me <- c(
@@ -42,9 +46,9 @@ leia_me <- c(
   "que tem o arquivo curso-r-transportes.Rproj). Os arquivos vão para dados/brutos/.",
   "",
   "CONTEÚDO",
-  "dados/brutos/fortaleza/nordeste.osm.pbf    malha viária do Nordeste (OpenStreetMap, extrato",
-  "                                           da Geofabrik). O r5r monta a rede a partir dela:",
-  "                                           reserve memória com -Xmx8G (veja o capítulo).",
+  "dados/brutos/fortaleza/fortaleza.osm.pbf   malha viária da região de Fortaleza (OpenStreetMap,",
+  "                                           recorte do extrato do Nordeste da Geofabrik).",
+  "                                           O r5r monta a rede a partir dela em uns 2 minutos.",
   "dados/brutos/fortaleza/gtfs_fortaleza.zip  GTFS do transporte público de Fortaleza",
   "                                           A pasta fortaleza/ é a que o r5r lê.",
   "dados/brutos/aop_fortaleza.rds             acessibilidade em Fortaleza, 2019 (Ipea, aopdata)",

@@ -44,7 +44,8 @@ mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "E
 
 ```{r}
 #| eval: false
-options(java.parameters = "-Xmx8G")   # memória para a JVM, ANTES de carregar o pacote
+options(java.parameters = "-Xmx2G")   # memória para a JVM, ANTES de carregar o pacote
+                                      # (2 GB bastam para Fortaleza; para uma região maior, suba)
 library(r5r)
 library(sf)
 library(dplyr)
@@ -62,7 +63,9 @@ list.files(pasta)     # deve conter um .osm.pbf e um ou mais .zip de GTFS
 rede <- r5r::build_network(data_path = pasta)   # antes da versão 2.3: setup_r5()
 ```
 
-Na primeira execução o R5 constrói um arquivo `.dat` com a rede. Pode levar alguns minutos.
+Na primeira execução o R5 constrói um arquivo `.dat` com a rede. Com o recorte de Fortaleza do
+pacote do módulo, leva uns 2 minutos; com o extrato do Nordeste inteiro, bem mais, e pede muita
+memória. Por isso o pacote traz só a região da cidade.
 Nas seguintes, ele reaproveita. Se o GTFS ou o `.pbf` mudarem, apague o `.dat` para forçar a
 reconstrução.
 
@@ -112,7 +115,10 @@ mapview::mapview(dplyr::select(aop, id_hex, P001), zcol = "P001", lwd = 0, alpha
 
 ```{r}
 #| eval: false
-partida <- as.POSIXct("2026-10-15 07:00:00", tz = "America/Fortaleza")
+# sábado, dentro da validade do GTFS (03/04 a 03/07/2026). Este GTFS só traz
+# viagens de sábado e domingo: num dia útil, o r5r não acha ônibus e devolve
+# só caminhada, sem erro (veja o aviso abaixo)
+partida <- as.POSIXct("2026-05-16 07:00:00", tz = "America/Fortaleza")
 
 ttm <- r5r::travel_time_matrix(
   rede,
@@ -129,6 +135,22 @@ ttm <- r5r::travel_time_matrix(
 nrow(ttm)
 head(ttm)
 ```
+
+::: {.callout-warning}
+## Confira se o GTFS tem viagens no dia escolhido
+
+O GTFS de Fortaleza do pacote do módulo declara um serviço de dias úteis no `calendar`, mas
+todas as viagens em `trips` são de sábado ou de domingo. Numa quinta-feira, o `r5r` não acha
+ônibus: a matriz sai com uns 38 mil pares, todos a pé, e nenhum erro aparece. No sábado, saem
+3,7 milhões. Antes de escolher a data, veja quais serviços têm viagens:
+
+```{r}
+#| eval: false
+table(gtfstools::read_gtfs(file.path(pasta, "gtfs_fortaleza.zip"))$trips$service_id)
+```
+
+Se a matriz com `TRANSIT` tiver o mesmo tamanho de uma só com `WALK`, o problema é esse.
+:::
 
 Os parâmetros que mais mudam o resultado, e que precisam aparecer na nota metodológica:
 
@@ -216,14 +238,17 @@ nrow(gtfs$routes)
 
 ```{r}
 #| eval: false
-# cenário: remover as linhas alimentadoras (exemplo: as que contêm "ALIMENTADOR" no nome)
-alimentadoras <- gtfs$routes |>
-  dplyr::filter(grepl("ALIMENT", toupper(route_long_name))) |>
+# cenário: cortar as linhas de menor oferta, o quarto delas com menos viagens no GTFS
+viagens <- gtfs$trips |>
+  dplyr::count(route_id, name = "viagens")
+
+cortadas <- viagens |>
+  dplyr::filter(viagens <= stats::quantile(viagens, 0.25)) |>
   dplyr::pull(route_id)
 
-length(alimentadoras)
+length(cortadas)
 
-gtfs_cenario <- gtfstools::filter_by_route_id(gtfs, route_id = alimentadoras, keep = FALSE)
+gtfs_cenario <- gtfstools::filter_by_route_id(gtfs, route_id = cortadas, keep = FALSE)
 
 c(rotas_antes = nrow(gtfs$routes), rotas_depois = nrow(gtfs_cenario$routes))
 
@@ -231,6 +256,8 @@ dir.create("dados/brutos/fortaleza_cenario", showWarnings = FALSE)
 file.copy(list.files(pasta, pattern = "\\.pbf$", full.names = TRUE),
           "dados/brutos/fortaleza_cenario")
 gtfstools::write_gtfs(gtfs_cenario, "dados/brutos/fortaleza_cenario/gtfs_cenario.zip")
+# a rede antiga do cenário, se houver, ignoraria o GTFS novo: apague para remontar
+unlink("dados/brutos/fortaleza_cenario/network.dat")
 ```
 
 Outras edições úteis:
@@ -239,6 +266,9 @@ Outras edições úteis:
 #| eval: false
 gtfstools::filter_by_route_type(gtfs, route_type = 3)           # só ônibus
 gtfstools::filter_by_time_of_day(gtfs, from = "06:00:00", to = "09:00:00")
+area_estudo <- sf::st_point(c(-38.527, -3.727)) |>              # 3 km em torno do Centro
+  sf::st_sfc(crs = 4326) |>
+  sf::st_buffer(3000)
 gtfstools::filter_by_sf(gtfs, geom = area_estudo)               # recorte espacial
 gtfstools::get_trip_speed(gtfs)                                  # velocidade comercial por viagem
 gtfstools::get_trip_geometry(gtfs, file = "shapes")              # traçado das linhas como sf
@@ -312,7 +342,7 @@ hex |>
   geom_sf(aes(fill = perda_pct), colour = NA) +
   scale_fill_gradient2(low = "#b3402a", mid = "grey95", high = "#1a5b8a",
                        midpoint = 0, name = "Variação (%)") +
-  labs(title = "Impacto da remoção das linhas alimentadoras",
+  labs(title = "Impacto do corte das linhas de menor oferta",
        subtitle = "Variação dos empregos acessíveis em 60 min por transporte público") +
   theme_void()
 ```
@@ -324,8 +354,30 @@ infraestrutura**, cada par precisa ser roteado e os fluxos somados por trecho:
 
 ```{r}
 #| eval: false
-# caminho 1: stplanr, rotear os pares e sobrepor
-rotas <- stplanr::route(l = linhas_od, route_fun = stplanr::route_osrm)
+# caminho 1: rotear os pares com o r5r e somar por trecho com o stplanr
+# pares de exemplo: dos 30 hexágonos mais populosos aos 10 com mais empregos;
+# o fluxo divide a população da origem entre os destinos, pelos empregos
+origens  <- hex |> sf::st_drop_geometry() |> dplyr::slice_max(P001, n = 30) |> dplyr::select(id_hex, P001)
+destinos <- hex |> sf::st_drop_geometry() |> dplyr::slice_max(T001, n = 10) |> dplyr::select(id_hex, T001)
+
+pares_od <- expand.grid(origem = origens$id_hex, destino = destinos$id_hex,
+                        stringsAsFactors = FALSE) |>
+  dplyr::filter(origem != destino) |>
+  dplyr::left_join(origens, by = c("origem" = "id_hex")) |>
+  dplyr::left_join(destinos, by = c("destino" = "id_hex")) |>
+  dplyr::mutate(fluxo = P001 * T001 / sum(destinos$T001))
+
+rotas <- r5r::detailed_itineraries(
+  rede,
+  origins      = pontos[match(pares_od$origem, pontos$id), ],
+  destinations = pontos[match(pares_od$destino, pontos$id), ],
+  mode = "CAR",
+  departure_datetime = partida,
+  shortest_path = TRUE
+) |>
+  dplyr::left_join(dplyr::select(pares_od, origem, destino, fluxo),
+                   by = c("from_id" = "origem", "to_id" = "destino"))
+
 carga <- stplanr::overline(rotas, attrib = "fluxo")
 
 ggplot(carga) +

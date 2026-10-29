@@ -36,7 +36,7 @@ local({
 
   # arquivos que o zip do módulo traz; se todos existem, o download é pulado
   arquivos <- file.path("dados", "brutos", c(
-    "fortaleza/nordeste.osm.pbf", "fortaleza/gtfs_fortaleza.zip", "aop_fortaleza.rds",
+    "fortaleza/fortaleza.osm.pbf", "fortaleza/gtfs_fortaleza.zip", "aop_fortaleza.rds",
     "rede_sao_paulo_santos.gpkg", "portos_osm.gpkg", "pontes_br116.gpkg"
   ))
 
@@ -92,7 +92,7 @@ local({
     message("Os dados do Módulo 4 já estão em dados/brutos/.")
   } else {
     zip <- tempfile(fileext = ".zip")
-    message("Baixando dados_modulo4.zip (cerca de 460 MB, pode demorar)...")
+    message("Baixando dados_modulo4.zip (cerca de 70 MB)...")
     if (baixar(url_dados, zip)) {
       conteudo <- unzip(zip, list = TRUE)$Name
       unzip(zip, files = grep("^dados/", conteudo, value = TRUE), exdir = ".", overwrite = TRUE)
@@ -135,7 +135,7 @@ local({
   ram_gb <- tryCatch(ps::ps_system_memory()$total / 2^30, error = function(e) NA)
   if (!is.na(ram_gb)) {
     message(sprintf("Memória RAM: %.0f GB", ram_gb))
-    if (ram_gb < 8) message("  Pouca memória para o r5r: feche outros programas antes de rodar o módulo.")
+    if (ram_gb < 6) message("  Pouca memória para o r5r: feche outros programas antes de rodar o módulo.")
   }
 
   cronometrar <- function(f) {

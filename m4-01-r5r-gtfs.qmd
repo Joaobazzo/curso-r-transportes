@@ -149,7 +149,7 @@ e horário** foi calculado, e por que vale olhar esta figura antes de escolher o
 
 ```{r}
 #| eval: false
-options(java.parameters = "-Xmx4G")    # memória para o Java, ANTES de carregar o pacote
+options(java.parameters = "-Xmx2G")    # memória para o Java, ANTES de carregar o pacote
 library(r5r)
 
 # copiar a pasta de exemplo: o R5 grava a rede montada (network.dat) dentro dela

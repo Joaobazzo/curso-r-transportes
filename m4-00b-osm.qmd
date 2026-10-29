@@ -44,7 +44,7 @@ servidor pode recusar downloads feitos pelo R. A mensagem costuma ter `HTTP 403`
 
 1. No navegador, baixe o
    [`dados_modulo4.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo4/dados_modulo4.zip)
-   (cerca de 460 MB).
+   (cerca de 70 MB).
 2. Descompacte o arquivo **dentro da pasta do projeto**, a que tem o arquivo
    `curso-r-transportes.Rproj`. Os arquivos vão para `dados/brutos/`.
 3. Rode o `source()` de novo. Ele encontra os dados, pula o download e confere o resto.
