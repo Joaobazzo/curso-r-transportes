@@ -26,6 +26,8 @@
 - `mapview`: conferência visual rápida de objetos espaciais, em uma linha. <https://r-spatial.github.io/mapview/>
 - `leafgl`: renderização por WebGL para o `mapview`, para bases espaciais grandes. <https://github.com/r-spatial/leafgl>
 - `mapgl`: mapas interativos baseados em Mapbox GL / MapLibre. <https://walker-data.com/mapgl/>
+- MapLibre GL JS: a biblioteca JavaScript por trás do `mapgl`; a documentação dela explica
+  estilos, camadas e expressões. <https://maplibre.org/maplibre-gl-js/docs/>
 - `sfnetworks`: redes espaciais topológicas (nós e arestas) a partir de geometrias `sf`. <https://luukvdmeer.github.io/sfnetworks/>
 
 **Bases públicas brasileiras**
@@ -69,8 +71,16 @@
 
 ## Folhas de referência
 
-As *cheat sheets* oficiais, em PDF, cobrem `dplyr`, `ggplot2`, `stringr`, `lubridate`, `sf`
-e Quarto: <https://posit.co/resources/cheatsheets/>.
+As *cheat sheets* oficiais da Posit, em PDF, resumem cada pacote em duas páginas. Todas estão
+para download em <https://posit.co/resources/cheatsheets/>. As três mais usadas no curso vão
+anexadas aqui:
+
+- [`dplyr`: transformação de dados](recursos/folhas/dplyr.pdf) (PDF): `filter`, `mutate`,
+  `summarise`, joins.
+- [`ggplot2`: visualização de dados](recursos/folhas/ggplot2.pdf) (PDF): geometrias, escalas,
+  facetas e temas.
+- [`sf`: dados espaciais vetoriais](recursos/folhas/sf.pdf) (PDF): predicados e operações
+  geométricas, medidas e transformações.
 
 ## Ferramentas
 

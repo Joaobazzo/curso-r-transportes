@@ -3,6 +3,7 @@ project:
   output-dir: _site
   resources:
     - slides/*.pdf
+    - recursos/folhas/*.pdf
 
 book:
   title: "Análise de Dados com R Aplicada ao Planejamento de Transportes"
