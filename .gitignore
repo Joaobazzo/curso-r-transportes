@@ -8,8 +8,19 @@
 *.svg
 /slides/Dados geoespaciais avancados.pdf
 R/gerar_certificados.R
-
+R/gerar_release_modulo4.R
+R/preparar_modulo4.R
+R/gerar_certificados.R
+R/gerar_release_modulo4.R
+R/preparar_modulo4.R
+scripts/m0*
+scripts/m4*
+scripts/m5*
 # o cache do Quarto precisa de tudo (css, json, png das figuras e dos widgets):
+
+
+slides/sf e terra.pdf
+
 # o site é montado no GitHub Actions a partir dele, sem R
 !_freeze/**
 

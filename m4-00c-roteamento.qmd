@@ -151,14 +151,7 @@ dodgr::write_dodgr_wt_profile("dados/perfil_dodgr.json")
 # ... editar o JSON ...
 grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway",
                                  wt_profile_file = "dados/perfil_dodgr.json")
-
-# penalidade de conversão: virar à esquerda cruzando o fluxo e esperar em semáforo custa tempo
-grafo_conv <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway",
-                                      turn_penalty = TRUE)
 ```
-
-A penalidade de conversão (`turn_penalty = TRUE`) importa em malha urbana, onde as viagens têm
-muitas conversões. Em rodovia, o efeito é pequeno.
 
 ## Componentes conectados
 
@@ -198,11 +191,13 @@ grafo <- grafo[grafo$component == 1, ]
 
 Os pontos de origem e destino podem vir de qualquer lugar: digitados, do `geocodebr`
 (@sec-m3-geocodificacao), de centroides de zonas. Aqui, o centro de São Paulo (Praça da Sé) e
-o centro de Santos, junto ao porto.
+o centro de Santos, junto ao porto. A coluna `id` dá nome a cada ponto; o `dodgr` usa esses
+nomes nas linhas e colunas das matrizes.
 
 ```{r}
-pontos <- cbind(x = c(-46.6339, -46.3336), y = c(-23.5503, -23.9345))   # lon, lat
-rownames(pontos) <- c("São Paulo", "Santos")
+pontos <- data.frame(id = c("São Paulo", "Santos"),
+                     x  = c(-46.6339, -46.3336),     # longitude
+                     y  = c(-23.5503, -23.9345))     # latitude
 ```
 
 Antes de rotear, o `dodgr` liga cada ponto ao vértice mais próximo da rede (o *snapping*). Isso
@@ -210,17 +205,17 @@ Antes de rotear, o `dodgr` liga cada ponto ao vértice mais próximo da rede (o 
 
 ```{r}
 verts <- dodgr::dodgr_vertices(grafo)
-idx   <- dodgr::match_points_to_verts(verts, pontos)   # vértice mais próximo de cada ponto
+idx   <- dodgr::match_points_to_verts(verts, pontos[, c("x", "y")])   # vértice mais próximo
 
 # os pontos e os vértices escolhidos, como sf
-pontos_sf   <- sf::st_as_sf(as.data.frame(pontos), coords = c("x", "y"), crs = 4326)
+pontos_sf   <- sf::st_as_sf(pontos, coords = c("x", "y"), crs = 4326)
 vertices_sf <- sf::st_as_sf(verts[idx, ], coords = c("x", "y"), crs = 4326)
 
 # distância de cada ponto ao seu vértice (by_element: 1º com 1º, 2º com 2º)
 dist_ligacao <- sf::st_distance(pontos_sf, vertices_sf, by_element = TRUE)
 
 ligacao <- data.frame(
-  ponto   = rownames(pontos),
+  ponto   = pontos$id,
   vertice = verts$id[idx],
   dist_m  = round(as.numeric(dist_ligacao))
 )
@@ -230,20 +225,12 @@ ligacao
 Algumas dezenas ou centenas de metros é normal. Se der quilômetros, o ponto está longe da
 malha, e o resultado vai incluir um "trecho fantasma" que não existe.
 
-Agora as matrizes. `dodgr_dists()` devolve metros; `dodgr_times()`, segundos:
+Agora as matrizes. `dodgr_dists()` devolve metros; `dodgr_times()`, segundos. As linhas e
+colunas já vêm com o `id` de cada ponto:
 
 ```{r}
 dist_m <- dodgr::dodgr_dists(grafo, from = pontos, to = pontos)
 tempo_s <- dodgr::dodgr_times(grafo, from = pontos, to = pontos)
-
-dist_m      # linhas e colunas vêm com o código do vértice em que cada ponto se ligou
-```
-
-Os nomes das linhas e colunas são os códigos dos vértices, os mesmos da tabela de ligação
-acima. Para ler, troque pelos nomes dos pontos e converta as unidades:
-
-```{r}
-dimnames(dist_m) <- dimnames(tempo_s) <- list(rownames(pontos), rownames(pontos))
 
 round(dist_m / 1000, 1)     # km
 round(tempo_s / 60)         # minutos
@@ -259,8 +246,7 @@ A matriz diz quanto custa; `dodgr_paths()` diz **por onde** se vai. Ele devolve 
 vértices do caminho, que convertemos em linha:
 
 ```{r}
-caminho <- dodgr::dodgr_paths(grafo, from = pontos[1, , drop = FALSE],
-                              to = pontos[2, , drop = FALSE])
+caminho <- dodgr::dodgr_paths(grafo, from = pontos[1, ], to = pontos[2, ])
 
 length(caminho[[1]][[1]])     # quantos vértices o caminho atravessa
 
@@ -273,11 +259,8 @@ rota <- verts[match(caminho[[1]][[1]], verts$id), c("x", "y")] |>
 A conferência visual, como sempre: a rota deve descer a serra por uma das duas rodovias, a Anchieta (SP-150) ou a Imigrantes (SP-160).
 
 ```{r}
-extremos <- data.frame(nome = rownames(pontos), lon = pontos[, 1], lat = pontos[, 2]) |>
-  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326)
-
 mapview::mapview(rota, color = "#b3402a", lwd = 5, layer.name = "Rota") +
-  mapview::mapview(extremos, col.regions = "#1a5b8a", layer.name = "Origem e destino")
+  mapview::mapview(pontos_sf, col.regions = "#1a5b8a", layer.name = "Origem e destino")
 ```
 
 ## Grafo contraído: o mesmo resultado, mais rápido
@@ -292,11 +275,6 @@ grafo_contraido <- dodgr::dodgr_contract_graph(grafo)
 c(arestas_original = nrow(grafo), arestas_contraido = nrow(grafo_contraido))
 
 dist_contraido <- dodgr::dodgr_dists(grafo_contraido, from = pontos, to = pontos)
-dist_contraido      # repare nos códigos dos vértices: não são os mesmos de antes
-```
-
-```{r}
-dimnames(dist_contraido) <- list(rownames(pontos), rownames(pontos))
 
 # grafo completo x grafo contraído, em km
 cbind(completo  = round(dist_m["São Paulo", "Santos"] / 1000, 1),
