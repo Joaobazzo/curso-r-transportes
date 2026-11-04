@@ -17,7 +17,7 @@ motor da Conveyal que faz exatamente isso.
 ::: {.callout-important}
 ## O que roda e o que não roda na construção do site
 
-Os blocos que chamam o `r5r` exigem o **JDK 21** (ver @sec-m4) e não são executados na
+Os blocos que chamam o `r5r` exigem o **JDK 21** (ver @sec-r5r-java) e não são executados na
 construção do site. Mas o exemplo inteiro usa os dados de **Porto Alegre que vêm dentro do
 próprio pacote**: não é preciso baixar nada, e o código roda na sua máquina assim que o Java
 estiver instalado. A exploração do GTFS, que não precisa de Java, é executada normalmente.
@@ -31,6 +31,83 @@ library(ggplot2)
 # mapa-base padrão dos mapview(): OpenStreetMap
 mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
 ```
+
+## Antes de começar: qual Java o R enxerga? {#sec-r5r-java}
+
+O `r5r` precisa do **JDK 21**. Há três perguntas diferentes, e as respostas podem não bater:
+
+```{r}
+#| eval: false
+# 1. qual java o sistema encontra no PATH? (a versão sai na primeira linha)
+system2("java", "-version")
+
+# 2. para qual pasta aponta a variável JAVA_HOME? ("" = não definida)
+Sys.getenv("JAVA_HOME")
+
+# 3. qual Java o rJava carrega de fato? É esta a que vale para o r5r
+rJava::.jinit()
+rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")
+```
+
+Pode haver mais de um Java instalado no computador. O que importa é a terceira resposta, que
+deve começar com `21`. Um erro como `JAVA_HOME cannot be determined from the Registry` quer
+dizer que o `rJava` não achou nenhum Java instalado.
+
+Se a versão não for a 21, o pacote `rJavaEnv` instala o JDK sem precisar de permissão de
+administrador e configura o projeto para usá-lo:
+
+```{r}
+#| eval: false
+install.packages("rJavaEnv")
+rJavaEnv::java_quick_install(version = 21)
+```
+
+Reinicie o R depois da instalação e rode a terceira verificação de novo.
+
+## O motor do R5: o arquivo `.jar` {#sec-r5r-jar}
+
+O `r5r` não traz o R5 consigo. Na primeira vez que monta uma rede, ele baixa o motor, um
+arquivo `.jar` de uns 60 MB, da página de *releases* da Conveyal no GitHub
+(<https://github.com/conveyal/r5/releases>), e o guarda numa pasta de cache. Nas vezes
+seguintes, usa a cópia guardada.
+
+Na rede do Ministério, esse *download* pode travar ou falhar: o GitHub redireciona o arquivo
+para outro endereço (`objects.githubusercontent.com`), que a rede costuma bloquear. Se
+`build_network()` parar no download do R5, tente primeiro o método de download do Windows,
+que passa pelo proxy do sistema, como o navegador:
+
+```{r}
+#| eval: false
+options(download.file.method = "wininet")
+r5r::download_r5()
+```
+
+Se não funcionar, baixe o `.jar` pelo navegador e coloque-o na pasta de cache. O link e a
+pasta dependem da versão do `r5r` instalada; este trecho mostra os dois para a sua máquina:
+
+```{r}
+#| eval: false
+packageVersion("r5r")
+r5r:::fileurl_from_metadata()                    # link do .jar
+r5r:::r5r_env$cache_dir                          # pasta onde colar
+dir.create(r5r:::r5r_env$cache_dir, recursive = TRUE, showWarnings = FALSE)
+shell.exec(r5r:::r5r_env$cache_dir)              # abre a pasta no Windows Explorer
+```
+
+Com o `r5r` 2.4.0, que pede o R5 7.5.1, são estes:
+
+- **Link:** <https://github.com/conveyal/r5/releases/download/v7.5.1/r5-v7.5-1-gf3631e9-all.jar>
+- **Pasta:** `C:\Users\<usuário>\AppData\Local\R\cache\R\r5r\r5_jar_v7.5.1`
+
+Copie o arquivo com o nome original, sem renomear.
+
+::: {.callout-note}
+## Atualizou o `r5r`? Confira o `.jar` de novo
+
+Cada versão do `r5r` pede uma versão do R5. A versão de desenvolvimento (2.4.0.9001), por
+exemplo, já pede o R5 7.6.0, em outra pasta (`r5_jar_v7.6.0`) e com outro link. Depois de
+atualizar o pacote, rode o trecho acima de novo e, se for preciso, repita o download manual.
+:::
 
 ## O insumo: uma pasta com `.pbf` e GTFS
 
@@ -68,6 +145,10 @@ As tabelas que importam para o roteamento:
 | `stop_times` | o horário de cada viagem em cada parada | `trip_id`, `stop_id` |
 | `calendar` | em que dias cada serviço opera, e o período de validade | `service_id` |
 | `shapes` | o traçado das linhas, para desenhar | `shape_id` |
+
+Para ver como as tabelas se ligam pelas chaves, abra o
+[diagrama do esquema GTFS](https://github.com/ipeaGIT/gtfs2gps-time_geography/blob/main/figures/flowchart_GTFS_scheme.png)
+(Ipea, repositório `gtfs2gps-time_geography`).
 
 As linhas:
 
@@ -297,7 +378,7 @@ ggplot(iso) +
 
 O `r5r` também roteia carro (`mode = "CAR"`), sobre a mesma malha. Mas, como o `dodgr`, usa
 velocidades de fluxo livre, e exige o Java e a montagem da rede. Para o automóvel e para a
-carga, o `dodgr` do capítulo anterior (@sec-m4-roteamento) costuma ser mais simples e mais
+carga, o `dodgr` do módulo 4 (@sec-m4-roteamento) costuma ser mais simples e mais
 rápido.
 
 | Para... | Use |

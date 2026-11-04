@@ -10,7 +10,7 @@ e comparar. O exemplo é Fortaleza.
 Eles exigem o **JDK 21** e uma pasta com o `.pbf` do OpenStreetMap e o GTFS da cidade:
 arquivos grandes, que não ficam no repositório. O código está pronto para rodar na sua
 máquina, e o material do encontro síncrono percorre esses passos ao vivo. O preparo da pasta
-está em @sec-m4.
+está em @sec-m5.
 
 Os **mapas** deste capítulo são executados: eles usam os resultados que o Ipea publica no
 `aopdata` para Fortaleza, calculados com o mesmo motor R5. Servem para mostrar como fica cada
@@ -278,8 +278,8 @@ gtfstools::get_trip_geometry(gtfs, file = "shapes")              # traçado das 
 
 A comparação parte da acessibilidade do cenário atual. Para Fortaleza, o Ipea publica a
 quantidade de empregos acessíveis em até 60 minutos de transporte público, que é exatamente o
-indicador `atual` calculado abaixo. É uma medida **cumulativa**; o próximo capítulo
-(@sec-m4-acessibilidade) explica essa e as outras medidas de acessibilidade.
+indicador `atual` calculado abaixo. É uma medida **cumulativa**; o capítulo de acessibilidade, no módulo 4
+(@sec-m4-acessibilidade), explica essa e as outras medidas.
 
 ```{r}
 mapview::mapview(dplyr::select(aop, id_hex, CMATT60), zcol = "CMATT60", lwd = 0, alpha.regions = 0.8,

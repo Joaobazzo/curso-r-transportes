@@ -1,125 +1,197 @@
 # Projeto final {#sec-m5-projeto}
 
-O projeto final é um **relatório técnico reproduzível**, com dados reais, que reúne o que foi
-visto nos cinco módulos. Não é um exercício acadêmico: a ideia é que você termine o curso com
-um documento que possa, com pequenos ajustes, virar um produto da Subsecretaria.
+O projeto final é um **relatório de acessibilidade de Fortaleza em HTML**, feito em Quarto, que
+reúne o que foi visto no curso: dados públicos acessados por código, operações espaciais,
+roteamento com o `r5r`, medidas de acessibilidade e mapas interativos. Não é um exercício
+acadêmico: a ideia é que você termine o curso com um documento que possa, com pequenos
+ajustes, virar um produto da Subsecretaria, e um roteiro que sirva para outra cidade com GTFS
+aberto.
 
 Não há entrega nem avaliação: o projeto é seu. O roteiro abaixo serve para que ele termine em
 um documento completo, e não em uma coleção de scripts.
 
 ## O que o projeto deve ter {#sec-m5-projeto-itens}
 
-Um repositório (ou uma pasta) contendo:
+Uma pasta (de preferência um repositório Git, @sec-m5-git) contendo:
 
 ```
 projeto/
-├── projeto.qmd              # o relatório
+├── relatorio.qmd            # o relatório
 ├── R/
-│   └── 01-preparar-dados.R  # processamento; roda antes, salva em dados/
-├── dados/                   # dado tratado (o bruto pode ficar fora, com script de download)
-├── resultados/              # figuras e tabelas exportadas
+│   ├── 01-rede.R            # monta a rede do r5r
+│   ├── 02-matrizes.R        # matrizes de tempo, atual e cenário; salva em dados/
+│   └── 03-acessibilidade.R  # indicadores por hexágono; salva em dados/
+├── dados/                   # resultados intermediários (.rds), lidos pelo relatório
 └── README.md                # como reproduzir, em 5 linhas
 ```
 
-E o relatório renderizado (HTML ou PDF), com **no mínimo**:
+O roteamento é demorado e exige Java: fica nos scripts de `R/`, que rodam antes e salvam os
+resultados. O relatório só lê esses resultados e desenha, e assim renderiza em segundos.
+
+E o relatório renderizado em **HTML**, com **no mínimo**:
 
 1. uma pergunta clara, em uma frase;
-2. a origem dos dados, com fonte e data de extração;
-3. pelo menos um mapa e um gráfico, com fonte e método declarados;
-4. uma tabela de resultado;
+2. a origem dos dados, com fonte e data de extração (OSM, GTFS, `aopdata`);
+3. um **mapa `mapgl` para cada resultado intermediário** (veja o roteiro);
+4. um gráfico e uma tabela de resultado;
 5. um parágrafo de interpretação e outro de limitações;
 6. a saída de `sessionInfo()` em anexo.
 
-Extensão sugerida: 4 a 8 páginas. Relatório curto e correto vale mais que relatório longo.
+## Roteiro
 
-## Opção 1: Perfil logístico de um município portuário
+A pergunta-guia: **quanto o corte das linhas de menor oferta reduz o acesso a empregos em
+Fortaleza, e quem perde mais?** Cada etapa reaproveita um capítulo do curso e termina num mapa
+que você confere antes de seguir.
 
-Combina SIDRA, Censo e a base de cabotagem da ANTAQ para caracterizar um município de destino.
+| Etapa | O que fazer | Capítulo | Mapa `mapgl` |
+|:--|:--|:--|:--|
+| 1. Rede | montar a rede com `.pbf` e GTFS | @sec-m4-r5r | paradas, com o número de viagens |
+| 2. Hexágonos | população, empregos e renda do `aopdata` | @sec-m4-acessibilidade | população e empregos, em camadas alternáveis |
+| 3. Isócronas | de um ponto central, em 15, 30, 45 e 60 minutos | @sec-m4-r5r | as faixas de tempo, em camadas |
+| 4. Acessibilidade atual | matriz de tempos e medida cumulativa em 30 e 60 min | @sec-m4-acessibilidade | empregos acessíveis, em 3D |
+| 5. Cenário | cortar as linhas de menor oferta com `gtfstools` e recalcular | @sec-m4-r5r | atual e cenário, em camadas alternáveis |
+| 6. Diferença | variação absoluta e percentual por hexágono | @sec-m4-r5r | paleta divergente centrada em zero |
+| 7. Equidade | perda média e pessoas afetadas por decil de renda | @sec-m4-acessibilidade | gráfico e tabela |
+| 8. Interpretação | quem é afetado, em que magnitude, o que isso implica | | |
 
-**Roteiro:**
+O GTFS de Fortaleza só tem viagens de **sábado e domingo**, de abril a julho de 2026. Use a
+mesma partida do capítulo do `r5r`, um sábado às 7h, e confira as viagens antes de calcular
+(@sec-m4-r5r).
 
-1. **Escolha** um município presente na base de cabotagem (@sec-m1-estudo-de-caso).
-2. **Tabela de caracterização** a partir do `geobr` e do `sidrar`: área, população, densidade,
-   PIB, posição na hierarquia urbana.
-3. **Crescimento populacional** com dados do SIDRA (Censo 2022: população e taxa de
-   crescimento desde 2010), em gráfico `ggplot2` (@sec-m1-ggplot2).
-4. **Mapa de população por setor censitário** ou pela grade estatística (@sec-m2-estudo-de-caso).
-5. **Mapa de fluxos origem–destino** com o município como destino (@sec-m3-estudo-de-caso).
-6. **Indicadores**: TKU recebido, participação nacional, principais origens e perfis de carga.
-7. **Interpretação**: que papel esse município exerce na rede de cabotagem, e o que os dados
-   sugerem sobre gargalos ou oportunidades.
+## Mapas com `mapgl`
 
-**Esqueleto do documento:**
+O `mapgl` desenha com WebGL, então aguenta os milhares de hexágonos de Fortaleza sem travar, e
+permite mapas que o `mapview` não faz: extrusão em 3D, camadas que o leitor liga e desliga,
+legendas próprias. Como os mesmos comandos se repetem em cada etapa, vale escrever uma função
+(@sec-m3-funcoes) e reaproveitá-la:
+
+```{r}
+# acrescenta ao mapa uma camada de hexágonos colorida por uma coluna
+camada_hex <- function(mapa, dados, coluna, titulo, cores = c("#F7F6F2", "#E7A07A", "#7A1F0F"),
+                       visivel = TRUE) {
+  faixa <- range(dados[[coluna]], na.rm = TRUE)
+  valores <- seq(faixa[1], faixa[2], length.out = length(cores))
+
+  mapa |>
+    mapgl::add_fill_layer(
+      id = titulo, source = dados,
+      fill_color = mapgl::interpolate(column = coluna, values = valores, stops = cores),
+      fill_opacity = 0.75, tooltip = coluna,
+      visibility = if (visivel) "visible" else "none"
+    )
+}
+
+mapa_base <- function(dados) {
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados)
+}
+```
+
+Enquanto o seu cálculo não roda, os resultados que o Ipea publica no `aopdata` para Fortaleza,
+calculados com o mesmo motor R5, servem para ver como fica cada mapa:
+
+```{r}
+aop <- readRDS("dados/brutos/aop_fortaleza.rds") |>
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex, populacao = P001, empregos = T001, decil = R003, acesso_60 = CMATT60) |>
+  sf::st_transform(4326)
+```
+
+**Etapa 2:** população e empregos no mesmo mapa. Troque a camada no seletor do canto
+superior direito, e passe o mouse sobre um hexágono para ver o valor:
+
+```{r}
+mapa_base(aop) |>
+  camada_hex(aop, "populacao", "População") |>
+  camada_hex(aop, "empregos", "Empregos", cores = c("#F7F6F2", "#7FA7C9", "#173A57"),
+             visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+```
+
+O `mapgl` também tem `compare()`, que põe dois mapas lado a lado com uma cortina. Mas ele
+carrega um componente da internet que impede o HTML de sair num arquivo só (veja o fim desta
+página), por isso as camadas alternáveis são a escolha mais segura para o relatório.
+
+**Etapa 4:** empregos acessíveis em até 60 minutos, com a altura do hexágono proporcional ao
+valor. Segure o botão direito do mouse e arraste para girar o mapa:
+
+```{r}
+aop <- dplyr::mutate(aop, altura = acesso_60 / 100)   # 500 mil empregos viram 5 km de altura
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = aop,
+                pitch = 50, projection = "mercator") |>
+  mapgl::add_fill_extrusion_layer(
+    id = "acesso", source = aop,
+    fill_extrusion_color = mapgl::interpolate(column = "acesso_60", values = c(0, 250000, 500000),
+                                              stops = c("#F6DCCB", "#2F6B9A", "#173A57")),
+    fill_extrusion_height = mapgl::get_column("altura"),
+    fill_extrusion_opacity = 0.85, tooltip = "acesso_60"
+  ) |>
+  mapgl::add_legend("Empregos em até 60 min", values = c(0, 250000, 500000),
+                    colors = c("#F6DCCB", "#2F6B9A", "#173A57"))
+```
+
+As outras etapas seguem o mesmo padrão, com os seus resultados no lugar dos do Ipea:
 
 ```{r}
 #| eval: false
-# ---- 01-preparar-dados.R ----
-library(dplyr); library(sf); library(readxl)
+# etapa 1: paradas, pelo número de viagens que passam em cada uma
+gtfs <- gtfstools::read_gtfs("dados/brutos/fortaleza/gtfs_fortaleza.zip")
+paradas <- gtfstools::convert_stops_to_sf(gtfs) |>
+  dplyr::left_join(dplyr::count(gtfs$stop_times, stop_id, name = "viagens"), by = "stop_id")
 
-municipio <- "Paranaguá"; uf <- "PR"
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = paradas) |>
+  mapgl::add_circle_layer(
+    id = "paradas", source = paradas,
+    circle_radius = mapgl::interpolate(column = "viagens", values = c(0, 500), stops = c(2, 9)),
+    circle_color = "#2F6B9A", circle_opacity = 0.7, tooltip = "viagens"
+  )
 
-cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
-# ... (nomes, limpeza, módulo 1)
+# etapa 3: isócronas (o resultado de r5r::isochrone(), uma camada por faixa de tempo)
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = isocronas) |>
+  mapgl::add_fill_layer(
+    id = "isocronas", source = dplyr::arrange(isocronas, dplyr::desc(isochrone)),
+    fill_color = mapgl::interpolate(column = "isochrone", values = c(15, 60),
+                                    stops = c("#173A57", "#F6DCCB")),
+    fill_opacity = 0.6, tooltip = "isochrone"
+  )
 
-muni_sf  <- geobr::read_municipality(code_muni = uf, year = 2022) |>
-  dplyr::filter(name_muni == municipio)
-setores  <- geobr::read_census_tract(code_tract = uf, year = 2010, simplified = FALSE)
-# tabela 4709: população residente (93) e taxa de crescimento geométrico (10605), Censo 2022
-pop_censo <- sidrar::get_sidra(x = 4709, variable = c(93, 10605), geo = "City",
-                               geo.filter = list("State" = 41))
+# etapa 5: atual e cenário, em camadas alternáveis
+mapa_base(acesso) |>
+  camada_hex(acesso, "atual", "Atual") |>
+  camada_hex(acesso, "cenario", "Cenário", visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
 
-saveRDS(list(cabotagem = cabotagem, muni = muni_sf, setores = setores,
-             pop = pop_censo), "dados/projeto.rds")
+# etapa 6: a diferença, com paleta divergente centrada em zero
+limite <- max(abs(acesso$variacao), na.rm = TRUE)
+mapa_base(acesso) |>
+  mapgl::add_fill_layer(
+    id = "variacao", source = acesso,
+    fill_color = mapgl::interpolate(column = "variacao", values = c(-limite, 0, limite),
+                                    stops = c("#C2542D", "#F7F6F2", "#2F6B9A")),
+    fill_opacity = 0.8, tooltip = "variacao"
+  )
 ```
 
-## Opção 2: Acessibilidade e cenário de transporte público
+Para que os mapas funcionem fora do seu computador, gere o HTML num arquivo só:
 
-Avalia o impacto de uma mudança na rede de transporte público sobre o acesso a oportunidades.
-
-**Roteiro:**
-
-1. **Escolha** a cidade (Fortaleza é a do material; qualquer cidade com GTFS aberto serve).
-2. **Monte a pasta do `r5r`**: `.pbf` do OSM e GTFS (@sec-m4).
-3. **Cenário atual**: matriz de tempos e indicador de acessibilidade cumulativa em 30 e 60
-   minutos (@sec-m4-r5r).
-4. **Cenário alternativo**: edite o GTFS com `gtfstools`, removendo as linhas alimentadoras,
-   simulando um corredor novo, ou reduzindo a frequência de um conjunto de linhas.
-5. **Recalcule** e compare: variação absoluta e percentual por hexágono.
-6. **Equidade**: quantas pessoas ganham e perdem acesso, por estrato de renda
-   (@sec-m4-acessibilidade).
-7. **Mapa da diferença**, com paleta divergente centrada em zero (@sec-m2-mapas).
-8. **Interpretação**: quem é afetado, em que magnitude, e o que isso implica para a decisão.
-
-## Opção 3: Tema livre da sua área
-
-Se você tem em mãos um problema real do seu trabalho, ele é a melhor escolha. Precisa apenas
-ter os itens de @sec-m5-projeto-itens e usar, no mínimo:
-
-- uma base pública brasileira acessada por código;
-- uma operação espacial (interseção, *buffer*, junção espacial, extração de raster ou
-  roteamento);
-- um mapa e um gráfico com padrão de publicação;
-- um documento Quarto que renderiza do zero.
-
-Exemplos que aparecem com frequência no dia a dia da Subsecretaria:
-
-| Tema | Ferramentas |
-|:--|:--|
-| População e equipamentos na faixa de influência de um trecho rodoviário | @sec-m2-estudo-de-caso |
-| Comparação de alternativas de traçado por relevo | @sec-m3-declividade |
-| Matriz OD e carregamento de um corredor logístico | @sec-m3-estudo-de-caso |
-| Trechos de rodovias de serra junto a encostas íngremes | @sec-m3-declividade |
-| Séries do Comex Stat por município e modal | @sec-m1-estudo-de-caso |
+```yaml
+---
+title: "Acessibilidade a empregos em Fortaleza"
+format:
+  html:
+    embed-resources: true
+---
+```
 
 ## Como saber se ficou bom
 
 | Critério | O que se espera |
 |:--|:--|
-| Reprodutibilidade | outra pessoa roda do zero e obtém o mesmo resultado |
-| Correção técnica | CRS adequado, chaves corretas, agregações sem dupla contagem |
-| Clareza da comunicação | mapas e tabelas legíveis, com fonte e método declarados |
+| Reprodutibilidade | outra pessoa roda os scripts e o relatório do zero e obtém o mesmo resultado |
+| Correção técnica | data de partida com viagens no GTFS, CRS adequado, nenhum hexágono duplicado |
+| Clareza da comunicação | mapas com legenda, título e fonte; paleta divergente na diferença |
 | Interpretação | o texto diz o que o resultado significa, não o que o código faz |
-| Limitações | as fragilidades estão explicitadas, não escondidas |
+| Limitações | as fragilidades estão explicitadas, não escondidas (por exemplo, um GTFS só de fim de semana) |
 
 O primeiro critério é o mais importante e o mais simples de garantir: caminhos relativos,
 dados de origem acessíveis por código ou incluídos, nenhum passo manual não documentado, e o
@@ -127,7 +199,7 @@ dados de origem acessíveis por código ou incluídos, nenhum passo manual não 
 
 ## Acompanhamento
 
-- **Durante o módulo 5**: escolha do tema e montagem do esqueleto.
+- **Durante o módulo 5**: montagem da rede, esqueleto do relatório e primeiros mapas.
 - **Dúvidas**: abrir *issue* no repositório do curso, com o código e a mensagem de erro
   completa. Dúvidas registradas ajudam toda a turma.
 
@@ -136,5 +208,5 @@ dados de origem acessíveis por código ou incluídos, nenhum passo manual não 
 
 Escreva primeiro o esqueleto do relatório: títulos das seções e uma frase dizendo o que cada
 uma vai mostrar. Depois preencha com código. É muito mais rápido que começar explorando dados
-sem saber onde quer chegar, e evita o projeto que vira uma coleção de gráficos sem conclusão.
+sem saber onde quer chegar, e evita o projeto que vira uma coleção de mapas sem conclusão.
 :::

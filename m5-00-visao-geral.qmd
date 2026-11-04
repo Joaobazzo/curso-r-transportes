@@ -3,18 +3,18 @@
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
 **Datas:** 26/10 e 27/10 (síncronas); 23/10 (assíncrono)\
-**Pacotes:** Quarto, `rmarkdown`, `knitr`, `gt`, `ggplot2`, `sf`, `ggspatial`, `patchwork`, `mapgl`\
-**Projeto final:** relatório técnico reproduzível com dados reais, para levar para o trabalho
+**Pacotes:** Quarto, `rmarkdown`, `knitr`, `gt`, `r5r`, `gtfstools`, `accessibility`, `aopdata`, `stplanr`, `flownet`, `mapgl`\
+**Projeto final:** relatório de acessibilidade de Fortaleza em HTML, com mapas interativos em `mapgl`
 :::
 
 ## O que você vai conseguir fazer no fim do módulo
 
 - Escrever um documento que **se atualiza sozinho** quando o dado muda: texto, tabelas,
   gráficos e mapas gerados pelo mesmo código.
-- Gerar o mesmo relatório para vários municípios, trechos ou cenários, em um laço.
 - Exportar para HTML, PDF e Word, sem refazer o trabalho.
-- Registrar o histórico de uma análise com Git e saber o que **não** pode ir para um
-  repositório público.
+- Calcular matrizes de tempo de viagem multimodais e isócronas com o `r5r`, e comparar
+  cenários de rede de transporte público editando o GTFS.
+- Mostrar cada etapa de uma análise de acessibilidade em mapas interativos com o `mapgl`.
 - Entregar uma análise que outra pessoa consegue reexecutar. É o objetivo de todo o
   curso.
 
@@ -25,8 +25,9 @@
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
 | 1 | Quarto: estrutura, figuras, tabelas, referências cruzadas, formatos | @sec-m5-quarto |
-| 2 | Controle de versão com Git e GitHub | @sec-m5-git |
-| 3 | Relatórios parametrizados e automação | @sec-m5-parametrizados |
+| 2 | Roteamento de transporte público com `r5r` e GTFS | @sec-m4-gtfs |
+| 3 | Roteamento multimodal, cenários e isócronas com `r5r` | @sec-m4-r5r |
+| 4 | Redes de fluxo e alocação (`flownet`, `stplanr`) | @sec-m4-r5r |
 
 Os mapas que entram nos relatórios seguem o que foi visto em @sec-m2-mapas.
 
@@ -34,18 +35,22 @@ Os mapas que entram nos relatórios seguem o que foi visto em @sec-m2-mapas.
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 4 | Projeto final: escolha, roteiro e critérios | @sec-m5-projeto |
-| 5 | Boas práticas e próximos passos | @sec-m5-proximos-passos |
+| 5 | Projeto final: relatório de acessibilidade de Fortaleza | @sec-m5-projeto |
+| 6 | Boas práticas e próximos passos | @sec-m5-proximos-passos |
 
 ## Pacotes do módulo
 
 ```{r}
 #| eval: false
-pacotes <- c("quarto", "rmarkdown", "knitr", "gt", "kableExtra", "usethis", "gitcreds",
-             "ggspatial", "patchwork", "scales", "classInt", "mapgl")
+pacotes <- c("quarto", "rmarkdown", "knitr", "gt", "kableExtra",
+             "ggspatial", "patchwork", "scales", "classInt", "mapgl",
+             "r5r", "gtfstools", "accessibility", "aopdata", "stplanr")
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))
 if (length(faltando) > 0) install.packages(faltando)
+
+# flownet ainda não está no CRAN
+# remotes::install_github("SebKrantz/flownet")
 ```
 
 Para exportar em PDF, é preciso uma distribuição LaTeX. A mais simples é a que o próprio R
@@ -55,3 +60,58 @@ instala:
 #| eval: false
 tinytex::install_tinytex()
 ```
+
+::: {.callout-important}
+## O `r5r` precisa de Java 21
+
+O `r5r` é uma interface para o R5, o motor de roteamento da Conveyal, escrito em Java. Sem o
+**JDK 21** instalado, o pacote carrega mas falha ao construir a rede. Verifique antes do
+encontro:
+
+```{r}
+#| eval: false
+# no terminal do sistema
+# java -version    -> deve responder "21"
+
+# dentro do R
+rJava::.jinit()
+rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")
+```
+
+Se a instalação depender da TI do Ministério, peça o **JDK 21 (Temurin ou Oracle)** no mesmo
+chamado do R e do Rtools.
+
+Na primeira rede que monta, o `r5r` baixa o motor do R5 (um `.jar`) do GitHub, e a rede do
+Ministério pode bloquear esse *download*. O passo a passo para baixá-lo à mão está em
+@sec-r5r-jar.
+:::
+
+## Sobre os blocos que este site não executa
+
+Os capítulos deste módulo são executados quando o site é construído, com uma exceção
+declarada: os blocos que dependem do **`r5r`** exigem o JDK 21 e uma pasta com o `.pbf` do
+OpenStreetMap e o GTFS da cidade: arquivos que não cabem no repositório. Esses blocos estão
+marcados como não executados e trazem, no texto, o resultado esperado.
+
+Para rodá-los na sua máquina, a pasta `dados/brutos/fortaleza/` já vem pronta no pacote de
+dados do módulo 4, baixado pelo script de preparação (@sec-m4-osm). Para montá-la à mão, ou para
+outra cidade:
+
+```{r}
+#| eval: false
+dir.create("dados/brutos/fortaleza", recursive = TRUE, showWarnings = FALSE)
+
+# 1. rede viária (OSM): não há extrato só do Ceará; vem o do Nordeste, com uns 450 MB.
+#    Para o r5r é pesado demais: o pacote do módulo traz só a região de Fortaleza,
+#    já recortada (fortaleza.osm.pbf, 54 MB)
+osmextract::oe_download(
+  file_url = osmextract::oe_match("Ceará")$url,
+  download_directory = "dados/brutos/fortaleza"
+)
+
+# 2. GTFS: baixe de https://dados.fortaleza.ce.gov.br (tag "gtfs")
+#    e salve o .zip na mesma pasta, sem descompactar
+```
+
+O capítulo do `r5r` com Porto Alegre (@sec-m4-gtfs) não precisa dessa pasta: ele usa os dados
+que vêm dentro do próprio `r5r`.

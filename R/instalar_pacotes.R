@@ -42,7 +42,17 @@ pacotes_transportes <- c(
 # módulo 3: bases grandes e SQL
 pacotes_dados_grandes <- c("duckdb", "duckplyr", "DBI", "dbplyr", "data.table", "arrow")
 
+# duckdb fixo na versão 1.x: o duckplyr ainda não funciona com o duckdb 2.0.
+# Vem de um retrato do CRAN anterior ao 2.0 (com binário para Windows); rode antes
+# de instalar duckplyr ou duckspatial, para que eles não puxem o duckdb 2.0
+instalar_duckdb_1x <- function() {
+  if (!requireNamespace("duckdb", quietly = TRUE) || packageVersion("duckdb") >= "2.0.0") {
+    install.packages("duckdb", repos = "https://packagemanager.posit.co/cran/2026-10-20")
+  }
+}
+
 instalar <- function(pacotes) {
+  if ("duckdb" %in% pacotes) instalar_duckdb_1x()
   faltando <- setdiff(pacotes, rownames(installed.packages()))
   if (length(faltando) == 0) {
     message("Todos instalados: ", paste(pacotes, collapse = ", "))
@@ -63,7 +73,8 @@ instalar(pacotes_modulo1)
 # instalar(pacotes_opcionais)          # módulo 1 (exemplos não executados)
 # instalar(pacotes_espaciais)          # módulo 2
 # instalar(pacotes_dados_grandes)      # módulo 3
-# instalar(pacotes_transportes)        # módulos 3 e 4# instalar(pacotes_relatorios)         # módulo 5
+# instalar(pacotes_transportes)        # módulos 3 e 4
+# instalar(pacotes_relatorios)         # módulo 5
 
 # r5r exige Java 21; verifique com:
 # rJava::.jinit(); rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")

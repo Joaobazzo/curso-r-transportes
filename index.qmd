@@ -49,7 +49,7 @@ para até 30 participantes, em formato on-line.
 | 2 | [Objetos espaciais: vetores e rasters](m2-00-visao-geral.qmd) | Faixa de influência da BR-116 |
 | 3 | [Integração de bases, roteamento e matrizes OD](m3-00-visao-geral.qmd) | Declividade × traçado; fluxos de cabotagem no mapa |
 | 4 | [Sensoriamento remoto e acessibilidade](m4-00-visao-geral.qmd) | Acessibilidade em Fortaleza |
-| 5 | [Mapas temáticos, relatórios reproduzíveis e projeto final](m5-00-visao-geral.qmd) | Relatório parametrizado e projeto final |
+| 5 | [Mapas temáticos, relatórios reproduzíveis e projeto final](m5-00-visao-geral.qmd) | Relatório de acessibilidade de Fortaleza (projeto final) |
 
 ## Cronograma
 

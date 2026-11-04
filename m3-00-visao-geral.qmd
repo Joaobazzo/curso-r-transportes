@@ -93,9 +93,17 @@ pacotes <- c(
   "ggplot2", "scales", "patchwork", "mapview", "knitr"
 )
 
+# duckdb fixo na versão 1.x: o duckplyr ainda não funciona com o duckdb 2.0.
+# Instale-o antes dos demais, de um retrato do CRAN anterior ao 2.0 (com binário para Windows)
+if (!requireNamespace("duckdb", quietly = TRUE) || packageVersion("duckdb") >= "2.0.0") {
+  install.packages("duckdb", repos = "https://packagemanager.posit.co/cran/2026-10-20")
+}
+
 faltando <- setdiff(pacotes, rownames(installed.packages()))
 if (length(faltando) > 0) install.packages(faltando)
 ```
+
+Não atualize o `duckdb` depois disso: se o RStudio oferecer a atualização para a 2.0, recuse.
 
 ::: {.callout-note}
 ## O `geocodebr` baixa os próprios dados

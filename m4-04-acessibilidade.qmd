@@ -410,5 +410,5 @@ comparacao |>
 ```
 
 É esse quadro, pessoas beneficiadas por faixa de renda, que transforma uma análise de
-transporte em um argumento de política pública. A opção 2 do projeto final
+transporte em um argumento de política pública. O projeto final
 (@sec-m5-projeto) percorre exatamente esse caminho.

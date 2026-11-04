@@ -61,14 +61,14 @@ depois se sentir necessidade.
 
 ## Controle de versão: crie a conta agora
 
-O Git e o GitHub são ensinados em detalhe no Módulo 5, mas as duas coisas mais demoradas
+O Git e o GitHub são ensinados em detalhe no Módulo 4, mas as duas coisas mais demoradas
 (instalar o Git e criar a conta) não dependem de nada do curso e valem fazer com antecedência:
 
 1. Instale o Git: <https://git-scm.com/downloads>.
 2. Crie uma conta gratuita no GitHub: <https://github.com/>.
 
 O resto (configurar o RStudio para usar o Git, fazer o primeiro *commit*, publicar um
-repositório) fica para o Módulo 5, quando já há um projeto de verdade para versionar.
+repositório) fica para o Módulo 4, quando já há um projeto de verdade para versionar.
 
 ## IA no desenvolvimento
 
