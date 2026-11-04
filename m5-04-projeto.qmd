@@ -1,75 +1,105 @@
 # Projeto final {#sec-m5-projeto}
 
 O projeto final é um **relatório de acessibilidade de Fortaleza em HTML**, feito em Quarto, que
-reúne o que foi visto no curso: dados públicos acessados por código, operações espaciais,
-roteamento com o `r5r`, medidas de acessibilidade e mapas interativos. Não é um exercício
-acadêmico: a ideia é que você termine o curso com um documento que possa, com pequenos
-ajustes, virar um produto da Subsecretaria, e um roteiro que sirva para outra cidade com GTFS
-aberto.
+reúne o que foi visto no curso: dados públicos, operações espaciais, roteamento com o `r5r`,
+medidas de acessibilidade e mapas interativos com `mapgl`.
 
-Não há entrega nem avaliação: o projeto é seu. O roteiro abaixo serve para que ele termine em
-um documento completo, e não em uma coleção de scripts.
+O relatório é montado com os blocos desta página. Você copia cada bloco, na ordem, para um
+arquivo `relatorio.qmd`; empilhados, eles formam o caderno completo. Os dados vêm do capítulo
+anterior (@sec-m4-r5r), que salvou cada resultado na pasta `dados/projeto_final/`. Abaixo de cada
+bloco está o que ele produz, para você conferir o seu relatório enquanto monta.
 
-## O que o projeto deve ter {#sec-m5-projeto-itens}
+Não há entrega nem avaliação: o projeto é seu. A ideia é que você termine o curso com um
+documento que possa, com pequenos ajustes, virar um produto da Subsecretaria, e com um roteiro
+que sirva para outra cidade com GTFS aberto.
 
-Uma pasta (de preferência um repositório Git, @sec-m5-git) contendo:
+## A pergunta
 
-```
-projeto/
-├── relatorio.qmd            # o relatório
-├── R/
-│   ├── 01-rede.R            # monta a rede do r5r
-│   ├── 02-matrizes.R        # matrizes de tempo, atual e cenário; salva em dados/
-│   └── 03-acessibilidade.R  # indicadores por hexágono; salva em dados/
-├── dados/                   # resultados intermediários (.rds), lidos pelo relatório
-└── README.md                # como reproduzir, em 5 linhas
-```
+**Quanto o corte das linhas de ônibus de menor oferta reduz o acesso a empregos em Fortaleza, e
+quem perde mais?**
 
-O roteamento é demorado e exige Java: fica nos scripts de `R/`, que rodam antes e salvam os
-resultados. O relatório só lê esses resultados e desenha, e assim renderiza em segundos.
+## Antes de começar
 
-E o relatório renderizado em **HTML**, com **no mínimo**:
-
-1. uma pergunta clara, em uma frase;
-2. a origem dos dados, com fonte e data de extração (OSM, GTFS, `aopdata`);
-3. um **mapa `mapgl` para cada resultado intermediário** (veja o roteiro);
-4. um gráfico e uma tabela de resultado;
-5. um parágrafo de interpretação e outro de limitações;
-6. a saída de `sessionInfo()` em anexo.
-
-## Roteiro
-
-A pergunta-guia: **quanto o corte das linhas de menor oferta reduz o acesso a empregos em
-Fortaleza, e quem perde mais?** Cada etapa reaproveita um capítulo do curso e termina num mapa
-que você confere antes de seguir.
-
-| Etapa | O que fazer | Capítulo | Mapa `mapgl` |
-|:--|:--|:--|:--|
-| 1. Rede | montar a rede com `.pbf` e GTFS | @sec-m4-r5r | paradas, com o número de viagens |
-| 2. Hexágonos | população, empregos e renda do `aopdata` | @sec-m4-acessibilidade | população e empregos, em camadas alternáveis |
-| 3. Isócronas | de um ponto central, em 15, 30, 45 e 60 minutos | @sec-m4-r5r | as faixas de tempo, em camadas |
-| 4. Acessibilidade atual | matriz de tempos e medida cumulativa em 30 e 60 min | @sec-m4-acessibilidade | empregos acessíveis, em 3D |
-| 5. Cenário | cortar as linhas de menor oferta com `gtfstools` e recalcular | @sec-m4-r5r | atual e cenário, em camadas alternáveis |
-| 6. Diferença | variação absoluta e percentual por hexágono | @sec-m4-r5r | paleta divergente centrada em zero |
-| 7. Equidade | perda média e pessoas afetadas por decil de renda | @sec-m4-acessibilidade | gráfico e tabela |
-| 8. Interpretação | quem é afetado, em que magnitude, o que isso implica | | |
-
-O GTFS de Fortaleza só tem viagens de **sábado e domingo**, de abril a julho de 2026. Use a
-mesma partida do capítulo do `r5r`, um sábado às 7h, e confira as viagens antes de calcular
-(@sec-m4-r5r).
-
-## Mapas com `mapgl`
-
-O `mapgl` desenha com WebGL, então aguenta os milhares de hexágonos de Fortaleza sem travar, e
-permite mapas que o `mapview` não faz: extrusão em 3D, camadas que o leitor liga e desliga,
-legendas próprias. Como os mesmos comandos se repetem em cada etapa, vale escrever uma função
-(@sec-m3-funcoes) e reaproveitá-la:
+1. **Rode o capítulo anterior inteiro** (`scripts/m4-05-r5r.R`), com o Java 21 configurado. Leva
+   uns 15 minutos. No fim, a pasta `dados/projeto_final/` deve ter estes arquivos:
 
 ```{r}
-# acrescenta ao mapa uma camada de hexágonos colorida por uma coluna
+list.files("dados/projeto_final")
+```
+
+2. **Crie o arquivo `relatorio.qmd` na raiz do projeto do curso**, a mesma pasta que contém
+   `dados/`. Os caminhos do relatório são relativos a ela.
+
+3. **Copie os blocos abaixo, na ordem**, colando cada um no fim do `relatorio.qmd`. Os blocos
+   de texto (os que começam com `##`) são um ponto de partida: reescreva com as suas palavras e
+   com os números que o seu resultado mostrar.
+
+4. **Renderize** com o botão *Render* do RStudio ou, no terminal, `quarto render relatorio.qmd`.
+   Renderize a cada dois ou três blocos: um erro é muito mais fácil de achar logo depois de
+   colar o bloco que o causou.
+
+## O relatório, bloco a bloco
+
+### Cabeçalho
+
+O cabeçalho vai no topo do arquivo. `embed-resources: true` põe os mapas, os estilos e os dados
+dentro do próprio HTML, e o relatório funciona aberto em qualquer computador, inclusive enviado
+por e-mail.
+
+```markdown
+---
+title: "Acessibilidade a empregos em Fortaleza"
+subtitle: "O efeito do corte das linhas de ônibus de menor oferta"
+author: "Seu nome"
+date: today
+lang: pt
+format:
+  html:
+    embed-resources: true
+    toc: true
+execute:
+  warning: false
+  message: false
+---
+
+Este relatório estima quantos empregos cada morador de Fortaleza alcança em até 60 minutos
+de transporte público, hoje e num cenário sem o quarto das linhas de ônibus com menos viagens,
+e mostra quem perde mais com o corte.
+```
+
+### Preparação
+
+O primeiro bloco de código carrega os dados e define as duas funções que todos os mapas usam.
+Ele não produz nada visível.
+
+```{r}
+#| echo: fenced
+#| label: setup
+library(sf)
+library(ggplot2)
+
+pasta <- "dados/projeto_final"
+
+# resultados do capítulo de roteamento multimodal
+comparacao <- readRDS(file.path(pasta, "comparacao.rds"))
+cortadas   <- readRDS(file.path(pasta, "linhas_cortadas.rds"))
+
+# a grade hexagonal do aopdata, com os resultados de acessibilidade de cada hexágono
+acesso <- readRDS("dados/brutos/aop_fortaleza.rds") |>
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex) |>
+  sf::st_transform(4326) |>
+  dplyr::left_join(comparacao, by = c("id_hex" = "id"))
+
+# mapa vazio, enquadrado nos dados
+mapa_base <- function(dados) {
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados, height = "525px")
+}
+
+# acrescenta ao mapa uma camada de hexágonos colorida por uma coluna, com legenda.
+# Passe a mesma faixa para duas camadas que devem ser comparadas na mesma escala
 camada_hex <- function(mapa, dados, coluna, titulo, cores = c("#F7F6F2", "#E7A07A", "#7A1F0F"),
-                       visivel = TRUE) {
-  faixa <- range(dados[[coluna]], na.rm = TRUE)
+                       faixa = range(dados[[coluna]], na.rm = TRUE), visivel = TRUE) {
   valores <- seq(faixa[1], faixa[2], length.out = length(cores))
 
   mapa |>
@@ -78,135 +108,280 @@ camada_hex <- function(mapa, dados, coluna, titulo, cores = c("#F7F6F2", "#E7A07
       fill_color = mapgl::interpolate(column = coluna, values = valores, stops = cores),
       fill_opacity = 0.75, tooltip = coluna,
       visibility = if (visivel) "visible" else "none"
-    )
-}
-
-mapa_base <- function(dados) {
-  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados)
+    ) |>
+    mapgl::add_legend(titulo, values = round(faixa), colors = cores,
+                      layer_id = titulo, add = TRUE)
 }
 ```
 
-Enquanto o seu cálculo não roda, os resultados que o Ipea publica no `aopdata` para Fortaleza,
-calculados com o mesmo motor R5, servem para ver como fica cada mapa:
+### Dados e método
 
-```{r}
-aop <- readRDS("dados/brutos/aop_fortaleza.rds") |>
-  dplyr::filter(P001 > 0) |>
-  dplyr::select(id_hex, populacao = P001, empregos = T001, decil = R003, acesso_60 = CMATT60) |>
-  sf::st_transform(4326)
+```markdown
+## Dados e método
+
+- **Rede viária:** OpenStreetMap, recorte de Fortaleza (data da extração).
+- **Transporte público:** GTFS da Etufor, válido de abril a julho de 2026.
+- **População, empregos e renda:** `aopdata` (Ipea), grade hexagonal H3, dados de 2019.
+- **Roteamento:** `r5r`, partida num sábado às 7h, janela de 60 minutos, mediana dos tempos,
+  até 20 minutos de caminhada em cada ponta.
+- **Indicador:** empregos acessíveis em até 60 minutos (medida cumulativa).
 ```
 
-**Etapa 2:** população e empregos no mesmo mapa. Troque a camada no seletor do canto
-superior direito, e passe o mouse sobre um hexágono para ver o valor:
+### A rede de transporte público
+
+```markdown
+## A rede de transporte público
+
+Cada ponto é uma parada; o tamanho é o número de viagens que passam por ela num fim de semana.
+```
 
 ```{r}
-mapa_base(aop) |>
-  camada_hex(aop, "populacao", "População") |>
-  camada_hex(aop, "empregos", "Empregos", cores = c("#F7F6F2", "#7FA7C9", "#173A57"),
+#| echo: fenced
+gtfs <- gtfstools::read_gtfs("dados/brutos/fortaleza/gtfs_fortaleza.zip")
+
+paradas <- gtfstools::convert_stops_to_sf(gtfs) |>
+  dplyr::left_join(dplyr::count(gtfs$stop_times, stop_id, name = "viagens"), by = "stop_id")
+
+mapa_base(paradas) |>
+  mapgl::add_circle_layer(
+    id = "paradas", source = paradas,
+    circle_radius = mapgl::interpolate(column = "viagens", values = c(0, 1000), stops = c(1.5, 10)),
+    circle_color = "#2F6B9A", circle_opacity = 0.7, tooltip = "viagens"
+  )
+```
+
+### Onde moram as pessoas e onde estão os empregos
+
+```markdown
+## Onde moram as pessoas e onde estão os empregos
+
+Troque a camada no seletor do canto superior direito.
+```
+
+```{r}
+#| echo: fenced
+mapa_base(acesso) |>
+  camada_hex(acesso, "populacao", "População") |>
+  camada_hex(acesso, "empregos", "Empregos", cores = c("#F7F6F2", "#7FA7C9", "#173A57"),
              visivel = FALSE) |>
   mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
 ```
 
-O `mapgl` também tem `compare()`, que põe dois mapas lado a lado com uma cortina. Mas ele
-carrega um componente da internet que impede o HTML de sair num arquivo só (veja o fim desta
-página), por isso as camadas alternáveis são a escolha mais segura para o relatório.
+### Até onde se chega a partir do Centro
 
-**Etapa 4:** empregos acessíveis em até 60 minutos, com a altura do hexágono proporcional ao
-valor. Segure o botão direito do mouse e arraste para girar o mapa:
+```markdown
+## Até onde se chega a partir do Centro
 
-```{r}
-aop <- dplyr::mutate(aop, altura = acesso_60 / 100)   # 500 mil empregos viram 5 km de altura
-
-mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = aop,
-                pitch = 50, projection = "mercator") |>
-  mapgl::add_fill_extrusion_layer(
-    id = "acesso", source = aop,
-    fill_extrusion_color = mapgl::interpolate(column = "acesso_60", values = c(0, 250000, 500000),
-                                              stops = c("#F6DCCB", "#2F6B9A", "#173A57")),
-    fill_extrusion_height = mapgl::get_column("altura"),
-    fill_extrusion_opacity = 0.85, tooltip = "acesso_60"
-  ) |>
-  mapgl::add_legend("Empregos em até 60 min", values = c(0, 250000, 500000),
-                    colors = c("#F6DCCB", "#2F6B9A", "#173A57"))
+Áreas alcançáveis a partir da Praça do Ferreira em 15, 30, 45 e 60 minutos.
 ```
 
-As outras etapas seguem o mesmo padrão, com os seus resultados no lugar dos do Ipea:
+```{r}
+#| echo: fenced
+isocronas <- readRDS(file.path(pasta, "isocronas.rds")) |>
+  dplyr::arrange(dplyr::desc(isochrone))          # as faixas menores por cima
+
+cores_iso <- c("#173A57", "#2F6B9A", "#A9C4DA", "#F6DCCB")
+
+mapa_base(isocronas) |>
+  mapgl::add_fill_layer(
+    id = "isocronas", source = isocronas,
+    fill_color = mapgl::match_expr("isochrone", values = c(15, 30, 45, 60), stops = cores_iso),
+    fill_opacity = 0.6, tooltip = "isochrone"
+  ) |>
+  mapgl::add_legend("Minutos a partir do Centro", values = c(15, 30, 45, 60),
+                    colors = cores_iso, type = "categorical")
+```
+
+### Um exemplo de viagem
+
+```markdown
+## Um exemplo de viagem
+
+A opção mais rápida de Messejana ao Centro, trecho a trecho.
+```
 
 ```{r}
-#| eval: false
-# etapa 1: paradas, pelo número de viagens que passam em cada uma
-gtfs <- gtfstools::read_gtfs("dados/brutos/fortaleza/gtfs_fortaleza.zip")
-paradas <- gtfstools::convert_stops_to_sf(gtfs) |>
-  dplyr::left_join(dplyr::count(gtfs$stop_times, stop_id, name = "viagens"), by = "stop_id")
+#| echo: fenced
+itinerario <- readRDS(file.path(pasta, "itinerario.rds")) |>
+  dplyr::filter(option == 1)
 
-mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = paradas) |>
-  mapgl::add_circle_layer(
-    id = "paradas", source = paradas,
-    circle_radius = mapgl::interpolate(column = "viagens", values = c(0, 500), stops = c(2, 9)),
-    circle_color = "#2F6B9A", circle_opacity = 0.7, tooltip = "viagens"
-  )
+modos <- unique(itinerario$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#2F6B9A", RAIL = "#C2542D", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
 
-# etapa 3: isócronas (o resultado de r5r::isochrone(), uma camada por faixa de tempo)
-mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = isocronas) |>
-  mapgl::add_fill_layer(
-    id = "isocronas", source = dplyr::arrange(isocronas, dplyr::desc(isochrone)),
-    fill_color = mapgl::interpolate(column = "isochrone", values = c(15, 60),
-                                    stops = c("#173A57", "#F6DCCB")),
-    fill_opacity = 0.6, tooltip = "isochrone"
-  )
+mapa_base(itinerario) |>
+  mapgl::add_line_layer(
+    id = "itinerario", source = itinerario,
+    line_color = mapgl::match_expr("mode", values = modos, stops = unname(cores_modo)),
+    line_width = 5, tooltip = "route"
+  ) |>
+  mapgl::add_legend("Modo", values = modos, colors = unname(cores_modo), type = "categorical")
+```
 
-# etapa 5: atual e cenário, em camadas alternáveis
+### Acessibilidade a empregos hoje
+
+```markdown
+## Acessibilidade a empregos hoje
+
+Quantos empregos se alcançam em até 60 minutos de transporte público, a partir de cada hexágono.
+```
+
+```{r}
+#| echo: fenced
+cores_acesso <- c("#F6DCCB", "#2F6B9A", "#173A57")
+faixa_acesso <- range(c(acesso$atual, acesso$cenario), na.rm = TRUE)
+
 mapa_base(acesso) |>
-  camada_hex(acesso, "atual", "Atual") |>
-  camada_hex(acesso, "cenario", "Cenário", visivel = FALSE) |>
-  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+  camada_hex(acesso, "atual", "Empregos em até 60 min", cores = cores_acesso,
+             faixa = faixa_acesso)
+```
 
-# etapa 6: a diferença, com paleta divergente centrada em zero
-limite <- max(abs(acesso$variacao), na.rm = TRUE)
+### O cenário
+
+```markdown
+## O cenário: sem as linhas de menor oferta
+
+O cenário remove `r length(cortadas)` linhas, o quarto delas com menos viagens no GTFS. As duas
+camadas usam a mesma escala de cor; alterne entre elas no seletor.
+```
+
+```{r}
+#| echo: fenced
+mapa_base(acesso) |>
+  camada_hex(acesso, "atual", "Atual", cores = cores_acesso, faixa = faixa_acesso) |>
+  camada_hex(acesso, "cenario", "Cenário", cores = cores_acesso, faixa = faixa_acesso,
+             visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+```
+
+### Quem perde acesso
+
+```markdown
+## Quem perde acesso
+
+Variação dos empregos acessíveis com o corte: vermelho onde se perde, azul onde se ganha.
+```
+
+```{r}
+#| echo: fenced
+limite <- max(abs(acesso$perda_abs), na.rm = TRUE)
+cores_dif <- c("#C2542D", "#F7F6F2", "#2F6B9A")
+
 mapa_base(acesso) |>
   mapgl::add_fill_layer(
     id = "variacao", source = acesso,
-    fill_color = mapgl::interpolate(column = "variacao", values = c(-limite, 0, limite),
-                                    stops = c("#C2542D", "#F7F6F2", "#2F6B9A")),
-    fill_opacity = 0.8, tooltip = "variacao"
+    fill_color = mapgl::interpolate(column = "perda_abs", values = c(-limite, 0, limite),
+                                    stops = cores_dif),
+    fill_opacity = 0.8, tooltip = "perda_abs"
+  ) |>
+  mapgl::add_legend("Variação de empregos acessíveis", values = round(c(-limite, 0, limite)),
+                    colors = cores_dif)
+```
+
+### Quem perde mais
+
+```markdown
+## Quem perde mais
+
+A variação média de cada quintil de renda, ponderada pela população (1 = os 20% mais pobres).
+```
+
+```{r}
+#| echo: fenced
+por_renda <- comparacao |>
+  dplyr::filter(!is.na(renda)) |>
+  dplyr::summarise(
+    pessoas = sum(populacao),
+    variacao_pct = weighted.mean(perda_pct, populacao, na.rm = TRUE),
+    .by = renda
+  ) |>
+  dplyr::arrange(renda)
+
+knitr::kable(por_renda, digits = 1, format.args = list(big.mark = "."),
+             col.names = c("Quintil de renda", "Pessoas", "Variação média (%)"))
+
+ggplot(por_renda, aes(factor(renda), variacao_pct)) +
+  geom_col(fill = "#C2542D") +
+  labs(x = "Quintil de renda (1 = mais pobres)",
+       y = "Variação média dos empregos acessíveis (%)") +
+  theme_minimal()
+```
+
+### O carregamento da rede viária
+
+```markdown
+## O carregamento da rede viária
+
+Os trechos mais usados nas viagens de carro entre as áreas mais populosas e as com mais
+empregos; a espessura é o fluxo.
+```
+
+```{r}
+#| echo: fenced
+carga <- readRDS(file.path(pasta, "carga.rds")) |>
+  sf::st_transform(4326) |>
+  dplyr::arrange(fluxo)                          # os trechos mais carregados por cima
+
+mapa_base(carga) |>
+  mapgl::add_line_layer(
+    id = "carga", source = carga, line_color = "#1a5b8a", line_opacity = 0.8,
+    line_width = mapgl::interpolate(column = "fluxo", values = range(carga$fluxo),
+                                    stops = c(0.5, 8)),
+    tooltip = "fluxo"
   )
 ```
 
-Para que os mapas funcionem fora do seu computador, gere o HTML num arquivo só:
+### Conclusões, limitações e anexo
 
-```yaml
----
-title: "Acessibilidade a empregos em Fortaleza"
-format:
-  html:
-    embed-resources: true
----
+O fim do relatório é texto seu: o que o resultado mostra, e o que ele não pode mostrar. As
+limitações abaixo valem para os dados do curso; acrescente as que você encontrar.
+
+```markdown
+## Conclusões
+
+(Quem é afetado, em que magnitude, e o que isso implica para a decisão.)
+
+## Limitações
+
+- O GTFS só tem viagens de fim de semana: o resultado vale para um sábado de manhã, não para o
+  pico de um dia útil.
+- População, empregos e renda são de 2019; a rede de transporte é de 2026.
+- O carregamento considera só o carro e um conjunto pequeno de pares origem–destino, com fluxos
+  hipotéticos.
+
+## Anexo: ambiente de execução
+```
+
+```{r}
+#| echo: fenced
+sessionInfo()
 ```
 
 ## Como saber se ficou bom
 
 | Critério | O que se espera |
 |:--|:--|
-| Reprodutibilidade | outra pessoa roda os scripts e o relatório do zero e obtém o mesmo resultado |
-| Correção técnica | data de partida com viagens no GTFS, CRS adequado, nenhum hexágono duplicado |
-| Clareza da comunicação | mapas com legenda, título e fonte; paleta divergente na diferença |
+| Reprodutibilidade | outra pessoa roda o `scripts/m4-05-r5r.R` e o relatório do zero e obtém o mesmo resultado |
+| Correção técnica | data de partida com viagens no GTFS, parâmetros do roteamento declarados |
+| Clareza da comunicação | mapas com legenda, paleta divergente na diferença, texto curto em cada seção |
 | Interpretação | o texto diz o que o resultado significa, não o que o código faz |
-| Limitações | as fragilidades estão explicitadas, não escondidas (por exemplo, um GTFS só de fim de semana) |
+| Limitações | as fragilidades estão explicitadas, não escondidas |
 
-O primeiro critério é o mais importante e o mais simples de garantir: caminhos relativos,
-dados de origem acessíveis por código ou incluídos, nenhum passo manual não documentado, e o
-`sessionInfo()` no anexo.
+## Para ir além
 
-## Acompanhamento
+- **Outro corte de tempo:** 30 minutos em vez de 60, no `cutoff` do capítulo anterior.
+- **Outra oportunidade:** escolas ou serviços de saúde, que o `aopdata` também traz.
+- **Outro cenário:** em vez de cortar linhas, aumentar a frequência das linhas troncais com
+  `gtfstools`, e medir o ganho.
+- **Outra cidade:** o mesmo roteiro serve para qualquer cidade com GTFS aberto e `.pbf`.
 
-- **Durante o módulo 5**: montagem da rede, esqueleto do relatório e primeiros mapas.
-- **Dúvidas**: abrir *issue* no repositório do curso, com o código e a mensagem de erro
-  completa. Dúvidas registradas ajudam toda a turma.
+O `mapgl` também tem `compare()`, que põe dois mapas lado a lado com uma cortina. Mas ele
+carrega um componente da internet que impede o HTML de sair num arquivo só, por isso o
+relatório usa camadas alternáveis.
 
 ::: {.callout-tip}
-## Comece pelo fim
+## Dúvidas
 
-Escreva primeiro o esqueleto do relatório: títulos das seções e uma frase dizendo o que cada
-uma vai mostrar. Depois preencha com código. É muito mais rápido que começar explorando dados
-sem saber onde quer chegar, e evita o projeto que vira uma coleção de mapas sem conclusão.
+Abra uma *issue* no repositório do curso, com o código e a mensagem de erro completa. Dúvidas
+registradas ajudam toda a turma.
 :::

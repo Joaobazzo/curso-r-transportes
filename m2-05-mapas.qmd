@@ -192,7 +192,7 @@ Subsecretaria, por exemplo.
 ```{r}
 library(mapgl)
 
-mapgl::maplibre(bounds = portos) |>
+mapgl::maplibre(bounds = portos, height = "525px") |>   # sem height, o mapa ocupa 750 px
   mapgl::add_circle_layer(
     id = "portos",
     source = portos,

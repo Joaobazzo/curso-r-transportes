@@ -10,7 +10,9 @@
 #     alguns exigem o Java 21, baixam arquivos grandes ou são trechos
 #     ilustrativos que dependem de objetos criados antes;
 #   - blocos com `error: true` entram dentro de try(), porque o erro é
-#     proposital.
+#     proposital;
+#   - blocos com `include: false` ficam de fora: são os que o site usa para
+#     carregar resultados prontos no lugar de um cálculo que exige o Java.
 # Os scripts são cópias: depois de editar um capítulo, rode este de novo.
 # ------------------------------------------------------------------
 
@@ -25,6 +27,7 @@ fim <- grep("^formatar_bloco <- function", src) - 1
 eval(parse(text = src[ini:fim], encoding = "UTF-8"))
 
 formatar <- function(b) {
+  if (isTRUE(b$oculto)) return(character())   # include: false: só serve ao site
   cod <- b$codigo
   while (length(cod) > 0 && !nzchar(trimws(cod[length(cod)]))) cod <- cod[-length(cod)]
   if (length(cod) == 0) return(character())

@@ -16,10 +16,13 @@ R/preparar_modulo4.R
 scripts/m0*
 scripts/m4*
 scripts/m5*
+# teste local do projeto final (R/testar_projeto_final.R)
+R/testar*
+R/testar_projeto_final.R
+relatorio_teste.qmd
+relatorio_teste.html
+relatorio_teste_files/
 # o cache do Quarto precisa de tudo (css, json, png das figuras e dos widgets):
-
-
-slides/sf e terra.pdf
 
 # o site é montado no GitHub Actions a partir dele, sem R
 !_freeze/**
@@ -41,6 +44,8 @@ slides/sf e terra.pdf
 # resultados gerados
 /resultados/
 /dados/brutos/
+/dados/processados/
+/dados/projeto_final/
 
 # sistema
 .DS_Store

@@ -4,23 +4,36 @@ Este capítulo mostra o fluxo completo de uma análise de cenário de transporte
 a rede, calcular a matriz de tempos, editar o GTFS para representar uma intervenção, recalcular
 e comparar. O exemplo é Fortaleza.
 
+Cada etapa termina salvando o seu resultado na pasta `dados/projeto_final/`. São esses
+arquivos que o projeto final (@sec-m5-projeto) lê para montar o relatório de acessibilidade de
+Fortaleza:
+
+| Arquivo em `dados/projeto_final/` | Etapa | Conteúdo |
+|:--|:--|:--|
+| `isocronas.rds` | 4 | isócronas de 15 a 60 min a partir do Centro |
+| `itinerario.rds` | 5 | um itinerário detalhado, de Messejana ao Centro |
+| `linhas_cortadas.rds` | 6 | as linhas removidas no cenário |
+| `comparacao.rds` | 7 | empregos acessíveis por hexágono, atual e cenário |
+| `carga.rds` | 8 | carregamento da rede viária |
+
 ::: {.callout-important}
-## Os blocos deste capítulo não são executados na construção do site
+## Os blocos com o `r5r` não são executados na construção do site
 
 Eles exigem o **JDK 21** e uma pasta com o `.pbf` do OpenStreetMap e o GTFS da cidade:
 arquivos grandes, que não ficam no repositório. O código está pronto para rodar na sua
 máquina, e o material do encontro síncrono percorre esses passos ao vivo. O preparo da pasta
 está em @sec-m5.
 
-Os **mapas** deste capítulo são executados: eles usam os resultados que o Ipea publica no
-`aopdata` para Fortaleza, calculados com o mesmo motor R5. Servem para mostrar como fica cada
-etapa, enquanto o seu próprio cálculo não roda.
+As **tabelas, gráficos e mapas** deste capítulo são executados: usam os arquivos que esse mesmo
+código gerou, rodado na máquina de quem escreveu o curso, e os resultados que o Ipea publica no
+`aopdata` para Fortaleza.
 :::
 
 ```{r}
 # para os mapas de referência: a grade de Fortaleza com os resultados do Ipea,
 # a mesma usada no @sec-m4-acessibilidade
 library(sf)
+library(ggplot2)
 
 arquivo <- "dados/brutos/aop_fortaleza.rds"
 
@@ -51,6 +64,9 @@ library(sf)
 library(dplyr)
 library(ggplot2)
 library(accessibility)
+
+# onde cada etapa salva o seu resultado, para o projeto final
+dir.create("dados/projeto_final", recursive = TRUE, showWarnings = FALSE)
 ```
 
 ## 1. Montar a rede
@@ -84,12 +100,9 @@ validade, ou com erro de formato.
 
 ```{r}
 #| eval: false
-# a grade hexagonal do aopdata serve bem como unidade de análise
-hex <- aopdata::read_access(city = "Fortaleza", mode = "public_transport",
-                            year = 2019, geometry = TRUE, showProgress = FALSE)
-
-pontos <- hex |>
-  dplyr::filter(P001 > 0) |>
+# a grade hexagonal do aopdata (o objeto aop, do início do capítulo) serve bem
+# como unidade de análise: um ponto no centro de cada hexágono com população
+pontos <- aop |>
   sf::st_centroid() |>
   dplyr::transmute(id = id_hex,
             lon = sf::st_coordinates(geometry)[, 1],
@@ -106,9 +119,22 @@ Cada hexágono com população vira um ponto de origem e de destino. A grade, co
 cada hexágono:
 
 ```{r}
-# só as colunas do mapa: com as 206 do aopdata, cada hexágono carrega um popup enorme
-mapview::mapview(dplyr::select(aop, id_hex, P001), zcol = "P001", lwd = 0, alpha.regions = 0.7,
-                 layer.name = "População")
+# o mapgl quer coordenadas em graus (EPSG:4326); só as colunas do mapa, para o tooltip
+populacao <- aop |>
+  dplyr::select(id_hex, populacao = P001) |>
+  sf::st_transform(4326)
+
+cores_pop <- c("#F7F6F2", "#E7A07A", "#7A1F0F")
+faixa_pop <- range(populacao$populacao)
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = populacao, height = "525px") |>
+  mapgl::add_fill_layer(
+    id = "populacao", source = populacao,
+    fill_color = mapgl::interpolate(column = "populacao", values = seq(faixa_pop[1], faixa_pop[2],
+                                    length.out = 3), stops = cores_pop),
+    fill_opacity = 0.75, tooltip = "populacao"
+  ) |>
+  mapgl::add_legend("População", values = faixa_pop, colors = cores_pop)
 ```
 
 ## 3. Matriz de tempos de viagem
@@ -181,15 +207,31 @@ público chega pior, e não necessariamente onde há menos postos de saúde.
 
 ```{r}
 #| eval: false
-origem <- pontos |> dplyr::slice(1)
+# a partir da Praça do Ferreira, no Centro
+centro <- data.frame(id = "centro", lon = -38.5267, lat = -3.7275)
 
 iso <- r5r::isochrone(
   rede,
-  origins = origem,
+  origins = centro,
   mode = c("WALK", "TRANSIT"),
   departure_datetime = partida,
-  cutoffs = c(15, 30, 45, 60)
+  cutoffs = c(15, 30, 45, 60),
+  time_window = 60,
+  max_walk_time = 20
 )
+
+saveRDS(iso, "dados/projeto_final/isocronas.rds")
+```
+
+```{r}
+#| include: false
+# o site não roda o r5r: carrega o resultado que o bloco acima salvou
+iso <- readRDS("dados/projeto_final/isocronas.rds")
+```
+
+```{r}
+#| fig-height: 6
+iso <- dplyr::arrange(iso, dplyr::desc(isochrone))   # as faixas menores por cima
 
 ggplot(iso) +
   geom_sf(aes(fill = factor(isochrone)), colour = NA, alpha = 0.5) +
@@ -204,18 +246,52 @@ dá para chegar em 30 minutos".
 
 ```{r}
 #| eval: false
+# de Messejana à Praça do Ferreira (o centro da etapa anterior)
+messejana <- data.frame(id = "messejana", lon = -38.4920, lat = -3.8300)
+
 det <- r5r::detailed_itineraries(
   rede,
-  origins      = pontos |> dplyr::slice(1),
-  destinations = pontos |> dplyr::slice(100),
+  origins      = messejana,
+  destinations = centro,
   mode = c("WALK", "TRANSIT"),
   departure_datetime = partida,
+  max_walk_time = 20,
   shortest_path = FALSE
 )
 
+saveRDS(det, "dados/projeto_final/itinerario.rds")
+```
+
+```{r}
+#| include: false
+det <- readRDS("dados/projeto_final/itinerario.rds")
+```
+
+Cada linha de `det` é um **trecho** de uma opção de viagem: a caminhada até o ponto, cada
+ônibus, a caminhada final. Com `shortest_path = FALSE`, vêm várias opções:
+
+```{r}
 det |>
   sf::st_drop_geometry() |>
   dplyr::select(option, segment, mode, route, segment_duration, wait, distance)
+```
+
+No mapa, a primeira opção, com uma cor por modo. Passe o mouse sobre um trecho para ver a
+linha de ônibus:
+
+```{r}
+opcao <- dplyr::filter(det, option == 1)
+modos <- unique(opcao$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#2F6B9A", RAIL = "#C2542D", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = opcao, height = "525px") |>
+  mapgl::add_line_layer(
+    id = "itinerario", source = opcao,
+    line_color = mapgl::match_expr("mode", values = modos, stops = unname(cores_modo)),
+    line_width = 5, tooltip = "route"
+  ) |>
+  mapgl::add_legend("Modo", values = modos, colors = unname(cores_modo), type = "categorical")
 ```
 
 Quando um resultado parece estranho, é aqui que se descobre o motivo: uma caminhada de 18
@@ -247,6 +323,7 @@ cortadas <- viagens |>
   dplyr::pull(route_id)
 
 length(cortadas)
+saveRDS(cortadas, "dados/projeto_final/linhas_cortadas.rds")
 
 gtfs_cenario <- gtfstools::filter_by_route_id(gtfs, route_id = cortadas, keep = FALSE)
 
@@ -269,7 +346,7 @@ gtfstools::filter_by_time_of_day(gtfs, from = "06:00:00", to = "09:00:00")
 area_estudo <- sf::st_point(c(-38.527, -3.727)) |>              # 3 km em torno do Centro
   sf::st_sfc(crs = 4326) |>
   sf::st_buffer(3000)
-gtfstools::filter_by_sf(gtfs, geom = area_estudo)               # recorte espacial
+gtfstools::filter_by_spatial_extent(gtfs, geom = area_estudo)   # recorte espacial
 gtfstools::get_trip_speed(gtfs)                                  # velocidade comercial por viagem
 gtfstools::get_trip_geometry(gtfs, file = "shapes")              # traçado das linhas como sf
 ```
@@ -282,9 +359,21 @@ indicador `atual` calculado abaixo. É uma medida **cumulativa**; o capítulo de
 (@sec-m4-acessibilidade), explica essa e as outras medidas.
 
 ```{r}
-mapview::mapview(dplyr::select(aop, id_hex, CMATT60), zcol = "CMATT60", lwd = 0, alpha.regions = 0.8,
-                 col.regions = grDevices::hcl.colors(10, "Viridis"),
-                 layer.name = "Empregos em 60 min")
+empregos_60 <- aop |>
+  dplyr::select(id_hex, empregos_60 = CMATT60) |>
+  sf::st_transform(4326)
+
+cores_acesso <- c("#F6DCCB", "#2F6B9A", "#173A57")
+faixa_acesso <- range(empregos_60$empregos_60)
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = empregos_60, height = "525px") |>
+  mapgl::add_fill_layer(
+    id = "empregos_60", source = empregos_60,
+    fill_color = mapgl::interpolate(column = "empregos_60", values = seq(faixa_acesso[1],
+                                    faixa_acesso[2], length.out = 3), stops = cores_acesso),
+    fill_opacity = 0.8, tooltip = "empregos_60"
+  ) |>
+  mapgl::add_legend("Empregos em até 60 min", values = round(faixa_acesso), colors = cores_acesso)
 ```
 
 O cenário é calculado com a rede editada, e o que interessa é a **diferença** entre os dois
@@ -301,7 +390,8 @@ ttm_cenario <- r5r::travel_time_matrix(
   max_walk_time = 20, max_trip_duration = 90
 )
 
-uso_solo <- hex |>
+# população, empregos e quintil de renda de cada hexágono
+uso_solo <- aop |>
   sf::st_drop_geometry() |>
   dplyr::transmute(id = id_hex, populacao = P001, empregos = T001, renda = R002)
 
@@ -312,15 +402,31 @@ acesso <- function(m) {
   )
 }
 
+acesso_cenario <- acesso(ttm_cenario) |>
+  dplyr::rename(cenario = empregos)
+
 comparacao <- acesso(ttm) |>
   dplyr::rename(atual = empregos) |>
-  dplyr::left_join(acesso(ttm_cenario) |> dplyr::rename(cenario = empregos), by = "id") |>
+  dplyr::left_join(acesso_cenario, by = "id") |>
   dplyr::left_join(uso_solo, by = "id") |>
   dplyr::mutate(
     perda_abs = cenario - atual,
-    perda_pct = 100 * (cenario / atual - 1)
+    # sem acesso hoje, não há o que perder: a variação percentual fica vazia
+    perda_pct = dplyr::if_else(atual > 0, 100 * (cenario / atual - 1), NA_real_)
   )
 
+saveRDS(comparacao, "dados/projeto_final/comparacao.rds")
+```
+
+```{r}
+#| include: false
+comparacao <- readRDS("dados/projeto_final/comparacao.rds")
+```
+
+Quanto cada faixa de renda perde, em média, ponderando pela população (o quintil 1 é o de menor
+renda):
+
+```{r}
 comparacao |>
   dplyr::summarise(
     pessoas = sum(populacao, na.rm = TRUE),
@@ -335,10 +441,11 @@ periferia e nos estratos de renda mais baixa. É justamente o argumento que a an
 serve para quantificar, em vez de afirmar.
 
 ```{r}
-#| eval: false
-hex |>
-  dplyr::left_join(comparacao, by = c("id_hex" = "id")) |>
-  ggplot() +
+#| fig-height: 6
+mapa_comparacao <- aop |>
+  dplyr::left_join(comparacao, by = c("id_hex" = "id"))
+
+ggplot(mapa_comparacao) +
   geom_sf(aes(fill = perda_pct), colour = NA) +
   scale_fill_gradient2(low = "#b3402a", mid = "grey95", high = "#1a5b8a",
                        midpoint = 0, name = "Variação (%)") +
@@ -357,8 +464,8 @@ infraestrutura**, cada par precisa ser roteado e os fluxos somados por trecho:
 # caminho 1: rotear os pares com o r5r e somar por trecho com o stplanr
 # pares de exemplo: dos 30 hexágonos mais populosos aos 10 com mais empregos;
 # o fluxo divide a população da origem entre os destinos, pelos empregos
-origens  <- hex |> sf::st_drop_geometry() |> dplyr::slice_max(P001, n = 30) |> dplyr::select(id_hex, P001)
-destinos <- hex |> sf::st_drop_geometry() |> dplyr::slice_max(T001, n = 10) |> dplyr::select(id_hex, T001)
+origens  <- aop |> sf::st_drop_geometry() |> dplyr::slice_max(P001, n = 30) |> dplyr::select(id_hex, P001)
+destinos <- aop |> sf::st_drop_geometry() |> dplyr::slice_max(T001, n = 10) |> dplyr::select(id_hex, T001)
 
 pares_od <- expand.grid(origem = origens$id_hex, destino = destinos$id_hex,
                         stringsAsFactors = FALSE) |>
@@ -380,13 +487,25 @@ rotas <- r5r::detailed_itineraries(
 
 carga <- stplanr::overline(rotas, attrib = "fluxo")
 
-ggplot(carga) +
-  geom_sf(aes(linewidth = fluxo), colour = "#1a5b8a", alpha = 0.7) +
-  scale_linewidth_continuous(range = c(0.2, 3)) +
-  theme_void()
+saveRDS(carga, "dados/projeto_final/carga.rds")
 
 # caminho 2: flownet, estimação e alocação de fluxos em rede
 # remotes::install_github("SebKrantz/flownet")
+```
+
+```{r}
+#| include: false
+carga <- readRDS("dados/projeto_final/carga.rds")
+```
+
+```{r}
+#| fig-height: 6
+carga <- dplyr::arrange(carga, fluxo)      # os trechos mais carregados por cima
+
+ggplot(carga) +
+  geom_sf(aes(linewidth = fluxo), colour = "#1a5b8a", alpha = 0.7) +
+  scale_linewidth_continuous(range = c(0.2, 3), name = "Fluxo") +
+  theme_void()
 ```
 
 O resultado é o **carregamento da rede**: o mapa em que a espessura está sobre a rodovia, e não

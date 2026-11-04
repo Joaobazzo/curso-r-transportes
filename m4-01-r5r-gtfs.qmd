@@ -27,9 +27,6 @@ estiver instalado. A exploração do GTFS, que não precisa de Java, é executad
 library(sf)
 library(dplyr)
 library(ggplot2)
-
-# mapa-base padrão dos mapview(): OpenStreetMap
-mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
 ```
 
 ## Antes de começar: qual Java o R enxerga? {#sec-r5r-java}
@@ -146,9 +143,10 @@ As tabelas que importam para o roteamento:
 | `calendar` | em que dias cada serviço opera, e o período de validade | `service_id` |
 | `shapes` | o traçado das linhas, para desenhar | `shape_id` |
 
-Para ver como as tabelas se ligam pelas chaves, abra o
-[diagrama do esquema GTFS](https://github.com/ipeaGIT/gtfs2gps-time_geography/blob/main/figures/flowchart_GTFS_scheme.png)
-(Ipea, repositório `gtfs2gps-time_geography`).
+Como as tabelas se ligam pelas chaves (`route_id`, `trip_id`, `stop_id`, `service_id`,
+`shape_id`):
+
+![Esquema das tabelas do GTFS e das chaves que as ligam. Fonte: Ipea, repositório [`gtfs2gps-time_geography`](https://github.com/ipeaGIT/gtfs2gps-time_geography).](https://raw.githubusercontent.com/ipeaGIT/gtfs2gps-time_geography/main/figures/flowchart_GTFS_scheme.png){#fig-gtfs-esquema fig-alt="Diagrama do esquema GTFS: as tabelas agency, routes, trips, stop_times, stops, calendar e shapes, ligadas pelas colunas de identificação."}
 
 As linhas:
 
@@ -193,8 +191,16 @@ tracados  <- gtfstools::convert_shapes_to_sf(gtfs)
 
 c(paradas = nrow(paradas), tracados = nrow(tracados))
 
-mapview::mapview(tracados, color = "#1a5b8a", lwd = 1.5, layer.name = "Traçados") +
-  mapview::mapview(paradas, cex = 1.5, col.regions = "#b3402a", layer.name = "Paradas")
+# o mapgl quer coordenadas em graus (EPSG:4326)
+paradas  <- sf::st_transform(paradas, 4326)
+tracados <- sf::st_transform(tracados, 4326)
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = tracados, height = "525px") |>
+  mapgl::add_line_layer(id = "Traçados", source = tracados, line_color = "#1a5b8a",
+                        line_width = 1.5, tooltip = "shape_id") |>
+  mapgl::add_circle_layer(id = "Paradas", source = paradas, circle_color = "#b3402a",
+                          circle_radius = 3, tooltip = "stop_name") |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE)
 ```
 
 ### Por que o horário de partida importa
@@ -343,12 +349,39 @@ det <- r5r::detailed_itineraries(
   departure_datetime = as.POSIXct("2019-05-13 14:00:00", tz = "America/Sao_Paulo"),
   shortest_path      = FALSE        # devolve as alternativas, não só a mais rápida
 )
+```
 
+```{r}
+#| include: false
+# o site não roda o r5r: carrega o resultado do bloco acima, calculado com a mesma rede
+# de exemplo por R/preparar_exemplos_r5r.R
+det <- readRDS("dados/processados/poa/itinerario.rds")
+```
+
+Cada linha é um trecho de uma opção de viagem:
+
+```{r}
 det |>
   sf::st_drop_geometry() |>
   dplyr::select(option, segment, mode, route, segment_duration, wait, distance)
+```
 
-mapview::mapview(det, zcol = "mode", lwd = 4)
+No mapa, a primeira opção, com uma cor por modo. Passe o mouse sobre um trecho para ver a
+linha:
+
+```{r}
+opcao <- dplyr::filter(det, option == 1)
+modos <- unique(opcao$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#1a5b8a", RAIL = "#b3402a", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = opcao, height = "525px") |>
+  mapgl::add_line_layer(
+    id = "itinerario", source = opcao,
+    line_color = mapgl::match_expr("mode", values = modos, stops = unname(cores_modo)),
+    line_width = 5, tooltip = "route"
+  ) |>
+  mapgl::add_legend("Modo", values = modos, colors = unname(cores_modo), type = "categorical")
 ```
 
 É olhando as etapas (caminhada, espera, linha, transferência) que se explica um tempo de viagem
@@ -367,6 +400,16 @@ iso <- r5r::isochrone(
   departure_datetime = as.POSIXct("2019-05-13 14:00:00", tz = "America/Sao_Paulo"),
   cutoffs            = c(15, 30, 45)
 )
+```
+
+```{r}
+#| include: false
+iso <- readRDS("dados/processados/poa/isocronas.rds")
+```
+
+```{r}
+#| fig-height: 5
+iso <- dplyr::arrange(iso, dplyr::desc(isochrone))   # as faixas menores por cima
 
 ggplot(iso) +
   geom_sf(aes(fill = factor(isochrone)), alpha = 0.5, colour = NA) +

@@ -58,6 +58,7 @@ extrair_blocos <- function(arquivo) {
         codigo = codigo,
         eval   = !any(grepl("^#\\|\\s*eval:\\s*false", opcoes)),
         erro   = any(grepl("^#\\|\\s*error:\\s*true", opcoes)),
+        oculto = any(grepl("^#\\|\\s*include:\\s*false", opcoes)),
         secao  = secao
       )
       next
