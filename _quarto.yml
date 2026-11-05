@@ -4,6 +4,7 @@ project:
   resources:
     - slides/*.pdf
     - recursos/folhas/*.pdf
+    - modelos/*.qmd
 
 book:
   title: "Análise de Dados com R Aplicada ao Planejamento de Transportes"
@@ -70,6 +71,7 @@ book:
         - m4-00c-roteamento.qmd
         - m4-04-acessibilidade.qmd
         - m5-02b-git.qmd
+        - m5-03a-relatorio-municipal.qmd
         - m5-03-parametrizados.qmd
         - m4-06-exercicios.qmd
     - part: "Módulo 5 — Mapas temáticos, relatórios reproduzíveis e projeto final"

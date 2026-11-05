@@ -6,11 +6,23 @@ caso, todos com a mesma estrutura e a mesma metodologia.
 
 É a resposta para o pedido recorrente: *"faça esse mesmo estudo para os outros 27 corredores"*.
 
+Este capítulo transforma o relatório de Paranaguá do capítulo anterior
+(@sec-relatorio-paranagua) num modelo, e o renderiza para os cinco municípios com mais
+cabotagem do país.
+
+## Do relatório ao modelo
+
+O relatório de Paranaguá foi escrito pensando nisso: o município aparece num único bloco, no
+começo, e todo o resto usa as variáveis `municipio`, `uf` e `codigo`:
+
 ```{r}
-library(dplyr)
-library(stringr)
-library(readxl)
+#| eval: false
+municipio <- "Paranaguá"
+uf        <- "PR"
 ```
+
+Parametrizar é trocar esses valores fixos por **parâmetros**, declarados no cabeçalho do
+documento. O restante do relatório não muda uma linha.
 
 ## Declarar os parâmetros
 
@@ -18,35 +30,60 @@ No YAML do documento modelo:
 
 ```yaml
 ---
-title: "Perfil de cabotagem: `r knitr::inline_expr("params$municipio")`"
+title: "Perfil municipal: `r knitr::inline_expr("params$municipio")` (`r knitr::inline_expr("params$uf")`)"
 params:
   municipio: "Paranaguá"
   uf: "PR"
-  ano: 2025
 ---
 ```
 
-Dentro do documento, os valores estão em `params`:
+Os valores do YAML são os padrões, usados quando ninguém informa outro. Dentro do documento,
+eles estão na lista `params`, e o primeiro bloco do relatório passa a ser:
 
 ```{r}
 #| eval: false
-params$municipio
-params$ano
+municipio <- params$municipio
+uf        <- params$uf
 ```
 
 Durante o desenvolvimento, é prático simular os parâmetros para poder rodar o código linha a
-linha no console:
+linha no console, onde `params` não existe:
 
 ```{r}
 # no desenvolvimento; quando renderizado, `params` vem do YAML
-if (!exists("params")) params <- list(municipio = "Paranaguá", uf = "PR", ano = 2025)
+if (!exists("params")) params <- list(municipio = "Paranaguá", uf = "PR")
 
 params$municipio
 ```
 
-## O corpo do relatório usa os parâmetros
+## O modelo completo
+
+O modelo pronto, que é o capítulo de Paranaguá com o primeiro bloco trocado pelos parâmetros,
+está em [`modelo_perfil.qmd`](modelos/modelo_perfil.qmd). Salve-o na **raiz do projeto do curso**
+(a pasta que contém `dados/`), porque ele lê `dados/cabotagem_tku_2025.xlsx` por um caminho
+relativo.
+
+Para um município, renderize passando os parâmetros em `execute_params`:
 
 ```{r}
+#| eval: false
+quarto::quarto_render(
+  input          = "modelo_perfil.qmd",
+  output_file    = "perfil_manaus_AM.html",
+  execute_params = list(municipio = "Manaus", uf = "AM")
+)
+```
+
+Sem `execute_params`, valem os padrões do YAML, e sai o relatório de Paranaguá.
+
+## Renderizar para cinco municípios
+
+Os casos saem dos próprios dados: os cinco municípios com mais TKU de cabotagem, somando
+embarques e desembarques.
+
+```{r}
+library(dplyr)
+
 colunas <- c("ano", "perfil", "sh2",
              "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
              "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
@@ -56,63 +93,32 @@ cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-")
 names(cabotagem) <- colunas
 
 cabotagem <- cabotagem |>
-  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), stringr::str_squish)) |>
   dplyr::filter(tku > 0)
 
-dados_muni <- cabotagem |>
-  dplyr::filter(cidade_destino == params$municipio, uf_destino == params$uf)
+casos <- dplyr::bind_rows(
+  cabotagem |> dplyr::select(cidade = cidade_origem,  uf = uf_origem,  tku),
+  cabotagem |> dplyr::select(cidade = cidade_destino, uf = uf_destino, tku)
+) |>
+  dplyr::filter(!is.na(cidade)) |>                    # ZEE/plataformas não são municípios
+  dplyr::summarise(tku_bi = sum(tku) / 1e9, .by = c(cidade, uf)) |>
+  dplyr::slice_max(tku_bi, n = 5)
 
-resumo <- dados_muni |>
-  dplyr::summarise(
-    ligacoes = dplyr::n(),
-    tku_bi = sum(tku) / 1e9,
-    perfis = dplyr::n_distinct(perfil),
-    origens = dplyr::n_distinct(paste(cidade_origem, uf_origem))
-  )
-
-resumo |> knitr::kable()
+casos |> knitr::kable(digits = 1, format.args = list(decimal.mark = ","),
+                      col.names = c("Município", "UF", "TKU (bi t·km)"))
 ```
 
-E o texto se escreve em função do resultado:
-
-> O município de `r params$municipio` (`r params$uf`) recebeu
-> `r round(resumo$tku_bi, 1)` bilhões de t·km em `r params$ano`, distribuídos em
-> `r resumo$ligacoes` ligações de cabotagem originadas em `r resumo$origens`
-> localidades distintas.
-
-```{r}
-#| label: fig-param
-#| fig-cap: "Origens do TKU recebido pelo município"
-#| fig-height: 3.6
-library(ggplot2)
-
-dados_muni |>
-  dplyr::mutate(origem = dplyr::if_else(is.na(cidade_origem), "ZEE/Plataforma",
-                          paste0(cidade_origem, " (", uf_origem, ")"))) |>
-  dplyr::summarise(tku_bi = sum(tku) / 1e9, .by = origem) |>
-  dplyr::slice_max(tku_bi, n = 8) |>
-  ggplot2::ggplot(ggplot2::aes(tku_bi, reorder(origem, tku_bi))) +
-  ggplot2::geom_col(fill = "#1a5b8a") +
-  ggplot2::labs(x = "TKU (bi t·km)", y = NULL) +
-  ggplot2::theme_minimal(base_size = 9)
-```
-
-## Renderizar para vários casos
+E o laço que gera um relatório por linha de `casos`:
 
 ```{r}
 #| eval: false
-library(quarto)
-
-casos <- cabotagem |>
-  dplyr::summarise(tku = sum(tku), .by = c(cidade_destino, uf_destino)) |>
-  dplyr::slice_max(tku, n = 10)
-
 dir.create("resultados/relatorios", recursive = TRUE, showWarnings = FALSE)
 
 for (i in seq_len(nrow(casos))) {
-  municipio <- casos$cidade_destino[i]
-  uf        <- casos$uf_destino[i]
+  municipio <- casos$cidade[i]
+  uf        <- casos$uf[i]
 
+  # perfil_sao_luis_MA.html: sem acentos nem espaços no nome do arquivo
   arquivo_saida <- paste0(
     "perfil_",
     municipio |> stringr::str_to_lower() |> stringi::stri_trans_general("Latin-ASCII") |>
@@ -123,19 +129,25 @@ for (i in seq_len(nrow(casos))) {
   message("Renderizando ", municipio, " (", i, "/", nrow(casos), ")")
 
   quarto::quarto_render(
-    input = "modelo_perfil.qmd",
-    output_file = arquivo_saida,
-    execute_params = list(municipio = municipio, uf = uf, ano = 2025)
+    input          = "modelo_perfil.qmd",
+    output_file    = arquivo_saida,
+    execute_params = list(municipio = municipio, uf = uf)
   )
 
   file.rename(arquivo_saida, file.path("resultados/relatorios", arquivo_saida))
 }
 ```
 
+Cada relatório leva uns dois minutos, a maior parte filtrando as tabelas do Censo do país
+inteiro. Os arquivos do Censo e as malhas são baixados só na primeira renderização; nas
+seguintes, vêm do computador.
+
 Alguns detalhes que evitam frustração:
 
 - `output_file` precisa ser só o **nome** do arquivo, não um caminho. Daí o `file.rename()`
   depois.
+- O nome do município precisa estar escrito como no IBGE, com acentos: é por ele que o modelo
+  acha o código IBGE. Na base de cabotagem, os nomes já seguem essa grafia.
 - Renderizações em série reaproveitam pouco; se o preparo dos dados é pesado, faça-o **antes**
   do laço e salve um `.rds` que o modelo apenas lê.
 - Envolva a chamada em `tryCatch()` quando os casos vierem de uma lista longa: um município
@@ -146,11 +158,10 @@ Alguns detalhes que evitam frustração:
 resultados <- lapply(seq_len(nrow(casos)), function(i) {
   tryCatch({
     quarto::quarto_render("modelo_perfil.qmd",
-                  execute_params = list(municipio = casos$cidade_destino[i],
-                                        uf = casos$uf_destino[i], ano = 2025))
-    data.frame(caso = casos$cidade_destino[i], status = "ok")
+                          execute_params = list(municipio = casos$cidade[i], uf = casos$uf[i]))
+    data.frame(caso = casos$cidade[i], status = "ok")
   }, error = function(e) {
-    data.frame(caso = casos$cidade_destino[i], status = paste("erro:", e$message))
+    data.frame(caso = casos$cidade[i], status = paste("erro:", e$message))
   })
 })
 

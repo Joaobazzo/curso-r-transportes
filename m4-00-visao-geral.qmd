@@ -6,7 +6,7 @@
 ::: {.modulo-meta}
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
 **Datas:** 19/10 e 21/10 (síncronas); 22/10 (assíncrono)\
-**Pacotes:** `osmdata`, `osmextract`, `sfnetworks`, `dodgr`, `accessibility`, `aopdata`, `usethis`, `quarto`\
+**Pacotes:** `osmdata`, `osmextract`, `sfnetworks`, `dodgr`, `accessibility`, `aopdata`, `usethis`, `quarto`, `geobr`, `censobr`, `sidrar`\
 **Estudo de caso:** acessibilidade em Fortaleza
 :::
 
@@ -19,7 +19,8 @@
   medida (tempo mínimo, cumulativa, gravitacional, com concorrência) captura.
 - Registrar o histórico de uma análise com Git e saber o que **não** pode ir para um
   repositório público.
-- Gerar o mesmo relatório para vários municípios, trechos ou cenários, em um laço.
+- Montar um diagnóstico municipal com o Censo (`geobr`, `censobr`), o SIDRA (`sidrar`) e a
+  cabotagem, e gerar o mesmo relatório para vários municípios, em um laço.
 
 ## Roteiro
 
@@ -31,7 +32,8 @@
 | 2 | Roteamento de automóvel e carga com `dodgr` | @sec-m4-roteamento |
 | 3 | Acessibilidade a oportunidades: conceito, medidas e interpretação | @sec-m4-acessibilidade |
 | 4 | Controle de versão com Git e GitHub | @sec-m5-git |
-| 5 | Relatórios parametrizados e automação | @sec-m5-parametrizados |
+| 5 | Um relatório municipal: Paranaguá (Censo, SIDRA e cabotagem) | @sec-relatorio-paranagua |
+| 6 | Relatórios parametrizados: o mesmo relatório para cinco municípios | @sec-m5-parametrizados |
 
 ### Conteúdo assíncrono (3h)
 
@@ -44,7 +46,8 @@
 ```{r}
 #| eval: false
 pacotes <- c("osmdata", "osmextract", "sfnetworks", "tidygraph", "dodgr",
-             "accessibility", "aopdata", "h3jsr", "usethis", "gitcreds", "quarto")
+             "accessibility", "aopdata", "h3jsr", "usethis", "gitcreds", "quarto",
+             "geobr", "censobr", "sidrar")
 
 faltando <- setdiff(pacotes, rownames(installed.packages()))
 if (length(faltando) > 0) install.packages(faltando)
