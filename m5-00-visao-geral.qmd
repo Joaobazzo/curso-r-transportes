@@ -24,10 +24,10 @@
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 1 | Quarto: estrutura, figuras, tabelas, referências cruzadas, formatos | @sec-m5-quarto |
-| 2 | Roteamento de transporte público com `r5r` e GTFS | @sec-m4-gtfs |
-| 3 | Roteamento multimodal, cenários e isócronas com `r5r` | @sec-m4-r5r |
-| 4 | Redes de fluxo e alocação (`flownet`, `stplanr`) | @sec-m4-r5r |
+| 1 | Roteamento de transporte público com `r5r` e GTFS | @sec-m4-gtfs |
+| 2 | Roteamento multimodal, cenários e isócronas com `r5r` | @sec-m4-r5r |
+| 3 | Redes de fluxo e alocação (`flownet`, `stplanr`) | @sec-m4-r5r |
+| 4 | Quarto: estrutura, figuras, tabelas, referências cruzadas, formatos | @sec-m5-quarto |
 
 Os mapas que entram nos relatórios seguem o que foi visto em @sec-m2-mapas.
 

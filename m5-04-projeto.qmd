@@ -6,7 +6,7 @@ medidas de acessibilidade e mapas interativos com `mapgl`.
 
 O relatório é montado com os blocos desta página. Você copia cada bloco, na ordem, para um
 arquivo `relatorio.qmd`; empilhados, eles formam o caderno completo. Os dados vêm do capítulo
-anterior (@sec-m4-r5r), que salvou cada resultado na pasta `dados/projeto_final/`. Abaixo de cada
+de roteamento multimodal (@sec-m4-r5r), que salvou cada resultado na pasta `dados/projeto_final/`. Abaixo de cada
 bloco está o que ele produz, para você conferir o seu relatório enquanto monta.
 
 Não há entrega nem avaliação: o projeto é seu. A ideia é que você termine o curso com um
@@ -20,7 +20,7 @@ quem perde mais?**
 
 ## Antes de começar
 
-1. **Rode o capítulo anterior inteiro** (`scripts/m4-05-r5r.R`), com o Java 21 configurado. Leva
+1. **Rode o capítulo de roteamento multimodal inteiro** (@sec-m4-r5r, `scripts/m4-05-r5r.R`), com o Java 21 configurado. Leva
    uns 15 minutos. No fim, a pasta `dados/projeto_final/` deve ter estes arquivos:
 
 ```{r}
@@ -369,7 +369,7 @@ sessionInfo()
 
 ## Para ir além
 
-- **Outro corte de tempo:** 30 minutos em vez de 60, no `cutoff` do capítulo anterior.
+- **Outro corte de tempo:** 30 minutos em vez de 60, no `cutoff` do capítulo de roteamento multimodal.
 - **Outra oportunidade:** escolas ou serviços de saúde, que o `aopdata` também traz.
 - **Outro cenário:** em vez de cortar linhas, aumentar a frequência das linhas troncais com
   `gtfstools`, e medir o ganho.

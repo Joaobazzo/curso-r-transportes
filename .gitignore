@@ -24,6 +24,13 @@ relatorio_teste.html
 relatorio_teste_files/
 R/testar_parametrizados.R
 /modelo_perfil.qmd
+
+# teste de diagnostico de rede (pode remover depois)
+a-diagnostico-rede.qmd
+_freeze/a-diagnostico-rede/*
+scripts/a-diagnostico-rede.R
+R/diagnostico_componentes_rede.R
+
 # o cache do Quarto precisa de tudo (css, json, png das figuras e dos widgets):
 
 # o site é montado no GitHub Actions a partir dele, sem R

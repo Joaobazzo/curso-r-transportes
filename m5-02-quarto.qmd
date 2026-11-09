@@ -1,5 +1,18 @@
 # Relatórios reproduzíveis com Quarto {#sec-m5-quarto}
 
+::: {.callout-warning}
+## Este capítulo não é reproduzível do jeito que está
+
+Ele é uma referência de sintaxe, não um exemplo para rodar de ponta a ponta. Os trechos de
+documento citam objetos que não são criados aqui (`serie`, `mapa_fluxos`, `tku`), a tabela de
+exemplo tem números digitados à mão, e os arquivos `modelo-mt.docx` e `referencias.bib` não
+existem no repositório. Copiar um trecho para um `.qmd` e renderizar vai dar erro.
+
+Para ver o Quarto funcionando do início ao fim, use os relatórios completos do curso: o de
+Paranaguá (@sec-relatorio-paranagua), o modelo parametrizado (@sec-m5-parametrizados) e o
+projeto final (@sec-m5-projeto), que vem logo a seguir.
+:::
+
 Um relatório reproduzível é um documento em que texto, código e resultados vivem no mesmo
 arquivo. Quando o dado muda, o documento inteiro se atualiza: tabelas, gráficos, mapas e os
 números citados no meio das frases.
