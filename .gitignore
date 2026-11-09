@@ -27,7 +27,6 @@ R/testar_parametrizados.R
 
 # teste de diagnostico de rede (pode remover depois)
 a-diagnostico-rede.qmd
-_freeze/a-diagnostico-rede/*
 scripts/a-diagnostico-rede.R
 R/diagnostico_componentes_rede.R
 
@@ -35,6 +34,8 @@ R/diagnostico_componentes_rede.R
 
 # o site é montado no GitHub Actions a partir dele, sem R
 !_freeze/**
+# ...menos o diagnóstico de rede, ainda não publicado (tem de vir depois da linha acima)
+_freeze/a-diagnostico-rede/
 
 # Quarto
 /_site/
