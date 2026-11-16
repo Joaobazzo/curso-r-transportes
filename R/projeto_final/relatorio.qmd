@@ -1,0 +1,456 @@
+---
+# o rodar_todas.R troca o título pelo da cidade (--metadata-file)
+title: "Acessibilidade a empregos"
+subtitle: "O efeito do corte das linhas de ônibus de menor oferta"
+author: "Curso de R aplicado ao planejamento de transportes"
+date: today
+lang: pt
+params:
+  cidade: fortaleza
+  recalcular: false
+format:
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: true
+    code-summary: "Código"
+execute:
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: parametros
+#| include: false
+# ------------------------------------------------------------------
+# Relatório do projeto final (m5-04-projeto.qmd) para uma das cinco cidades
+# de data_raw/projeto_final/. Faz, do zero, o cálculo do capítulo de
+# roteamento multimodal (m4-05-r5r.qmd) e depois o relatório.
+#
+# Renderizar uma cidade (na pasta R/projeto_final):
+#   quarto render relatorio.qmd -P cidade:porto_alegre --output relatorio_porto_alegre.html
+#   (o título com o nome da cidade vem do rodar_todas.R)
+# As cinco: Rscript R/projeto_final/rodar_todas.R, na raiz do projeto.
+#
+# Os resultados do r5r ficam em saidas/{cidade}/ e são reaproveitados na
+# renderização seguinte; -P recalcular:true refaz o cálculo.
+# ------------------------------------------------------------------
+options(java.parameters = "-Xmx8G")   # antes de carregar o r5r: São Paulo pede memória
+library(sf)
+
+source("cidades.R", encoding = "UTF-8")
+cid <- params$cidade
+stopifnot(cid %in% names(cidades))
+cfg <- cidades[[cid]]
+
+entrada <- file.path("../../data_raw/projeto_final", cid)   # só os dados do pacote da cidade
+saidas  <- file.path("saidas", cid)
+dir.create(saidas, recursive = TRUE, showWarnings = FALSE)
+
+arquivo_aop  <- file.path(entrada, paste0("aop_", cid, ".rds"))
+arquivo_gtfs <- file.path(entrada, paste0("gtfs_", cid, ".zip"))
+stopifnot(file.exists(arquivo_aop), file.exists(arquivo_gtfs),
+          length(list.files(entrada, pattern = "\\.pbf$")) == 1)
+
+partida <- as.POSIXct(cfg$partida, tz = cfg$fuso)
+# "da Praça", "do Mercado"; "à Praça", "ao Mercado"
+da <- if (cfg$centro$genero == "f") "da" else "do"
+a_ <- if (cfg$centro$genero == "f") "à" else "ao"
+dia <- c("num domingo", "numa segunda-feira", "numa terça-feira", "numa quarta-feira",
+         "numa quinta-feira", "numa sexta-feira", "num sábado")[as.POSIXlt(partida)$wday + 1]
+
+resultados <- c("isocronas", "itinerario", "linhas_cortadas", "comparacao", "carga", "info")
+calcular <- isTRUE(params$recalcular) ||
+  !all(file.exists(file.path(saidas, paste0(resultados, ".rds"))))
+```
+
+```{r}
+#| label: calculo
+#| include: false
+#| eval: !expr calcular
+# ==================================================================
+# O capítulo de roteamento multimodal, etapas 1 a 8, com os dados da cidade
+# ==================================================================
+library(r5r)
+inicio <- Sys.time()
+
+aop <- readRDS(arquivo_aop) |>
+  dplyr::filter(P001 > 0)
+
+# 1. rede atual
+rede <- r5r::build_network(data_path = entrada, verbose = FALSE)
+n_rotas <- nrow(r5r::transit_network_to_sf(rede)$routes)
+stopifnot(n_rotas > 0)
+
+# 2. pontos: o centro de cada hexágono com população
+xy <- sf::st_coordinates(sf::st_centroid(sf::st_geometry(aop)))
+pontos <- data.frame(id = aop$id_hex, lon = xy[, 1], lat = xy[, 2])
+
+# 3. matriz de tempos
+matriz <- function(r) {
+  r5r::travel_time_matrix(
+    r, origins = pontos, destinations = pontos,
+    mode = c("WALK", "TRANSIT"), departure_datetime = partida,
+    time_window = 60, percentiles = 50,
+    max_walk_time = 20, max_trip_duration = 90,
+    verbose = FALSE, progress = FALSE
+  )
+}
+ttm <- matriz(rede)
+
+# 4. isócronas a partir do centro
+centro <- data.frame(id = "centro", lon = cfg$centro$lon, lat = cfg$centro$lat)
+iso <- r5r::isochrone(
+  rede, origins = centro, mode = c("WALK", "TRANSIT"),
+  departure_datetime = partida, cutoffs = c(15, 30, 45, 60),
+  time_window = 60, max_walk_time = 20, verbose = FALSE, progress = FALSE
+)
+saveRDS(iso, file.path(saidas, "isocronas.rds"))
+
+# 5. itinerário detalhado, do bairro ao centro
+bairro <- data.frame(id = "bairro", lon = cfg$bairro$lon, lat = cfg$bairro$lat)
+det <- r5r::detailed_itineraries(
+  rede, origins = bairro, destinations = centro,
+  mode = c("WALK", "TRANSIT"), departure_datetime = partida,
+  max_walk_time = 20, shortest_path = FALSE, verbose = FALSE, progress = FALSE
+)
+saveRDS(det, file.path(saidas, "itinerario.rds"))
+
+# 8. carregamento da rede viária: dos 30 hexágonos mais populosos aos 10 com mais empregos
+origens  <- aop |> sf::st_drop_geometry() |> dplyr::slice_max(P001, n = 30, with_ties = FALSE) |>
+  dplyr::select(id_hex, P001)
+destinos <- aop |> sf::st_drop_geometry() |> dplyr::slice_max(T001, n = 10, with_ties = FALSE) |>
+  dplyr::select(id_hex, T001)
+
+pares_od <- expand.grid(origem = origens$id_hex, destino = destinos$id_hex,
+                        stringsAsFactors = FALSE) |>
+  dplyr::filter(origem != destino) |>
+  dplyr::left_join(origens, by = c("origem" = "id_hex")) |>
+  dplyr::left_join(destinos, by = c("destino" = "id_hex")) |>
+  dplyr::mutate(fluxo = P001 * T001 / sum(destinos$T001))
+
+rotas <- r5r::detailed_itineraries(
+  rede,
+  origins      = pontos[match(pares_od$origem, pontos$id), ],
+  destinations = pontos[match(pares_od$destino, pontos$id), ],
+  mode = "CAR", departure_datetime = partida, shortest_path = TRUE,
+  verbose = FALSE, progress = FALSE
+) |>
+  dplyr::left_join(dplyr::select(pares_od, origem, destino, fluxo),
+                   by = c("from_id" = "origem", "to_id" = "destino"))
+
+carga <- stplanr::overline(rotas, attrib = "fluxo")
+saveRDS(carga, file.path(saidas, "carga.rds"))
+
+r5r::stop_r5(rede)
+
+# 6. o cenário: sem o quarto das linhas com menos viagens
+gtfs <- gtfstools::read_gtfs(arquivo_gtfs)
+viagens <- gtfs$trips |>
+  dplyr::count(route_id, name = "viagens")
+cortadas <- viagens |>
+  dplyr::filter(viagens <= stats::quantile(viagens, 0.25)) |>
+  dplyr::pull(route_id)
+saveRDS(cortadas, file.path(saidas, "linhas_cortadas.rds"))
+
+gtfs_cenario <- gtfstools::filter_by_route_id(gtfs, route_id = cortadas, keep = FALSE)
+
+pasta_cenario <- file.path(saidas, "rede_cenario")
+unlink(pasta_cenario, recursive = TRUE)              # rede antiga ignoraria o GTFS novo
+dir.create(pasta_cenario)
+file.copy(list.files(entrada, pattern = "\\.pbf$", full.names = TRUE), pasta_cenario)
+gtfstools::write_gtfs(gtfs_cenario, file.path(pasta_cenario, "gtfs_cenario.zip"))
+
+# 7. recalcular e comparar
+rede_cenario <- r5r::build_network(data_path = pasta_cenario, verbose = FALSE)
+ttm_cenario  <- matriz(rede_cenario)
+r5r::stop_r5(rede_cenario)
+
+uso_solo <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::transmute(id = id_hex, populacao = P001, empregos = T001, renda = R002)
+
+acesso_cum <- function(m) {
+  accessibility::cumulative_cutoff(
+    travel_matrix = m, land_use_data = uso_solo,
+    opportunity = "empregos", travel_cost = "travel_time_p50", cutoff = 60
+  )
+}
+
+comparacao <- acesso_cum(ttm) |>
+  dplyr::rename(atual = empregos) |>
+  dplyr::left_join(dplyr::rename(acesso_cum(ttm_cenario), cenario = empregos), by = "id") |>
+  dplyr::left_join(uso_solo, by = "id") |>
+  dplyr::mutate(
+    perda_abs = cenario - atual,
+    perda_pct = dplyr::if_else(atual > 0, 100 * (cenario / atual - 1), NA_real_)
+  )
+saveRDS(comparacao, file.path(saidas, "comparacao.rds"))
+
+# o que o relatório cita sobre o cálculo
+saveRDS(list(rotas = n_rotas, rotas_cenario = nrow(gtfs_cenario$routes),
+             pares = nrow(ttm), pares_cenario = nrow(ttm_cenario),
+             minutos = as.numeric(difftime(Sys.time(), inicio, units = "mins")),
+             r5r = as.character(packageVersion("r5r"))),
+        file.path(saidas, "info.rds"))
+
+# a pasta de entrada volta a ter só os dados do pacote; a rede do cenário é apagada
+rm(rede, rede_cenario); invisible(gc())
+unlink(list.files(entrada, pattern = "^network|\\.mapdb|gtfs_errors|r5r-log", full.names = TRUE))
+unlink(pasta_cenario, recursive = TRUE)
+```
+
+Este relatório estima quantos empregos cada morador de `r cfg$nome` alcança em até 60 minutos
+de transporte público, hoje e num cenário sem o quarto das linhas de ônibus com menos viagens,
+e mostra quem perde mais com o corte.
+
+```{r}
+#| label: setup
+library(ggplot2)
+
+pasta <- saidas
+
+# resultados do cálculo (capítulo de roteamento multimodal)
+comparacao <- readRDS(file.path(pasta, "comparacao.rds"))
+cortadas   <- readRDS(file.path(pasta, "linhas_cortadas.rds"))
+info       <- readRDS(file.path(pasta, "info.rds"))
+
+# a grade hexagonal do aopdata, com os resultados de acessibilidade de cada hexágono
+acesso <- readRDS(arquivo_aop) |>
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex) |>
+  sf::st_transform(4326) |>
+  dplyr::left_join(comparacao, by = c("id_hex" = "id"))
+
+# mapa vazio, enquadrado nos dados
+mapa_base <- function(dados) {
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados, height = "525px")
+}
+
+# acrescenta ao mapa uma camada de hexágonos colorida por uma coluna, com legenda
+camada_hex <- function(mapa, dados, coluna, titulo, cores = c("#F7F6F2", "#E7A07A", "#7A1F0F"),
+                       faixa = range(dados[[coluna]], na.rm = TRUE), visivel = TRUE) {
+  valores <- seq(faixa[1], faixa[2], length.out = length(cores))
+
+  mapa |>
+    mapgl::add_fill_layer(
+      id = titulo, source = dados,
+      fill_color = mapgl::interpolate(column = coluna, values = valores, stops = cores),
+      fill_opacity = 0.75, tooltip = coluna,
+      visibility = if (visivel) "visible" else "none"
+    ) |>
+    mapgl::add_legend(titulo, values = round(faixa), colors = cores,
+                      layer_id = titulo, add = TRUE)
+}
+
+gtfs <- gtfstools::read_gtfs(arquivo_gtfs)
+validade <- if (!is.null(gtfs$calendar) && nrow(gtfs$calendar) > 0) {
+  range(c(gtfs$calendar$start_date, gtfs$calendar$end_date))
+} else {
+  range(gtfs$calendar_dates$date)
+}
+operadores <- paste(unique(gtfs$agency$agency_name), collapse = ", ")
+num <- function(x, d = 0) format(round(x, d), big.mark = ".", decimal.mark = ",", nsmall = d)
+```
+
+## Dados e método
+
+- **Rede viária:** OpenStreetMap, recorte da região de `r cfg$nome` do extrato regional da Geofabrik.
+- **Transporte público:** GTFS de `r operadores`, válido de
+  `r format(validade[1], "%d/%m/%Y")` a `r format(validade[2], "%d/%m/%Y")`;
+  `r num(nrow(gtfs$routes))` linhas.
+- **População, empregos e renda:** `aopdata` (Ipea), grade hexagonal H3, dados de 2019;
+  `r num(nrow(acesso))` hexágonos com população.
+- **Roteamento:** `r5r` `r info$r5r`, partida `r dia`
+  (`r format(partida, "%d/%m/%Y")`) às 7h, janela de 60 minutos, mediana dos tempos, até 20
+  minutos de caminhada em cada ponta.
+- **Indicador:** empregos acessíveis em até 60 minutos (medida cumulativa).
+
+## A rede de transporte público
+
+Cada ponto é uma parada; o tamanho é o número de viagens que passam por ela no GTFS.
+
+```{r}
+paradas <- gtfstools::convert_stops_to_sf(gtfs) |>
+  dplyr::left_join(dplyr::count(gtfs$stop_times, stop_id, name = "viagens"), by = "stop_id") |>
+  dplyr::filter(!is.na(viagens))
+
+mapa_base(paradas) |>
+  mapgl::add_circle_layer(
+    id = "paradas", source = paradas,
+    circle_radius = mapgl::interpolate(column = "viagens", values = c(0, 1000), stops = c(1.5, 10)),
+    circle_color = "#2F6B9A", circle_opacity = 0.7, tooltip = "viagens"
+  )
+```
+
+## Onde moram as pessoas e onde estão os empregos
+
+Troque a camada no seletor do canto superior direito.
+
+```{r}
+mapa_base(acesso) |>
+  camada_hex(acesso, "populacao", "População") |>
+  camada_hex(acesso, "empregos", "Empregos", cores = c("#F7F6F2", "#7FA7C9", "#173A57"),
+             visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+```
+
+## Até onde se chega a partir do Centro
+
+Áreas alcançáveis a partir `r da` `r cfg$centro$nome` em 15, 30, 45 e 60 minutos.
+
+```{r}
+isocronas <- readRDS(file.path(pasta, "isocronas.rds")) |>
+  dplyr::arrange(dplyr::desc(isochrone))          # as faixas menores por cima
+
+cores_iso <- c("#173A57", "#2F6B9A", "#A9C4DA", "#F6DCCB")
+
+mapa_base(isocronas) |>
+  mapgl::add_fill_layer(
+    id = "isocronas", source = isocronas,
+    fill_color = mapgl::match_expr("isochrone", values = c(15, 30, 45, 60), stops = cores_iso),
+    fill_opacity = 0.6, tooltip = "isochrone"
+  ) |>
+  mapgl::add_legend("Minutos a partir do Centro", values = c(15, 30, 45, 60),
+                    colors = cores_iso, type = "categorical")
+```
+
+## Um exemplo de viagem
+
+```{r}
+itinerario <- readRDS(file.path(pasta, "itinerario.rds")) |>
+  dplyr::filter(option == 1)
+```
+
+A opção mais rápida de `r cfg$bairro$nome` `r a_` `r cfg$centro$nome`, trecho a trecho:
+`r round(itinerario$total_duration[1])` minutos.
+
+```{r}
+modos <- unique(itinerario$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#2F6B9A", RAIL = "#C2542D", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapa_base(itinerario) |>
+  mapgl::add_line_layer(
+    id = "itinerario", source = itinerario,
+    line_color = mapgl::match_expr("mode", values = modos, stops = unname(cores_modo)),
+    line_width = 5, tooltip = "route"
+  ) |>
+  mapgl::add_legend("Modo", values = modos, colors = unname(cores_modo), type = "categorical")
+
+itinerario |>
+  sf::st_drop_geometry() |>
+  dplyr::select(segment, mode, route, segment_duration, wait, distance) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ".", decimal.mark = ","), col.names = c("Trecho", "Modo", "Linha", "Duração (min)",
+                                         "Espera (min)", "Distância (m)"))
+```
+
+## Acessibilidade a empregos hoje
+
+Quantos empregos se alcançam em até 60 minutos de transporte público, a partir de cada hexágono.
+
+```{r}
+cores_acesso <- c("#F6DCCB", "#2F6B9A", "#173A57")
+faixa_acesso <- range(c(acesso$atual, acesso$cenario), na.rm = TRUE)
+
+mapa_base(acesso) |>
+  camada_hex(acesso, "atual", "Empregos em até 60 min", cores = cores_acesso,
+             faixa = faixa_acesso)
+```
+
+## O cenário: sem as linhas de menor oferta
+
+O cenário remove `r length(cortadas)` linhas, o quarto delas com menos viagens no GTFS
+(de `r num(nrow(gtfs$routes))` para `r num(nrow(gtfs$routes) - length(cortadas))` linhas). As duas camadas usam a mesma
+escala de cor; alterne entre elas no seletor.
+
+```{r}
+mapa_base(acesso) |>
+  camada_hex(acesso, "atual", "Atual", cores = cores_acesso, faixa = faixa_acesso) |>
+  camada_hex(acesso, "cenario", "Cenário", cores = cores_acesso, faixa = faixa_acesso,
+             visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+```
+
+## Quem perde acesso
+
+Variação dos empregos acessíveis com o corte: vermelho onde se perde, azul onde se ganha.
+
+```{r}
+limite <- max(abs(acesso$perda_abs), na.rm = TRUE)
+cores_dif <- c("#C2542D", "#F7F6F2", "#2F6B9A")
+
+mapa_base(acesso) |>
+  mapgl::add_fill_layer(
+    id = "variacao", source = acesso,
+    fill_color = mapgl::interpolate(column = "perda_abs", values = c(-limite, 0, limite),
+                                    stops = cores_dif),
+    fill_opacity = 0.8, tooltip = "perda_abs"
+  ) |>
+  mapgl::add_legend("Variação de empregos acessíveis", values = round(c(-limite, 0, limite)),
+                    colors = cores_dif)
+```
+
+## Quem perde mais
+
+A variação média de cada quintil de renda, ponderada pela população (1 = os 20% mais pobres).
+
+```{r}
+por_renda <- comparacao |>
+  dplyr::filter(renda %in% 1:5) |>                # o aopdata tem alguns hexágonos com quintil 0
+  dplyr::summarise(
+    pessoas = sum(populacao),
+    variacao_pct = weighted.mean(perda_pct, populacao, na.rm = TRUE),
+    .by = renda
+  ) |>
+  dplyr::arrange(renda)
+
+knitr::kable(por_renda, digits = 1, format.args = list(big.mark = ".", decimal.mark = ","),
+             col.names = c("Quintil de renda", "Pessoas", "Variação média (%)"))
+
+ggplot(por_renda, aes(factor(renda), variacao_pct)) +
+  geom_col(fill = "#C2542D") +
+  labs(x = "Quintil de renda (1 = mais pobres)",
+       y = "Variação média dos empregos acessíveis (%)") +
+  theme_minimal()
+```
+
+## O carregamento da rede viária
+
+Os trechos mais usados nas viagens de carro entre as áreas mais populosas e as com mais
+empregos; a espessura é o fluxo.
+
+```{r}
+carga <- readRDS(file.path(pasta, "carga.rds")) |>
+  sf::st_transform(4326) |>
+  dplyr::arrange(fluxo)                          # os trechos mais carregados por cima
+
+mapa_base(carga) |>
+  mapgl::add_line_layer(
+    id = "carga", source = carga, line_color = "#1a5b8a", line_opacity = 0.8,
+    line_width = mapgl::interpolate(column = "fluxo", values = range(carga$fluxo),
+                                    stops = c(0.5, 8)),
+    tooltip = "fluxo"
+  )
+```
+
+## Limitações
+
+```{r}
+#| results: asis
+cat(paste0("- ", c(
+  cfg$limitacoes,
+  "População, empregos e renda são de 2019; a rede de transporte é a do GTFS acima.",
+  "O carregamento considera só o carro e um conjunto pequeno de pares origem–destino, com fluxos hipotéticos."
+)), sep = "\n")
+```
+
+## Anexo: ambiente de execução
+
+O cálculo com o `r5r` levou `r num(info$minutos, 1)` minutos
+(`r num(info$pares)` pares origem–destino na matriz atual e `r num(info$pares_cenario)` na do
+cenário).
+
+```{r}
+sessionInfo()
+```

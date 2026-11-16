@@ -1,38 +1,189 @@
 # Projeto final {#sec-m5-projeto}
 
-O projeto final é um **relatório de acessibilidade de Fortaleza em HTML**, feito em Quarto, que
-reúne o que foi visto no curso: dados públicos, operações espaciais, roteamento com o `r5r`,
-medidas de acessibilidade e mapas interativos com `mapgl`.
+O projeto final é um **relatório de acessibilidade em HTML**, feito em Quarto, para uma de cinco
+cidades: **Belo Horizonte, Fortaleza, Porto Alegre, Rio de Janeiro ou São Paulo**. Ele reúne o que
+foi visto no curso: dados públicos, operações espaciais, roteamento com o `r5r`, medidas de
+acessibilidade e mapas interativos com `mapgl`.
 
-O relatório é montado com os blocos desta página. Você copia cada bloco, na ordem, para um
-arquivo `relatorio.qmd`; empilhados, eles formam o caderno completo. Os dados vêm do capítulo
-de roteamento multimodal (@sec-m4-r5r), que salvou cada resultado na pasta `dados/projeto_final/`. Abaixo de cada
-bloco está o que ele produz, para você conferir o seu relatório enquanto monta.
+Você escolhe a cidade, roda o capítulo de roteamento multimodal (@sec-m4-r5r) com os dados dela e
+monta o relatório com os blocos desta página. O exemplo da página é Fortaleza, a mesma cidade do
+capítulo; para as outras quatro, muda só o que está indicado em cada etapa.
 
 Não há entrega nem avaliação: o projeto é seu. A ideia é que você termine o curso com um
 documento que possa, com pequenos ajustes, virar um produto da Subsecretaria, e com um roteiro
-que sirva para outra cidade com GTFS aberto.
+que sirva para qualquer cidade com GTFS aberto.
 
 ## A pergunta
 
-**Quanto o corte das linhas de ônibus de menor oferta reduz o acesso a empregos em Fortaleza, e
+**Quanto o corte das linhas de ônibus de menor oferta reduz o acesso a empregos na cidade, e
 quem perde mais?**
 
-## Antes de começar
+O cenário é o mesmo nas cinco cidades: retirar da rede o quarto das linhas com menos viagens no
+GTFS. Com a mesma pergunta e o mesmo método, os relatórios de cidades diferentes podem ser
+comparados entre si.
 
-1. **Rode o capítulo de roteamento multimodal inteiro** (@sec-m4-r5r, `scripts/m4-05-r5r.R`), com o Java 21 configurado. Leva
-   uns 15 minutos. No fim, a pasta `dados/projeto_final/` deve ter estes arquivos:
+## As etapas
+
+```{mermaid}
+flowchart LR
+  A["<b>1. Dados</b><br/>pacote da cidade:<br/>GTFS, OpenStreetMap<br/>e uso do solo (aopdata)"]
+  B["<b>2. Roteamento</b><br/>capítulo do r5r:<br/>isócronas, itinerário,<br/>matrizes e cenário"]
+  C["<b>3. Relatório</b><br/>blocos desta página:<br/>relatorio.qmd → HTML"]
+  A -- "data_raw/projeto_final/{cidade}/" --> B
+  B -- "dados/projeto_final/" --> C
+```
+
+| Etapa | O que fazer | Onde | Resultado |
+|:--|:--|:--|:--|
+| 1. Dados | baixar e extrair o pacote da cidade | abaixo | `data_raw/projeto_final/{cidade}/` |
+| 2. Roteamento | rodar `scripts/m4-05-r5r.R` com as linhas da cidade | @sec-m4-r5r | `dados/projeto_final/*.rds` |
+| 3. Relatório | empilhar os blocos num `relatorio.qmd` e renderizar | esta página | `relatorio.html` |
+
+## Etapa 1: os dados da cidade
+
+Cada cidade tem um pacote `.7z`, no [Release `dados-modulo5`](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5) do repositório do curso, com tudo o que o roteamento precisa, já conferido no `r5r`. Baixe só o da cidade que você escolher (os links estão na tabela abaixo):
+
+- **`{cidade}.osm.pbf`**: a rede viária do OpenStreetMap, recortada do extrato regional da
+  Geofabrik em torno da área urbana (os hexágonos com população, com 10 km de folga);
+- **`gtfs_{cidade}.zip`**: o GTFS do transporte público, num único arquivo;
+- **`aop_{cidade}.rds`**: a grade hexagonal do `aopdata` (Ipea), com população, empregos e renda
+  de cada hexágono;
+- **`LEIA-ME.txt`**: as fontes, a validade do GTFS, a data de partida recomendada e as
+  observações sobre os dados.
+
+| Cidade | Pacote | Hexágonos com população | GTFS | Atenção |
+|:--|:--|--:|:--|:--|
+| Belo Horizonte | [`belo_horizonte.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/belo_horizonte.7z) (44 MB) | 2.548 | SUMOB, convencional e suplementar, até 31/12/2026 | sem o metrô |
+| Fortaleza | [`fortaleza.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/fortaleza.7z) (62 MB) | 2.185 | Etufor, de 03/04 a 03/07/2026 | só tem viagens aos **sábados e domingos** |
+| Porto Alegre | [`porto_alegre.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/porto_alegre.7z) (40 MB) | 3.216 | EPTC, de 12/09 a 12/12/2025 | GTFS **vencido**: use a data de outubro de 2025; sem o Trensurb |
+| Rio de Janeiro | [`rio_de_janeiro.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/rio_de_janeiro.7z) (59 MB) | 6.392 | SMTR, ônibus e BRT, até 2027 | sem metrô, trens, VLT e barcas; viagens só das 5h às 11h |
+| São Paulo | [`sao_paulo.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/sao_paulo.7z) (175 MB) | 9.704 | SPTrans, com metrô e CPTM, até 2027 | a rede mais pesada; viagens só das 5h às 11h |
+
+Para preparar os dados:
+
+1. **Baixe o pacote** da sua cidade, clicando no nome do arquivo na tabela acima ou na lista
+   *Assets* da página do
+   [Release](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5).
+2. **Crie a pasta `data_raw/projeto_final/`** dentro da pasta do projeto do curso, a que tem o
+   arquivo `curso-r-transportes.Rproj`.
+3. **Mova o `.7z` para essa pasta e extraia-o ali.** No Windows, use o
+   [7-Zip](https://www.7-zip.org/): clique com o botão direito no arquivo, *7-Zip* → *Extrair
+   aqui*. O pacote já traz a pasta da cidade, e o resultado fica assim (com Porto Alegre):
+
+```
+data_raw/projeto_final/porto_alegre/
+├── aop_porto_alegre.rds
+├── gtfs_porto_alegre.zip
+├── LEIA-ME.txt
+└── porto_alegre.osm.pbf
+```
+
+Não descompacte o `gtfs_{cidade}.zip`: o `r5r` lê o GTFS compactado.
+
+Os pacotes foram montados pelo `R/preparar_projeto_final.R`, que baixa os mesmos dados das fontes
+originais (Geofabrik, Mobility Database e `aopdata`) e trata os GTFS: os horários por frequência de
+São Paulo e do Rio viraram horários fixos, os dois GTFS de Belo Horizonte foram unidos, e as
+viagens de duração zero, que o `r5r` trataria como teletransporte, foram removidas. O `LEIA-ME.txt`
+diz o que foi feito em cada cidade.
+
+## Etapa 2: o roteamento
+
+O capítulo de roteamento multimodal (@sec-m4-r5r) faz todo o cálculo e salva cada resultado em
+`dados/projeto_final/`. Ele é escrito para Fortaleza; para outra cidade, abra o
+`scripts/m4-05-r5r.R` e troque as linhas abaixo, que também estão no `LEIA-ME.txt` do pacote.
+
+::: {.panel-tabset}
+
+## Fortaleza
+
+```r
+arquivo   <- "data_raw/projeto_final/fortaleza/aop_fortaleza.rds"
+pasta     <- "data_raw/projeto_final/fortaleza"
+partida   <- as.POSIXct("2026-05-16 07:00:00", tz = "America/Fortaleza")   # um sábado
+centro    <- data.frame(id = "centro", lon = -38.5267, lat = -3.7275)     # Praça do Ferreira
+messejana <- data.frame(id = "bairro", lon = -38.4920, lat = -3.8300)     # Messejana
+```
+
+## Belo Horizonte
+
+```r
+arquivo   <- "data_raw/projeto_final/belo_horizonte/aop_belo_horizonte.rds"
+pasta     <- "data_raw/projeto_final/belo_horizonte"
+partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
+centro    <- data.frame(id = "centro", lon = -43.9378, lat = -19.9191)    # Praça Sete
+messejana <- data.frame(id = "bairro", lon = -43.9580, lat = -19.8160)    # Venda Nova
+```
+
+## Porto Alegre
+
+```r
+arquivo   <- "data_raw/projeto_final/porto_alegre/aop_porto_alegre.rds"
+pasta     <- "data_raw/projeto_final/porto_alegre"
+partida   <- as.POSIXct("2025-10-22 07:00:00", tz = "America/Sao_Paulo")   # dentro do GTFS
+centro    <- data.frame(id = "centro", lon = -51.2276, lat = -30.0277)    # Mercado Público
+messejana <- data.frame(id = "bairro", lon = -51.1530, lat = -30.1480)    # Restinga
+```
+
+## Rio de Janeiro
+
+```r
+arquivo   <- "data_raw/projeto_final/rio_de_janeiro/aop_rio_de_janeiro.rds"
+pasta     <- "data_raw/projeto_final/rio_de_janeiro"
+partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
+centro    <- data.frame(id = "centro", lon = -43.1910, lat = -22.9035)    # Central do Brasil
+messejana <- data.frame(id = "bairro", lon = -43.3384, lat = -22.8735)    # Madureira
+```
+
+## São Paulo
+
+```r
+arquivo   <- "data_raw/projeto_final/sao_paulo/aop_sao_paulo.rds"
+pasta     <- "data_raw/projeto_final/sao_paulo"
+partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
+centro    <- data.frame(id = "centro", lon = -46.6340, lat = -23.5504)    # Praça da Sé
+messejana <- data.frame(id = "bairro", lon = -46.4020, lat = -23.5830)    # Cidade Tiradentes
+```
+
+:::
+
+Além dessas linhas:
+
+- onde aparece `"gtfs_fortaleza.zip"`, use o GTFS da sua cidade (`"gtfs_porto_alegre.zip"`, por
+  exemplo);
+- onde aparece `dados/brutos/fortaleza_cenario`, use `dados/brutos/{cidade}_cenario`;
+- a memória da JVM: `-Xmx2G` basta para Fortaleza; para as outras cidades, reserve mais. Os
+  testes das cinco rodaram com 8 GB (`options(java.parameters = "-Xmx8G")`, antes de carregar o
+  `r5r`), e São Paulo, a maior rede, precisa disso.
+
+O objeto se chama `messejana` no capítulo; nas outras cidades ele guarda outro bairro, mas o nome
+pode ficar, para não ter de mudar o resto do código. O cálculo completo, com as duas matrizes,
+leva de 3 minutos (Fortaleza) a uns 20 minutos (São Paulo).
+
+No fim, a pasta `dados/projeto_final/` deve ter estes arquivos:
 
 ```{r}
 list.files("dados/projeto_final")
 ```
 
-2. **Crie o arquivo `relatorio.qmd` na raiz do projeto do curso**, a mesma pasta que contém
-   `dados/`. Os caminhos do relatório são relativos a ela.
+::: {.callout-warning}
+## Uma cidade de cada vez
 
-3. **Copie os blocos abaixo, na ordem**, colando cada um no fim do `relatorio.qmd`. Os blocos
-   de texto (os que começam com `##`) são um ponto de partida: reescreva com as suas palavras e
-   com os números que o seu resultado mostrar.
+A pasta `dados/projeto_final/` guarda os resultados de **uma** cidade: rodar o capítulo para
+outra sobrescreve os arquivos. Para fazer duas cidades, copie a pasta antes de rodar a segunda.
+:::
+
+## Etapa 3: o relatório
+
+1. **Crie o arquivo `relatorio.qmd` na raiz do projeto do curso**, a mesma pasta que contém
+   `dados/` e `data_raw/`. Os caminhos do relatório são relativos a ela.
+
+2. **Copie os blocos abaixo, na ordem**, colando cada um no fim do `relatorio.qmd`. Os blocos
+   de texto (os que começam com `##`) são um ponto de partida: reescreva com as suas palavras,
+   com o nome da sua cidade e com os números que o seu resultado mostrar.
+
+3. **Troque a cidade no bloco de preparação**: `cidade <- "fortaleza"` vira o nome da pasta da
+   sua cidade (`"belo_horizonte"`, `"porto_alegre"`, `"rio_de_janeiro"` ou `"sao_paulo"`). Os
+   outros blocos de código não mudam.
 
 4. **Renderize** com o botão *Render* do RStudio ou, no terminal, `quarto render relatorio.qmd`.
    Renderize a cada dois ou três blocos: um erro é muito mais fácil de achar logo depois de
@@ -42,7 +193,8 @@ list.files("dados/projeto_final")
 
 ### Cabeçalho
 
-O cabeçalho vai no topo do arquivo. `embed-resources: true` põe os mapas, os estilos e os dados
+O cabeçalho vai no topo do arquivo; troque Fortaleza pela sua cidade no título e no parágrafo.
+`embed-resources: true` põe os mapas, os estilos e os dados
 dentro do próprio HTML, e o relatório funciona aberto em qualquer computador, inclusive enviado
 por e-mail.
 
@@ -69,14 +221,20 @@ e mostra quem perde mais com o corte.
 
 ### Preparação
 
-O primeiro bloco de código carrega os dados e define as duas funções que todos os mapas usam.
-Ele não produz nada visível.
+O primeiro bloco de código escolhe a cidade, carrega os dados e define as duas funções que todos
+os mapas usam. É o único bloco de código em que você troca alguma coisa. Ele não produz nada
+visível.
 
 ```{r}
 #| echo: fenced
 #| label: setup
 library(sf)
 library(ggplot2)
+
+# a pasta do pacote da cidade: "belo_horizonte", "fortaleza", "porto_alegre",
+# "rio_de_janeiro" ou "sao_paulo"
+cidade <- "fortaleza"
+brutos <- file.path("data_raw/projeto_final", cidade)
 
 pasta <- "dados/projeto_final"
 
@@ -85,7 +243,7 @@ comparacao <- readRDS(file.path(pasta, "comparacao.rds"))
 cortadas   <- readRDS(file.path(pasta, "linhas_cortadas.rds"))
 
 # a grade hexagonal do aopdata, com os resultados de acessibilidade de cada hexágono
-acesso <- readRDS("dados/brutos/aop_fortaleza.rds") |>
+acesso <- readRDS(file.path(brutos, paste0("aop_", cidade, ".rds"))) |>
   dplyr::filter(P001 > 0) |>
   dplyr::select(id_hex) |>
   sf::st_transform(4326) |>
@@ -119,7 +277,7 @@ camada_hex <- function(mapa, dados, coluna, titulo, cores = c("#F7F6F2", "#E7A07
 ```markdown
 ## Dados e método
 
-- **Rede viária:** OpenStreetMap, recorte de Fortaleza (data da extração).
+- **Rede viária:** OpenStreetMap, recorte de Fortaleza do extrato da Geofabrik.
 - **Transporte público:** GTFS da Etufor, válido de abril a julho de 2026.
 - **População, empregos e renda:** `aopdata` (Ipea), grade hexagonal H3, dados de 2019.
 - **Roteamento:** `r5r`, partida num sábado às 7h, janela de 60 minutos, mediana dos tempos,
@@ -127,17 +285,20 @@ camada_hex <- function(mapa, dados, coluna, titulo, cores = c("#F7F6F2", "#E7A07
 - **Indicador:** empregos acessíveis em até 60 minutos (medida cumulativa).
 ```
 
+As fontes, a validade do GTFS e a data de partida da sua cidade estão no `LEIA-ME.txt` do pacote;
+o dia da semana também muda: Fortaleza é a única com sábado.
+
 ### A rede de transporte público
 
 ```markdown
 ## A rede de transporte público
 
-Cada ponto é uma parada; o tamanho é o número de viagens que passam por ela num fim de semana.
+Cada ponto é uma parada; o tamanho é o número de viagens que passam por ela no GTFS.
 ```
 
 ```{r}
 #| echo: fenced
-gtfs <- gtfstools::read_gtfs("dados/brutos/fortaleza/gtfs_fortaleza.zip")
+gtfs <- gtfstools::read_gtfs(file.path(brutos, paste0("gtfs_", cidade, ".zip")))
 
 paradas <- gtfstools::convert_stops_to_sf(gtfs) |>
   dplyr::left_join(dplyr::count(gtfs$stop_times, stop_id, name = "viagens"), by = "stop_id")
@@ -334,7 +495,8 @@ mapa_base(carga) |>
 ### Conclusões, limitações e anexo
 
 O fim do relatório é texto seu: o que o resultado mostra, e o que ele não pode mostrar. As
-limitações abaixo valem para os dados do curso; acrescente as que você encontrar.
+limitações abaixo são as de Fortaleza. Na sua cidade, troque a primeira pelas observações do
+`LEIA-ME.txt` (o que falta na rede, o período do GTFS) e acrescente as que você encontrar.
 
 ```markdown
 ## Conclusões
@@ -367,13 +529,29 @@ sessionInfo()
 | Interpretação | o texto diz o que o resultado significa, não o que o código faz |
 | Limitações | as fragilidades estão explicitadas, não escondidas |
 
+Com os dados dos pacotes e os parâmetros da etapa 2, o `r5r` dá sempre o mesmo resultado. Os
+números abaixo saíram do relatório rodado do zero nas cinco cidades (`r5r` 2.4.0); se os seus
+forem muito diferentes, confira a data de partida e o GTFS:
+
+| Cidade | Linhas cortadas | Variação no quintil 1 (mais pobres) | Variação no quintil 5 (mais ricos) | Viagem do bairro ao centro |
+|:--|--:|--:|--:|:--|
+| Belo Horizonte | 83 de 328 | −4,9% | −1,0% | Venda Nova → Praça Sete, 57 min |
+| Fortaleza | 70 de 325 | −7,1% | −3,0% | Messejana → Praça do Ferreira, 53 min |
+| Porto Alegre | 75 de 300 | −3,3% | −0,2% | Restinga → Mercado Público, 93 min |
+| Rio de Janeiro | 112 de 422 | −4,5% | −4,4% | Madureira → Central do Brasil, 72 min |
+| São Paulo | 297 de 1.184 | −6,2% | −3,7% | Cidade Tiradentes → Praça da Sé, 115 min |
+
 ## Para ir além
 
 - **Outro corte de tempo:** 30 minutos em vez de 60, no `cutoff` do capítulo de roteamento multimodal.
 - **Outra oportunidade:** escolas ou serviços de saúde, que o `aopdata` também traz.
 - **Outro cenário:** em vez de cortar linhas, aumentar a frequência das linhas troncais com
   `gtfstools`, e medir o ganho.
-- **Outra cidade:** o mesmo roteiro serve para qualquer cidade com GTFS aberto e `.pbf`.
+- **Comparar cidades:** rode duas cidades (copiando `dados/projeto_final/` entre uma e outra) e
+  ponha as tabelas por renda lado a lado. Onde o corte pesa mais sobre os mais pobres?
+- **Uma sexta cidade:** o `R/preparar_projeto_final.R` monta o pacote de qualquer cidade do
+  `aopdata` com GTFS na Mobility Database. Antes, confira se os horários do GTFS são completos:
+  Curitiba ficou de fora porque as viagens não têm horário ao longo do trajeto.
 
 O `mapgl` também tem `compare()`, que põe dois mapas lado a lado com uma cortina. Mas ele
 carrega um componente da internet que impede o HTML de sair num arquivo só, por isso o

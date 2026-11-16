@@ -4,7 +4,7 @@
 **Carga horária:** 6 horas (3h síncronas + 3h assíncronas)\
 **Datas:** 26/10 e 27/10 (síncronas); 23/10 (assíncrono)\
 **Pacotes:** Quarto, `rmarkdown`, `knitr`, `gt`, `r5r`, `gtfstools`, `accessibility`, `aopdata`, `stplanr`, `flownet`, `mapgl`\
-**Projeto final:** relatório de acessibilidade de Fortaleza em HTML, com mapas interativos em `mapgl`
+**Projeto final:** relatório de acessibilidade em HTML para uma de cinco cidades (Belo Horizonte, Fortaleza, Porto Alegre, Rio de Janeiro ou São Paulo), com mapas interativos em `mapgl`
 :::
 
 ## O que você vai conseguir fazer no fim do módulo
@@ -35,7 +35,7 @@ Os mapas que entram nos relatórios seguem o que foi visto em @sec-m2-mapas.
 
 | Bloco | Conteúdo | Capítulo |
 |:--|:--|:--|
-| 5 | Projeto final: relatório de acessibilidade de Fortaleza | @sec-m5-projeto |
+| 5 | Projeto final: relatório de acessibilidade de uma de cinco cidades | @sec-m5-projeto |
 | 6 | Boas práticas e próximos passos | @sec-m5-proximos-passos |
 
 ## Pacotes do módulo

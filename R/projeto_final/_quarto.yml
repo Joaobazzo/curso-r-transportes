@@ -1,0 +1,6 @@
+# projeto próprio: esta pasta não faz parte do livro do curso
+project:
+  type: default
+  output-dir: html
+  render:
+    - relatorio.qmd

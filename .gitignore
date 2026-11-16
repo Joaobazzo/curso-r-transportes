@@ -51,6 +51,13 @@ _freeze/a-diagnostico-rede/
 .Ruserdata
 *.Rproj.user
 
+# dados do projeto final por cidade (R/preparar_projeto_final.R; grandes demais para o git)
+/data_raw/
+# relatórios das cinco cidades (R/projeto_final/rodar_todas.R): resultados do r5r e HTMLs
+R/projeto_final/saidas/
+R/projeto_final/html/
+R/projeto_final/.quarto/
+
 # resultados gerados
 /resultados/
 /dados/brutos/
