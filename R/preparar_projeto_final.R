@@ -203,13 +203,19 @@ if (!nzchar(java_home)) stop("Defina JAVA_HOME apontando para o JDK 21 (o mesmo 
 # O código Java abaixo usa a API do osm-lib do R5 7.6 (r5r 2.5.0). Até o R5 7.5.1
 # (r5r 2.4.0) o banco era criado com new OSM(caminho); no 7.6 esse construtor
 # virou privado e o banco é criado com OSM.newWritableFile(arquivo).
-if (packageVersion("r5r") < "2.5.0")
-  stop("Este script precisa do r5r 2.5.0 ou mais novo (R5 7.6); a versão instalada é ",
-       packageVersion("r5r"), ".")
-# o jar da versão de R5 que o r5r instalado pede (baixa se não estiver no cache).
-# Não use list.files() no cache: ele pode ter jars de versões antigas.
-jar <- r5r::download_r5(quiet = TRUE)
-if (is.null(jar) || !file.exists(jar)) stop("não foi possível obter o jar do R5")
+# Primeiro procura o jar do R5 7.6 no cache do r5r, onde ele pode ter sido posto à
+# mão: o download_r5() consulta o GitHub antes de olhar o cache e falha em redes que
+# bloqueiam o download. O filtro pela versão evita pegar um jar antigo que tenha
+# ficado no cache (no 7.5.1, por exemplo, o código Java não compila).
+jar <- list.files(r5r:::r5r_env$cache_dir, pattern = "^r5-v7\\.6.*-all\\.jar$",
+                  recursive = TRUE, full.names = TRUE)
+jar <- tail(sort(jar), 1)
+if (length(jar) == 0) {
+  jar <- file.path(r5r:::r5r_env$cache_dir, "r5-v7.6-all.jar")
+  options(timeout = max(600, getOption("timeout")))
+  utils::download.file("https://github.com/conveyal/r5/releases/download/v7.6/r5-v7.6-all.jar",
+                       jar, mode = "wb")
+}
 message("Usando o jar ", jar)
 
 # o programa de recorte: lê o extrato uma vez e grava um .pbf por retângulo
