@@ -19,9 +19,9 @@
 # É um script de quem mantém o curso, não dos alunos: baixa uns 1,5 GB de
 # extratos do OSM e leva uns 30 minutos. Os alunos recebem as pastas prontas.
 #
-# Requisitos: Java 21 (o mesmo do r5r) e o jar do R5, que o r5r baixa. O
-# recorte do .pbf é feito em Java, com o osm-lib que vem dentro do jar do R5
-# (o R não grava .pbf). Rode a partir da raiz do projeto:
+# Requisitos: Java 21 (o mesmo do r5r), r5r 2.5.0 ou mais novo e o jar do R5
+# 7.6, que o r5r baixa. O recorte do .pbf é feito em Java, com o osm-lib que vem
+# dentro do jar do R5 (o R não grava .pbf). Rode a partir da raiz do projeto:
 #   Rscript R/preparar_projeto_final.R
 # ------------------------------------------------------------------
 
@@ -103,6 +103,7 @@ cidades <- list(
 # 1. Grade do aopdata e retângulo de recorte (os hexágonos com 10 km de folga)
 # ------------------------------------------------------------------
 for (slug in names(cidades)) {
+  message(slug)
   pasta <- file.path(destino, slug)
   dir.create(pasta, showWarnings = FALSE)
   arq <- file.path(pasta, paste0("aop_", slug, ".rds"))
@@ -199,9 +200,17 @@ for (slug in names(removidas)) {
 # ------------------------------------------------------------------
 java_home <- Sys.getenv("JAVA_HOME")
 if (!nzchar(java_home)) stop("Defina JAVA_HOME apontando para o JDK 21 (o mesmo do r5r).")
-jar <- list.files(file.path(r5r:::r5r_env$cache_dir), pattern = "\\.jar$", recursive = TRUE,
-                  full.names = TRUE)[1]
-if (is.na(jar)) jar <- r5r::download_r5(quiet = TRUE)
+# O código Java abaixo usa a API do osm-lib do R5 7.6 (r5r 2.5.0). Até o R5 7.5.1
+# (r5r 2.4.0) o banco era criado com new OSM(caminho); no 7.6 esse construtor
+# virou privado e o banco é criado com OSM.newWritableFile(arquivo).
+if (packageVersion("r5r") < "2.5.0")
+  stop("Este script precisa do r5r 2.5.0 ou mais novo (R5 7.6); a versão instalada é ",
+       packageVersion("r5r"), ".")
+# o jar da versão de R5 que o r5r instalado pede (baixa se não estiver no cache).
+# Não use list.files() no cache: ele pode ter jars de versões antigas.
+jar <- r5r::download_r5(quiet = TRUE)
+if (is.null(jar) || !file.exists(jar)) stop("não foi possível obter o jar do R5")
+message("Usando o jar ", jar)
 
 # o programa de recorte: lê o extrato uma vez e grava um .pbf por retângulo
 codigo_java <- '
@@ -211,7 +220,7 @@ import java.io.*;
 public class Recorte {
   // args: entrada.pbf banco [saida.pbf minLat minLon maxLat maxLon]...
   public static void main(String[] a) throws Exception {
-    OSM osm = new OSM(a[1]);
+    OSM osm = OSM.newWritableFile(new File(a[1]));  // recusa um banco que já exista
     osm.tileIndexing = true;
     osm.readFromFile(a[0]);
     System.out.println("lido: " + osm.ways.size() + " vias");
@@ -252,6 +261,8 @@ for (regiao in regioes) {
                                  regiao), extrato, mode = "wb")
   }
 
+  # restos de uma rodada interrompida: o newWritableFile() não aceita banco existente
+  unlink(list.files(fontes, pattern = paste0("^", regiao, "\\.db"), full.names = TRUE))
   argumentos <- c(shQuote(extrato), shQuote(file.path(fontes, paste0(regiao, ".db"))))
   for (k in seq_along(slugs)) {
     bb <- cidades[[slugs[k]]]$bbox
