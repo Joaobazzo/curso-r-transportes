@@ -1,0 +1,978 @@
+# Projeto final 2: São Paulo a pé, de bicicleta e de transporte público {#sec-m5-projeto-sp}
+
+Esta página refaz o estudo do projeto final (@sec-m5-projeto) para **São Paulo**, a maior rede do
+pacote, e vai além do transporte público em duas direções:
+
+1. **O relevo.** São Paulo não é plana: entre o vale do Tietê e o espigão da Avenida Paulista há
+   uns 100 metros de desnível. A pé e de bicicleta, a subida pesa. O `r5r` considera o relevo
+   quando a pasta da rede tem um modelo digital de elevação (`.tif`).
+2. **O estresse do ciclista.** Nem toda rua é pedalável para todo mundo. O `r5r` classifica cada
+   trecho num **nível de estresse de tráfego** (*Level of Traffic Stress*, LTS), de 1 (tolerável
+   para crianças) a 4 (só para quem encara o trânsito pesado), e restringe as rotas ao nível que
+   o ciclista aceita.
+
+As perguntas:
+
+- **Quanto o corte das linhas de ônibus de menor oferta reduz o acesso a empregos, e quem perde
+  mais?** (a mesma do projeto final)
+- **Quanto o relevo reduz o acesso a empregos a pé e de bicicleta?**
+- **Quanto do acesso por bicicleta depende de aceitar ruas estressantes?**
+
+::: {.callout-important}
+## Os blocos com o `r5r` não são executados na construção do site
+
+Como no capítulo de roteamento multimodal (@sec-m4-r5r), os blocos que montam a rede e calculam
+as matrizes exigem o JDK 21, uns 8 GB de memória para a JVM e os dados de São Paulo. Eles estão
+prontos para rodar na sua máquina; os mapas, tabelas e gráficos da página usam os resultados que
+esse mesmo código gerou. O cálculo completo leva uns 45 minutos.
+
+O `R/gerar_resultados_projeto_sp.R` roda, na ordem, todos os blocos de cálculo desta página
+(os de rótulo `calc-`), e é com ele que os resultados foram gerados.
+:::
+
+## Os dados
+
+São três fontes:
+
+- o pacote de São Paulo do projeto final (`sao_paulo.7z`, no
+  [Release `dados-modulo5`](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5)),
+  extraído em `data_raw/projeto_final/sao_paulo/`: a rede do OpenStreetMap, o GTFS da SPTrans e
+  a grade do `aopdata`;
+- o **modelo digital de elevação** dos *tiles* de terreno da AWS (derivados de SRTM e
+  Copernicus), baixado com o `elevatr` no bloco do relevo, como no capítulo de dados raster;
+- e nada mais: tudo o que a página calcula sai desses arquivos.
+
+Os resultados vão para `dados/projeto_final_sp/`, separados dos do projeto final de Fortaleza.
+
+```{r}
+#| label: setup
+library(sf)
+library(ggplot2)
+
+pasta_sp <- "data_raw/projeto_final/sao_paulo"     # rede, GTFS e aopdata do pacote
+saidas   <- "dados/projeto_final_sp"                # os resultados desta página
+dir.create(saidas, recursive = TRUE, showWarnings = FALSE)
+
+partida <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")   # uma quarta-feira
+
+# os hexágonos com população: população, empregos e quintil de renda
+aop <- readRDS(file.path(pasta_sp, "aop_sao_paulo.rds")) |>
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex, populacao = P001, empregos = T001, renda = R002)
+
+# um ponto de origem e destino no centro de cada hexágono
+xy <- sf::st_coordinates(sf::st_centroid(sf::st_geometry(aop)))
+pontos <- data.frame(id = aop$id_hex, lon = xy[, 1], lat = xy[, 2])
+
+# os lugares dos exemplos
+se     <- data.frame(id = "se", lon = -46.6340, lat = -23.5504)                # Praça da Sé
+bairro <- data.frame(id = "cidade_tiradentes", lon = -46.4020, lat = -23.5830) # Cidade Tiradentes
+batata <- data.frame(id = "largo_da_batata", lon = -46.6936, lat = -23.5668)   # Pinheiros
+
+nrow(pontos)
+```
+
+Os mapas da página são de hexágonos. Para o arquivo não ficar pesado, cada mapa carrega a grade
+uma vez só (`add_source()`) e desenha várias camadas sobre ela, alternáveis no seletor:
+
+```{r}
+#| label: funcoes-mapa
+num <- function(x, d = 0) format(round(x, d), big.mark = ".", decimal.mark = ",", nsmall = d)
+
+# mapa com a grade como fonte de dados única, só com as colunas pedidas em ...
+mapa_hex <- function(dados, ...) {
+  dados <- dplyr::select(dados, ...)
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados, height = "525px") |>
+    mapgl::add_source(id = "hex", data = dados)
+}
+
+# uma camada da grade, colorida por uma coluna
+camada <- function(mapa, coluna, titulo, faixa, cores = c("#F6DCCB", "#2F6B9A", "#173A57"),
+                   visivel = TRUE) {
+  mapa |>
+    mapgl::add_fill_layer(
+      id = titulo, source = "hex",
+      fill_color = mapgl::interpolate(column = coluna,
+                                      values = seq(faixa[1], faixa[2], length.out = length(cores)),
+                                      stops = cores),
+      fill_opacity = 0.75, tooltip = coluna,
+      visibility = if (visivel) "visible" else "none"
+    ) |>
+    mapgl::add_legend(titulo, values = round(faixa), colors = cores, layer_id = titulo, add = TRUE)
+}
+
+seletor <- function(mapa) {
+  mapgl::add_layers_control(mapa, position = "top-right", collapsible = FALSE, mode = "single")
+}
+```
+
+```{r}
+#| label: mapa-pop
+grade <- aop |>
+  sf::st_transform(4326)
+
+mapa_hex(grade, populacao, empregos) |>
+  camada("populacao", "População", range(grade$populacao),
+         cores = c("#F7F6F2", "#E7A07A", "#7A1F0F")) |>
+  camada("empregos", "Empregos", c(0, stats::quantile(grade$empregos, 0.99)),
+         cores = c("#F7F6F2", "#7FA7C9", "#173A57"), visivel = FALSE) |>
+  seletor()
+```
+
+São `r num(nrow(aop))` hexágonos com `r num(sum(aop$populacao))` moradores. Os empregos se
+concentram no centro expandido; a população, na periferia. A escala dos empregos para no
+percentil 99, para os poucos hexágonos com dezenas de milhares de vagas não apagarem o resto.
+
+## O relevo
+
+O modelo de elevação vem do `elevatr`, a mesma fonte do capítulo de dados raster: *tiles* de
+terreno da AWS, derivados de SRTM e Copernicus. A área de estudo são os hexágonos com população,
+com 10 km de folga, a mesma regra do recorte do OpenStreetMap; assim o relevo cobre toda a rede.
+No zoom 10, cada célula tem uns 70 metros.
+
+```{r}
+#| label: calc-relevo
+#| eval: false
+pasta_relevo <- "dados/brutos/sao_paulo_relevo"     # a rede com relevo: .pbf + .tif, sem GTFS
+dir.create(pasta_relevo, recursive = TRUE, showWarnings = FALSE)
+
+# a área de estudo: os hexágonos com população e 10 km de folga
+area <- aop |>
+  sf::st_union() |>
+  sf::st_buffer(dist = 10000) |>
+  sf::st_transform(4326) |>
+  sf::st_sf()
+
+dem_raw <- elevatr::get_elev_raster(locations = area, z = 10, clip = "bbox")
+relevo  <- terra::rast(dem_raw)
+names(relevo) <- "altitude"
+
+# o r5r exige o .tif em graus (EPSG:4326); o elevatr já devolve nesse sistema
+terra::crs(relevo) <- "EPSG:4326"
+terra::writeRaster(relevo, file.path(pasta_relevo, "relevo_sao_paulo.tif"), overwrite = TRUE)
+file.copy(file.path(pasta_sp, "sao_paulo.osm.pbf"), pasta_relevo, overwrite = TRUE)
+
+# altitude e declividade médias de cada hexágono
+declividade <- terra::terrain(relevo, v = "slope", unit = "degrees")
+
+hexagonos <- aop |>
+  sf::st_transform(4326) |>       # o mesmo sistema do raster
+  terra::vect()                   # o terra pede os polígonos no formato dele
+
+altitude_hex    <- terra::extract(relevo, hexagonos, fun = mean, na.rm = TRUE)
+declividade_hex <- terra::extract(declividade, hexagonos, fun = mean, na.rm = TRUE)
+
+relevo_hex <- data.frame(
+  id_hex      = aop$id_hex,       # o extract devolve as linhas na ordem dos polígonos
+  altitude    = altitude_hex$altitude,
+  declividade = declividade_hex$slope
+)
+saveRDS(relevo_hex, file.path(saidas, "relevo_hex.rds"))
+
+# uma versão leve do relevo para o mapa estático: uns 280 m, com o sombreamento
+leve <- terra::aggregate(relevo, fact = 4, fun = "mean")
+inclinacao  <- terra::terrain(leve, "slope", unit = "radians")
+orientacao  <- terra::terrain(leve, "aspect", unit = "radians")
+sombra <- terra::shade(inclinacao, orientacao, angle = 40, direction = 315)
+grade_relevo <- as.data.frame(c(leve, sombra), xy = TRUE, na.rm = TRUE)
+names(grade_relevo) <- c("x", "y", "altitude", "sombra")
+saveRDS(grade_relevo, file.path(saidas, "relevo_grade.rds"))
+```
+
+```{r}
+#| include: false
+relevo_hex   <- readRDS(file.path(saidas, "relevo_hex.rds"))
+grade_relevo <- readRDS(file.path(saidas, "relevo_grade.rds"))
+```
+
+```{r}
+#| label: fig-relevo
+#| fig-height: 6.5
+#| fig-cap: "Relevo da região de São Paulo (AWS Terrain Tiles via `elevatr`), com o sombreamento das encostas e o contorno dos hexágonos com população."
+contorno <- aop |>
+  sf::st_union() |>
+  sf::st_transform(4326)
+
+ggplot(grade_relevo, aes(x, y)) +
+  geom_raster(aes(fill = altitude)) +
+  geom_raster(aes(alpha = sombra), fill = "grey10") +
+  scale_alpha(range = c(0.35, 0), guide = "none") +
+  scale_fill_gradientn(colours = c("#2F6B9A", "#A9C4DA", "#F7F6F2", "#E7A07A", "#7A1F0F"),
+                       name = "Altitude (m)") +
+  geom_sf(data = contorno, inherit.aes = FALSE, fill = NA, colour = "grey20", linewidth = 0.3) +
+  coord_sf(xlim = range(xy[, 1]), ylim = range(xy[, 2])) +
+  theme_void()
+```
+
+```{r}
+#| label: mapa-relevo
+grade <- grade |>
+  dplyr::left_join(relevo_hex, by = "id_hex") |>
+  dplyr::mutate(altitude = round(altitude), declividade = round(declividade, 1))
+
+mapa_hex(grade, declividade, altitude) |>
+  camada("declividade", "Declividade média (graus)", c(0, stats::quantile(grade$declividade, 0.99, na.rm = TRUE)),
+         cores = c("#F7F6F2", "#E7A07A", "#7A1F0F")) |>
+  camada("altitude", "Altitude média (m)", range(grade$altitude, na.rm = TRUE),
+         cores = c("#2F6B9A", "#F7F6F2", "#7A1F0F"), visivel = FALSE) |>
+  seletor()
+```
+
+Na média ponderada pela população, cada morador vive num hexágono com declividade de
+`r num(weighted.mean(grade$declividade, grade$populacao, na.rm = TRUE), 1)` graus.
+As encostas mais íngremes estão nas bordas: a Cantareira, ao norte, e os morros do extremo sul e
+do extremo leste, onde fica boa parte da periferia.
+
+## Transporte público: o estudo do projeto final
+
+Este é o capítulo de roteamento multimodal com os dados de São Paulo, como na etapa 2 do
+projeto final, num só bloco: a rede, a matriz de tempos, a isócrona da Sé, o itinerário de
+Cidade Tiradentes à Sé, o carregamento viário, o cenário sem o quarto das linhas com menos
+viagens e a comparação.
+
+```{r}
+#| label: calc-transporte-publico
+#| eval: false
+options(java.parameters = "-Xmx8G")     # antes do primeiro uso do r5r
+
+rede <- r5r::build_network(data_path = pasta_sp)   # sem .tif na pasta: sem relevo
+
+matriz_tp <- function(r) {
+  r5r::travel_time_matrix(
+    r, origins = pontos, destinations = pontos,
+    mode = c("WALK", "TRANSIT"), departure_datetime = partida,
+    time_window = 60, percentiles = 50, max_walk_time = 20, max_trip_duration = 90
+  )
+}
+ttm <- matriz_tp(rede)
+
+iso <- r5r::isochrone(rede, origins = se, mode = c("WALK", "TRANSIT"),
+                      departure_datetime = partida, cutoffs = c(15, 30, 45, 60),
+                      time_window = 60, max_walk_time = 20)
+saveRDS(iso, file.path(saidas, "isocronas_tp.rds"))
+
+itinerario <- r5r::detailed_itineraries(rede, origins = bairro, destinations = se,
+                                        mode = c("WALK", "TRANSIT"), departure_datetime = partida,
+                                        max_walk_time = 20, shortest_path = FALSE)
+saveRDS(itinerario, file.path(saidas, "itinerario_tp.rds"))
+
+# carregamento: dos 30 hexágonos mais populosos aos 10 com mais empregos, de carro
+origens <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::slice_max(populacao, n = 30, with_ties = FALSE) |>
+  dplyr::select(origem = id_hex, populacao)
+
+destinos <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::slice_max(empregos, n = 10, with_ties = FALSE) |>
+  dplyr::select(destino = id_hex, empregos)
+
+# todos os pares origem–destino, com um fluxo hipotético: a população da origem repartida
+# entre os destinos, na proporção dos empregos de cada um
+pares_od <- expand.grid(origem = origens$origem, destino = destinos$destino,
+                        stringsAsFactors = FALSE) |>
+  dplyr::filter(origem != destino) |>
+  dplyr::left_join(origens, by = "origem") |>
+  dplyr::left_join(destinos, by = "destino") |>
+  dplyr::mutate(fluxo = populacao * empregos / sum(destinos$empregos))
+
+rotas_carro <- r5r::detailed_itineraries(
+  rede,
+  origins      = pontos[match(pares_od$origem, pontos$id), ],
+  destinations = pontos[match(pares_od$destino, pontos$id), ],
+  mode = "CAR", departure_datetime = partida, shortest_path = TRUE
+)
+
+# cada rota recebe o fluxo do seu par; o overline soma os fluxos trecho a trecho
+fluxos <- dplyr::select(pares_od, origem, destino, fluxo)
+rotas_carro <- rotas_carro |>
+  dplyr::left_join(fluxos, by = c("from_id" = "origem", "to_id" = "destino"))
+
+carga <- stplanr::overline(rotas_carro, attrib = "fluxo")
+saveRDS(carga, file.path(saidas, "carga.rds"))
+
+# o cenário: sem o quarto das linhas com menos viagens
+gtfs <- gtfstools::read_gtfs(file.path(pasta_sp, "gtfs_sao_paulo.zip"))
+viagens  <- dplyr::count(gtfs$trips, route_id, name = "viagens")
+cortadas <- viagens$route_id[viagens$viagens <= stats::quantile(viagens$viagens, 0.25)]
+saveRDS(cortadas, file.path(saidas, "linhas_cortadas.rds"))
+
+gtfs_cenario <- gtfstools::filter_by_route_id(gtfs, route_id = cortadas, keep = FALSE)
+
+pasta_cenario <- "dados/brutos/sao_paulo_cenario"
+dir.create(pasta_cenario, showWarnings = FALSE)
+file.copy(file.path(pasta_sp, "sao_paulo.osm.pbf"), pasta_cenario, overwrite = TRUE)
+gtfstools::write_gtfs(gtfs_cenario, file.path(pasta_cenario, "gtfs_cenario.zip"))
+unlink(file.path(pasta_cenario, "network.dat"))     # força remontar com o GTFS novo
+
+r5r::stop_r5(rede)
+rede_cenario <- r5r::build_network(data_path = pasta_cenario)
+ttm_cenario  <- matriz_tp(rede_cenario)
+r5r::stop_r5(rede_cenario)
+
+uso_solo <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::rename(id = id_hex)
+
+acesso_cum <- function(m, minutos) {
+  accessibility::cumulative_cutoff(travel_matrix = m, land_use_data = uso_solo,
+                                   opportunity = "empregos", travel_cost = "travel_time_p50",
+                                   cutoff = minutos)
+}
+
+# empregos em até 60 minutos, hoje e no cenário, cada um numa coluna
+acesso_atual   <- acesso_cum(ttm, 60) |> dplyr::rename(atual = empregos)
+acesso_cenario <- acesso_cum(ttm_cenario, 60) |> dplyr::rename(cenario = empregos)
+moradores      <- dplyr::select(uso_solo, id, populacao, renda)
+
+comparacao_tp <- acesso_atual |>
+  dplyr::left_join(acesso_cenario, by = "id") |>
+  dplyr::left_join(moradores, by = "id") |>
+  dplyr::mutate(perda_abs = cenario - atual,
+                perda_pct = dplyr::if_else(atual > 0, 100 * (cenario / atual - 1), NA_real_))
+saveRDS(comparacao_tp, file.path(saidas, "comparacao_tp.rds"))
+```
+
+```{r}
+#| include: false
+iso_tp        <- readRDS(file.path(saidas, "isocronas_tp.rds"))
+itinerario_tp <- readRDS(file.path(saidas, "itinerario_tp.rds"))
+carga         <- readRDS(file.path(saidas, "carga.rds"))
+cortadas      <- readRDS(file.path(saidas, "linhas_cortadas.rds"))
+comparacao_tp <- readRDS(file.path(saidas, "comparacao_tp.rds"))
+```
+
+### Até onde se chega a partir da Sé, e como se chega de Cidade Tiradentes
+
+```{r}
+#| label: mapa-isocrona-tp
+iso_tp <- dplyr::arrange(iso_tp, dplyr::desc(isochrone))      # as faixas menores por cima
+cores_iso <- c("#173A57", "#2F6B9A", "#A9C4DA", "#F6DCCB")
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = iso_tp, height = "525px") |>
+  mapgl::add_fill_layer(id = "isocronas", source = iso_tp,
+                        fill_color = mapgl::match_expr("isochrone", values = c(15, 30, 45, 60),
+                                                       stops = cores_iso),
+                        fill_opacity = 0.6, tooltip = "isochrone") |>
+  mapgl::add_legend("Minutos a partir da Sé", values = c(15, 30, 45, 60), colors = cores_iso,
+                    type = "categorical")
+```
+
+```{r}
+#| label: mapa-itinerario-tp
+opcao <- dplyr::filter(itinerario_tp, option == 1)
+modos <- unique(opcao$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#2F6B9A", RAIL = "#C2542D", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = opcao, height = "525px") |>
+  mapgl::add_line_layer(id = "itinerario", source = opcao,
+                        line_color = mapgl::match_expr("mode", values = modos,
+                                                       stops = unname(cores_modo)),
+                        line_width = 5, tooltip = "route") |>
+  mapgl::add_legend("Modo", values = modos, colors = unname(cores_modo), type = "categorical")
+```
+
+A viagem mais rápida de Cidade Tiradentes à Sé leva `r round(opcao$total_duration[1])` minutos,
+combinando `r paste(setdiff(unique(opcao$route), ""), collapse = ", ")`. Em São Paulo, ao
+contrário das outras cidades do pacote, o GTFS da SPTrans traz o metrô e os trens da CPTM, e é
+por eles que passam as viagens longas da periferia leste.
+
+### O cenário: quem perde acesso com o corte
+
+```{r}
+#| label: mapa-cenario-tp
+resultado_tp <- dplyr::select(comparacao_tp, id_hex = id, atual, cenario, perda_abs)
+grade <- dplyr::left_join(grade, resultado_tp, by = "id_hex")
+
+faixa_tp <- c(0, max(grade$atual, na.rm = TRUE))
+limite   <- max(abs(grade$perda_abs), na.rm = TRUE)
+
+mapa_hex(grade, atual, cenario, perda_abs) |>
+  camada("atual", "Empregos em 60 min: hoje", faixa_tp) |>
+  camada("cenario", "Empregos em 60 min: cenário", faixa_tp, visivel = FALSE) |>
+  camada("perda_abs", "Variação com o corte", c(-limite, limite),
+         cores = c("#C2542D", "#F7F6F2", "#2F6B9A"), visivel = FALSE) |>
+  seletor()
+```
+
+O cenário remove `r length(cortadas)` linhas. A variação média de cada quintil de renda,
+ponderada pela população (1 = os 20% mais pobres):
+
+```{r}
+#| label: tab-renda-tp
+por_renda_tp <- comparacao_tp |>
+  dplyr::filter(renda %in% 1:5) |>
+  dplyr::summarise(pessoas = sum(populacao),
+                   atual = weighted.mean(as.numeric(atual), populacao, na.rm = TRUE),   # inteiros estourariam
+                   variacao_pct = weighted.mean(perda_pct, populacao, na.rm = TRUE),
+                   .by = renda) |>
+  dplyr::arrange(renda)
+
+knitr::kable(por_renda_tp, digits = 1, format.args = list(big.mark = ".", decimal.mark = ","),
+             col.names = c("Quintil de renda", "Pessoas", "Empregos em 60 min (média)",
+                           "Variação com o corte (%)"))
+```
+
+Os mais pobres alcançam bem menos empregos hoje e perdem uma fatia maior com o corte: as linhas
+de menor oferta são, em boa parte, as que alimentam os bairros distantes.
+
+### O carregamento da rede viária
+
+```{r}
+#| label: mapa-carga
+carga <- carga |>
+  sf::st_transform(4326) |>
+  dplyr::arrange(fluxo)
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = carga, height = "525px") |>
+  mapgl::add_line_layer(id = "carga", source = carga, line_color = "#1a5b8a", line_opacity = 0.8,
+                        line_width = mapgl::interpolate(column = "fluxo",
+                                                        values = range(carga$fluxo),
+                                                        stops = c(0.5, 8)),
+                        tooltip = "fluxo")
+```
+
+## A pé e de bicicleta, com e sem relevo
+
+Para medir o efeito do relevo, a mesma matriz é calculada em duas redes:
+
+- a **plana**, a do pacote, sem `.tif` na pasta;
+- a **com relevo**, uma pasta com o mesmo `.pbf` e o `.tif` do bloco anterior. Com o `.tif` ali,
+  o `build_network()` usa a função de Tobler (`elevation = "TOBLER"`, o padrão), que reduz a
+  velocidade nas subidas e aumenta um pouco nas descidas suaves, a pé e de bicicleta.
+
+O indicador é o número de empregos alcançáveis em até **30 minutos**, a 3,6 km/h a pé e a
+12 km/h de bicicleta. Na bicicleta, vale o nível de estresse padrão do `r5r`, `max_lts = 2`: o
+ciclista comum, que só pedala em ciclovias, ciclofaixas e ruas calmas (a seção seguinte varia
+esse nível).
+
+O bloco tem quatro passos: duas funções que se repetem, as duas medidas na rede plana, as duas na
+rede com relevo e, no fim, as quatro medidas numa tabela só.
+
+```{r}
+#| label: calc-ativo
+#| eval: false
+pasta_relevo <- "dados/brutos/sao_paulo_relevo"
+
+# ---- 1. As duas funções do bloco -----------------------------------
+
+# matriz de tempos de viagem a pé ou de bicicleta, de todos os hexágonos para todos.
+# max_trip_duration = 30: viagens mais longas nem entram na matriz.
+# lts: o nível de estresse máximo que o ciclista aceita (o r5r ignora a pé)
+matriz_ativa <- function(rede, modo, lts = 2) {
+  r5r::travel_time_matrix(
+    rede, origins = pontos, destinations = pontos, mode = modo,
+    departure_datetime = partida, max_trip_duration = 30,
+    walk_speed = 3.6, bike_speed = 12, max_lts = lts
+  )
+}
+
+# empregos alcançáveis em até 30 minutos a partir de cada hexágono.
+# Devolve uma tabela com duas colunas: id (o hexágono) e empregos
+acesso_30 <- function(matriz) {
+  accessibility::cumulative_cutoff(travel_matrix = matriz, land_use_data = uso_solo,
+                                   opportunity = "empregos", travel_cost = "travel_time_p50",
+                                   cutoff = 30)
+}
+
+# ---- 2. Rede plana (a do pacote, já montada no bloco do transporte público) ----
+rede_plana <- r5r::build_network(data_path = pasta_sp)
+
+# cada medida ganha o nome da sua combinação de modo e rede, para não se misturarem adiante
+a_pe_plano <- matriz_ativa(rede_plana, "WALK") |>
+  acesso_30() |>
+  dplyr::rename(a_pe_plano = empregos)
+
+bici_plano <- matriz_ativa(rede_plana, "BICYCLE") |>
+  acesso_30() |>
+  dplyr::rename(bici_plano = empregos)
+
+# a rota de bicicleta do Largo da Batata à Sé, para a subseção seguinte
+rota_plana <- r5r::detailed_itineraries(rede_plana, origins = batata, destinations = se,
+                                        mode = "BICYCLE", bike_speed = 12, max_lts = 2,
+                                        departure_datetime = partida)
+r5r::stop_r5(rede_plana)
+
+# ---- 3. Rede com relevo: as mesmas medidas -------------------------
+# overwrite = TRUE remonta a rede se o .tif mudar
+rede_relevo <- r5r::build_network(data_path = pasta_relevo, elevation = "TOBLER",
+                                  overwrite = TRUE)
+
+a_pe_relevo <- matriz_ativa(rede_relevo, "WALK") |>
+  acesso_30() |>
+  dplyr::rename(a_pe_relevo = empregos)
+
+bici_relevo <- matriz_ativa(rede_relevo, "BICYCLE") |>
+  acesso_30() |>
+  dplyr::rename(bici_relevo = empregos)
+
+rota_relevo <- r5r::detailed_itineraries(rede_relevo, origins = batata, destinations = se,
+                                         mode = "BICYCLE", bike_speed = 12, max_lts = 2,
+                                         departure_datetime = partida)
+# a rede_relevo continua aberta: os blocos seguintes a usam
+
+# ---- 4. As quatro medidas numa tabela só, uma linha por hexágono ----
+# full_join: se um hexágono faltar numa das tabelas, ele continua, com NA na coluna dela
+ativo <- a_pe_plano |>
+  dplyr::full_join(bici_plano,  by = "id") |>
+  dplyr::full_join(a_pe_relevo, by = "id") |>
+  dplyr::full_join(bici_relevo, by = "id")
+
+saveRDS(ativo, file.path(saidas, "acesso_ativo.rds"))
+```
+
+```{r}
+#| include: false
+ativo <- readRDS(file.path(saidas, "acesso_ativo.rds"))
+```
+
+A tabela `ativo` tem uma linha por hexágono e uma coluna para cada medida. Para tirar a média da
+cidade, cada hexágono precisa pesar pelo número de moradores: um hexágono com 5 mil pessoas conta
+mais que um com 50. Por isso, o primeiro passo é juntar a população:
+
+```{r}
+#| label: tab-ativo
+# 1. a população e a renda de cada hexágono, sem a geometria
+moradores <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::select(id = id_hex, populacao, renda)
+
+# 2. junta às medidas de acesso. Um hexágono sem resultado (NA) não alcança
+#    nenhum emprego em 30 minutos: vira 0
+ativo_pop <- ativo |>
+  dplyr::left_join(moradores, by = "id") |>
+  dplyr::mutate(
+    a_pe_plano  = dplyr::coalesce(a_pe_plano, 0),
+    bici_plano  = dplyr::coalesce(bici_plano, 0),
+    a_pe_relevo = dplyr::coalesce(a_pe_relevo, 0),
+    bici_relevo = dplyr::coalesce(bici_relevo, 0)
+  )
+
+# 3. a média de cada medida, ponderada pela população
+medias <- ativo_pop |>
+  dplyr::summarise(
+    a_pe_plano  = weighted.mean(a_pe_plano, populacao),
+    bici_plano  = weighted.mean(bici_plano, populacao),
+    a_pe_relevo = weighted.mean(a_pe_relevo, populacao),
+    bici_relevo = weighted.mean(bici_relevo, populacao)
+  )
+
+# 4. a tabela para o leitor: uma linha por modo, sem e com relevo
+resumo_ativo <- data.frame(
+  modo   = c("A pé", "Bicicleta (LTS 2)"),
+  plano  = c(medias$a_pe_plano, medias$bici_plano),
+  relevo = c(medias$a_pe_relevo, medias$bici_relevo)
+) |>
+  dplyr::mutate(variacao = 100 * (relevo / plano - 1))
+
+knitr::kable(resumo_ativo, digits = 1, format.args = list(big.mark = ".", decimal.mark = ","),
+             col.names = c("Modo", "Sem relevo", "Com relevo", "Variação (%)"),
+             caption = "Empregos alcançáveis em até 30 minutos, média ponderada pela população")
+```
+
+O relevo reduz o acesso a pé em `r num(abs(resumo_ativo$variacao[1]), 1)`% e de bicicleta em
+`r num(abs(resumo_ativo$variacao[2]), 1)`%, na média da população. O efeito médio esconde a
+geografia: onde ele pesa é nas encostas. O mapa mostra a variação de cada hexágono na bicicleta:
+
+```{r}
+#| label: mapa-ativo
+# as medidas que vão para o mapa, com o nome da coluna da grade (id_hex)
+medidas_mapa <- dplyr::select(ativo_pop, id_hex = id, bici_plano, bici_relevo, a_pe_relevo)
+
+# a variação de cada hexágono na bicicleta, em %. Sem acesso na rede plana, a conta não existe
+grade <- grade |>
+  dplyr::left_join(medidas_mapa, by = "id_hex") |>
+  dplyr::mutate(var_relevo = dplyr::if_else(bici_plano > 0,
+                                            round(100 * (bici_relevo / bici_plano - 1), 1),
+                                            NA_real_))
+
+# a escala do acesso para no percentil 99, como no mapa dos empregos
+faixa_bici <- c(0, stats::quantile(grade$bici_plano, 0.99, na.rm = TRUE))
+faixa_a_pe <- c(0, stats::quantile(grade$a_pe_relevo, 0.99, na.rm = TRUE))
+
+mapa_hex(grade, var_relevo, bici_plano, bici_relevo, a_pe_relevo) |>
+  camada("var_relevo", "Efeito do relevo na bicicleta (%)", c(-50, 50),
+         cores = c("#C2542D", "#F7F6F2", "#2F6B9A")) |>
+  camada("bici_plano", "Bicicleta, sem relevo", faixa_bici, visivel = FALSE) |>
+  camada("bici_relevo", "Bicicleta, com relevo", faixa_bici, visivel = FALSE) |>
+  camada("a_pe_relevo", "A pé, com relevo", faixa_a_pe, visivel = FALSE) |>
+  seletor()
+```
+
+A escala da variação vai de −50% a +50%; o efeito é quase todo negativo. Hexágonos azulados são
+os que ficam no alto e descem para os empregos: a descida suave acelera a bicicleta.
+
+### Uma rota sobre o espigão
+
+A média da cidade diz quanto o relevo pesa, mas não mostra **como**. Para isso, vale olhar uma
+viagem só. Do Largo da Batata, em Pinheiros, à Praça da Sé, a bicicleta precisa subir o espigão
+da Paulista e descer para o vale do Anhangabaú. Com o relevo, o `r5r` estima um tempo maior e
+pode escolher outro caminho, que suba menos.
+
+As duas rotas já foram calculadas no bloco anterior (`rota_plana` e `rota_relevo`). Para
+compará-las, falta o **perfil de altitude** de cada uma: a altitude ao longo do caminho, lida do
+mesmo `.tif` usado pela rede. A função abaixo faz isso em cinco passos:
+
+```{r}
+#| label: calc-perfil
+#| eval: false
+perfil_rota <- function(rota) {
+  # 1. os trechos da rota, na ordem da viagem
+  rota <- rota[order(rota$segment), ]
+
+  # 2. as coordenadas de todos os vértices, numa matriz (colunas X e Y),
+  #    e com elas uma linha só, do começo ao fim da viagem
+  vertices <- sf::st_coordinates(rota)[, c("X", "Y")]
+  linha <- sf::st_sfc(sf::st_linestring(vertices), crs = 4326)
+
+  # 3. um ponto a cada 25 m ao longo da linha; para medir em metros, a linha vai
+  #    para SIRGAS 2000 / UTM 23S
+  linha_m  <- sf::st_transform(linha, 31983)
+  pontos_m <- sf::st_line_sample(linha_m, density = 1 / 25) |>
+    sf::st_cast("POINT")
+
+  # 4. a distância percorrida até cada ponto: a soma dos passos entre pontos vizinhos
+  passos <- sf::st_distance(pontos_m[-length(pontos_m)], pontos_m[-1], by_element = TRUE)
+  distancia_km <- c(0, cumsum(as.numeric(passos))) / 1000
+
+  # 5. a altitude de cada ponto, lida no .tif (que está em graus)
+  mde <- terra::rast(file.path(pasta_relevo, "relevo_sao_paulo.tif"))
+  pontos_graus <- terra::vect(sf::st_transform(pontos_m, 4326))
+  altitude <- terra::extract(mde, pontos_graus)$altitude
+
+  data.frame(distancia = distancia_km, altitude = altitude)
+}
+```
+
+Com a função pronta, falta aplicá-la às rotas. Uma terceira rota entra na comparação: a do
+ciclista que aceita **qualquer rua**, inclusive as avenidas de trânsito pesado (`max_lts = 4`).
+Ela antecipa a seção seguinte, sobre o estresse de tráfego.
+
+```{r}
+#| label: calc-rotas
+#| eval: false
+# a terceira rota: na rede com relevo, sem restrição de estresse
+rota_lts4 <- r5r::detailed_itineraries(rede_relevo, origins = batata, destinations = se,
+                                       mode = "BICYCLE", bike_speed = 12, max_lts = 4,
+                                       departure_datetime = partida)
+
+# as três rotas numa tabela só, com uma coluna que diz qual é qual
+rotas_bici <- rbind(
+  dplyr::mutate(rota_plana,  rede = "Sem relevo, LTS 2"),
+  dplyr::mutate(rota_relevo, rede = "Com relevo, LTS 2"),
+  dplyr::mutate(rota_lts4,   rede = "Com relevo, LTS 4")
+)
+saveRDS(rotas_bici, file.path(saidas, "rotas_bici.rds"))
+
+# o perfil de cada rota, um de cada vez, e depois os três empilhados
+perfis <- list()
+for (nome in unique(rotas_bici$rede)) {
+  rota   <- rotas_bici[rotas_bici$rede == nome, ]
+  perfil <- perfil_rota(rota)
+  perfis[[nome]] <- data.frame(rede = nome, perfil)
+}
+perfis <- dplyr::bind_rows(perfis)
+saveRDS(perfis, file.path(saidas, "perfis_bici.rds"))
+```
+
+```{r}
+#| include: false
+rotas_bici <- readRDS(file.path(saidas, "rotas_bici.rds"))
+perfis     <- readRDS(file.path(saidas, "perfis_bici.rds"))
+```
+
+Primeiro, o caminho. No mapa, as duas rotas do ciclista comum (LTS 2), sem e com relevo:
+
+```{r}
+#| label: mapa-rotas-relevo
+duas <- rotas_bici |>
+  dplyr::filter(rede != "Com relevo, LTS 4") |>
+  sf::st_transform(4326)
+cores_rota <- c("Sem relevo, LTS 2" = "#7A7A7A", "Com relevo, LTS 2" = "#C2542D")
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = duas, height = "525px") |>
+  mapgl::add_line_layer(id = "rotas", source = duas,
+                        line_color = mapgl::match_expr("rede", values = names(cores_rota),
+                                                       stops = unname(cores_rota)),
+                        line_width = 5, line_opacity = 0.8, tooltip = "total_duration") |>
+  mapgl::add_legend("Rota de bicicleta", values = names(cores_rota),
+                    colors = unname(cores_rota), type = "categorical")
+```
+
+Depois, o relevo ao longo de cada caminho. O perfil mostra onde estão as subidas:
+
+```{r}
+#| label: fig-perfil
+#| fig-height: 3.5
+#| fig-cap: "Perfil de altitude das rotas de bicicleta do Largo da Batata à Praça da Sé."
+ggplot(perfis, aes(distancia, altitude, colour = rede)) +
+  geom_line(linewidth = 0.9) +
+  scale_colour_manual(values = c(cores_rota, "Com relevo, LTS 4" = "#2F6B9A"), name = NULL) +
+  labs(x = "Distância percorrida (km)", y = "Altitude (m)") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+Por fim, os números de cada rota. O tempo e a distância vêm do `r5r`; a subida acumulada é a
+soma de todos os trechos em que o perfil sobe:
+
+```{r}
+#| label: tab-rotas
+# tempo e distância: o r5r repete o total da viagem em cada trecho, basta um valor por rota
+tempo_rotas <- rotas_bici |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(minutos = max(total_duration), km = max(total_distance) / 1000, .by = rede)
+
+# subida acumulada: as diferenças positivas de altitude entre pontos vizinhos do perfil
+subida_rotas <- perfis |>
+  dplyr::summarise(subida = sum(pmax(diff(altitude), 0), na.rm = TRUE), .by = rede)
+
+tab_rotas <- dplyr::left_join(tempo_rotas, subida_rotas, by = "rede")
+
+knitr::kable(tab_rotas, digits = 1, format.args = list(decimal.mark = ","),
+             col.names = c("Rota", "Tempo (min)", "Distância (km)", "Subida acumulada (m)"))
+```
+
+```{r}
+#| include: false
+rota_tab <- function(nome) tab_rotas[tab_rotas$rede == nome, ]
+plana_2  <- rota_tab("Sem relevo, LTS 2")
+relevo_2 <- rota_tab("Com relevo, LTS 2")
+relevo_4 <- rota_tab("Com relevo, LTS 4")
+```
+
+Com o relevo, a mesma viagem passa de `r num(plana_2$minutos, 1)` para
+`r num(relevo_2$minutos, 1)` minutos: o `r5r` desacelera a bicicleta nas subidas. Já o ciclista
+que aceita qualquer rua chega em `r num(relevo_4$minutos, 1)` minutos, por um caminho mais curto
+(`r num(relevo_4$km, 1)` km) e com menos subida (`r num(relevo_4$subida)` m): as avenidas,
+fora do alcance do ciclista comum, encurtam a viagem. Quanto isso pesa no acesso da cidade
+inteira é o tema da seção seguinte.
+
+## Bicicleta e estresse de tráfego
+
+O `r5r` atribui a cada trecho de rua um nível de estresse a partir das etiquetas do
+OpenStreetMap: tipo de via, número de faixas, velocidade e presença de ciclovia ou ciclofaixa.
+Com `max_lts = 2`, a rota só usa trechos de nível 1 e 2; nos outros, o ciclista desce e empurra a
+bicicleta, na velocidade de caminhada.
+
+O bloco abaixo usa a rede com relevo, ainda aberta, para três coisas: o acesso a empregos com
+cada nível de estresse tolerado, a extensão de ruas em cada nível e as ruas do corredor entre
+Pinheiros e a Sé, para o mapa.
+
+```{r}
+#| label: calc-lts
+#| eval: false
+# ---- 1. O acesso com cada nível de estresse tolerado -----------------
+# o LTS 2 já foi calculado no bloco da bicicleta com relevo: só muda o nome da coluna
+lts2 <- dplyr::rename(bici_relevo, lts2 = bici_relevo)
+
+# os outros três níveis: uma matriz para cada um
+lts1 <- matriz_ativa(rede_relevo, "BICYCLE", lts = 1) |>
+  acesso_30() |>
+  dplyr::rename(lts1 = empregos)
+
+lts3 <- matriz_ativa(rede_relevo, "BICYCLE", lts = 3) |>
+  acesso_30() |>
+  dplyr::rename(lts3 = empregos)
+
+lts4 <- matriz_ativa(rede_relevo, "BICYCLE", lts = 4) |>
+  acesso_30() |>
+  dplyr::rename(lts4 = empregos)
+
+# os quatro numa tabela só, uma linha por hexágono
+acesso_lts <- lts1 |>
+  dplyr::full_join(lts2, by = "id") |>
+  dplyr::full_join(lts3, by = "id") |>
+  dplyr::full_join(lts4, by = "id")
+saveRDS(acesso_lts, file.path(saidas, "acesso_lts.rds"))
+
+# ---- 2. O nível de estresse de cada trecho de rua pedalável ----------
+ruas <- r5r::street_network_to_sf(rede_relevo)$edges |>
+  dplyr::filter(bicycle) |>
+  # a rede tem um registro por sentido de cada trecho: fica um só
+  dplyr::mutate(par = paste(pmin(from_vertex, to_vertex), pmax(from_vertex, to_vertex))) |>
+  dplyr::filter(!duplicated(par))
+
+km_lts <- ruas |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(km = sum(length) / 1000, .by = bicycle_lts) |>
+  dplyr::arrange(bicycle_lts)
+saveRDS(km_lts, file.path(saidas, "km_lts.rds"))
+
+# ---- 3. Para o mapa: as ruas num corredor de 1,5 km em torno da reta Pinheiros–Sé ----
+corredor <- rbind(batata, se) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  sf::st_union() |>
+  sf::st_cast("LINESTRING") |>
+  sf::st_transform(31983) |>           # para o buffer em metros
+  sf::st_buffer(1500) |>
+  sf::st_transform(4326)
+
+ruas_corredor <- ruas |>
+  sf::st_filter(corredor) |>           # só as ruas que tocam o corredor
+  dplyr::select(osm_id, street_class, bicycle_lts)
+saveRDS(ruas_corredor, file.path(saidas, "ruas_corredor.rds"))
+
+r5r::stop_r5(rede_relevo)
+```
+
+```{r}
+#| include: false
+acesso_lts    <- readRDS(file.path(saidas, "acesso_lts.rds"))
+km_lts        <- readRDS(file.path(saidas, "km_lts.rds"))
+ruas_corredor <- readRDS(file.path(saidas, "ruas_corredor.rds"))
+```
+
+A extensão de ruas pedaláveis em cada nível, em todo o recorte do OpenStreetMap (a capital e
+parte dos municípios vizinhos):
+
+```{r}
+#| label: tab-km-lts
+km_lts |>
+  dplyr::mutate(pct = 100 * km / sum(km)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ".", decimal.mark = ","),
+               col.names = c("Nível de estresse (LTS)", "Extensão (km)", "% da rede pedalável"))
+```
+
+No corredor entre Pinheiros e a Sé, as avenidas de LTS 4 formam a malha principal, e as
+ciclovias e ruas calmas aparecem como trechos soltos entre elas:
+
+```{r}
+#| label: mapa-lts
+cores_lts <- c("#2F6B9A", "#7FA7C9", "#E7A07A", "#7A1F0F")
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = ruas_corredor,
+                height = "525px") |>
+  mapgl::add_line_layer(id = "lts", source = ruas_corredor,
+                        line_color = mapgl::match_expr("bicycle_lts", values = 1:4,
+                                                       stops = cores_lts),
+                        line_width = 2, tooltip = "street_class") |>
+  mapgl::add_legend("Nível de estresse (LTS)", values = 1:4, colors = cores_lts,
+                    type = "categorical")
+```
+
+Quanto do acesso por bicicleta depende de aceitar ruas mais estressantes? Os empregos alcançáveis
+em 30 minutos, na rede com relevo, para cada nível máximo tolerado. O caminho é o mesmo da tabela
+do relevo: juntar a população, trocar a falta de resultado por zero e tirar a média ponderada,
+agora por quintil de renda:
+
+```{r}
+#| label: tab-lts-renda
+# 1. junta a população e a renda (a tabela moradores, da tabela a pé e de bicicleta)
+lts_pop <- acesso_lts |>
+  dplyr::left_join(moradores, by = "id") |>
+  dplyr::mutate(
+    lts1 = dplyr::coalesce(lts1, 0),
+    lts2 = dplyr::coalesce(lts2, 0),
+    lts3 = dplyr::coalesce(lts3, 0),
+    lts4 = dplyr::coalesce(lts4, 0)
+  )
+
+# 2. a média ponderada de cada nível, por quintil de renda
+por_renda_lts <- lts_pop |>
+  dplyr::filter(renda %in% 1:5) |>               # o aopdata tem alguns hexágonos com quintil 0
+  dplyr::summarise(
+    lts1 = weighted.mean(lts1, populacao),
+    lts2 = weighted.mean(lts2, populacao),
+    lts3 = weighted.mean(lts3, populacao),
+    lts4 = weighted.mean(lts4, populacao),
+    .by = renda
+  ) |>
+  dplyr::arrange(renda)
+
+# 3. quanto do acesso "de qualquer rua" (LTS 4) o ciclista comum (LTS 2) mantém
+por_renda_lts <- por_renda_lts |>
+  dplyr::mutate(pct_lts2 = 100 * lts2 / lts4)
+
+knitr::kable(por_renda_lts, digits = 0, format.args = list(big.mark = ".", decimal.mark = ","),
+             col.names = c("Quintil de renda", "LTS 1", "LTS 2", "LTS 3", "LTS 4",
+                           "LTS 2 / LTS 4 (%)"))
+```
+
+```{r}
+#| label: fig-lts
+#| fig-height: 4
+#| fig-cap: "Empregos alcançáveis de bicicleta em até 30 minutos, por nível de estresse tolerado e quintil de renda (média ponderada pela população)."
+# para o gráfico, uma linha por quintil e nível
+por_renda_lts_longa <- por_renda_lts |>
+  tidyr::pivot_longer(lts1:lts4, names_to = "lts", values_to = "empregos") |>
+  dplyr::mutate(lts = sub("lts", "LTS ", lts))
+
+ggplot(por_renda_lts_longa, aes(factor(renda), empregos, fill = lts)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = cores_lts, name = NULL) +
+  scale_y_continuous(labels = scales::label_number(big.mark = ".")) +
+  labs(x = "Quintil de renda (1 = mais pobres)", y = "Empregos em 30 min de bicicleta") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+```{r}
+#| label: mapa-lts-acesso
+# as medidas que vão para o mapa, com o nome da coluna da grade (id_hex)
+lts_mapa <- dplyr::select(lts_pop, id_hex = id, lts1, lts2, lts4)
+
+grade <- grade |>
+  dplyr::left_join(lts_mapa, by = "id_hex") |>
+  dplyr::mutate(pct_lts2 = dplyr::if_else(lts4 > 0, round(100 * lts2 / lts4), NA_real_))
+
+faixa_lts <- c(0, stats::quantile(grade$lts4, 0.99, na.rm = TRUE))
+
+mapa_hex(grade, pct_lts2, lts1, lts2, lts4) |>
+  camada("pct_lts2", "Acesso com LTS 2, em % do LTS 4", c(0, 100),
+         cores = c("#7A1F0F", "#E7A07A", "#F7F6F2")) |>
+  camada("lts1", "Bicicleta, LTS 1", faixa_lts, visivel = FALSE) |>
+  camada("lts2", "Bicicleta, LTS 2", faixa_lts, visivel = FALSE) |>
+  camada("lts4", "Bicicleta, LTS 4", faixa_lts, visivel = FALSE) |>
+  seletor()
+```
+
+```{r}
+#| label: mapa-rotas-lts
+duas_lts <- rotas_bici |>
+  dplyr::filter(rede != "Sem relevo, LTS 2") |>
+  sf::st_transform(4326)
+cores_rota_lts <- c("Com relevo, LTS 2" = "#C2542D", "Com relevo, LTS 4" = "#2F6B9A")
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = duas_lts, height = "525px") |>
+  mapgl::add_line_layer(id = "rotas_lts", source = duas_lts,
+                        line_color = mapgl::match_expr("rede", values = names(cores_rota_lts),
+                                                       stops = unname(cores_rota_lts)),
+                        line_width = 5, line_opacity = 0.8, tooltip = "total_duration") |>
+  mapgl::add_legend("Rota de bicicleta", values = names(cores_rota_lts),
+                    colors = unname(cores_rota_lts), type = "categorical")
+```
+
+Com LTS 2, a média da população alcança
+`r num(weighted.mean(lts_pop$lts2, lts_pop$populacao))` empregos em 30 minutos de bicicleta;
+aceitando qualquer rua (LTS 4), `r num(weighted.mean(lts_pop$lts4, lts_pop$populacao))`. A
+diferença é o tamanho do problema que uma rede cicloviária contínua resolveria: os empregos que
+estão ao alcance da bicicleta, mas só para quem encara o trânsito.
+
+## Conclusões
+
+(O que os resultados mostram sobre cada pergunta, quem é mais afetado e o que isso implica para
+a política de transporte público, de calçadas e de ciclovias.)
+
+## Limitações
+
+- O GTFS da SPTrans foi convertido de frequências para horários fixos só entre 5h e 11h; o
+  resultado vale para o pico da manhã.
+- Os *tiles* do `elevatr` são bons para análise exploratória, mas misturam fontes (SRTM,
+  Copernicus) e, em áreas densas, parte de prédios e árvores entra na altitude. Para um estudo
+  oficial, prefira uma fonte citável, como o TOPODATA/INPE.
+- A função de Tobler foi estimada para caminhada; o R5 a aplica também à bicicleta. Bicicletas
+  elétricas, cada vez mais comuns, quase não sentem o relevo.
+- O nível de estresse vem das etiquetas do OpenStreetMap: uma ciclovia não mapeada, ou uma rua
+  sem número de faixas e velocidade, pode cair no nível errado.
+- População, empregos e renda são de 2019 (`aopdata`); a rede de transporte é de 2026.
+- O carregamento considera só o carro e um conjunto pequeno de pares origem–destino, com fluxos
+  hipotéticos.
+
+## Anexo: ambiente de execução
+
+```{r}
+#| label: sessao
+sessionInfo()
+```

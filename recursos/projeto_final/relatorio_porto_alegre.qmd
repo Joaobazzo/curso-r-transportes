@@ -1,0 +1,313 @@
+---
+title: "Acessibilidade a empregos em Porto Alegre"
+subtitle: "O efeito do corte das linhas de ônibus de menor oferta"
+author: "Curso de R aplicado ao planejamento de transportes"
+date: today
+lang: pt
+format:
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: true
+    code-summary: "Código"
+execute:
+  warning: false
+  message: false
+---
+
+<!--
+  Projeto final: relatório de Porto Alegre.
+  Fica na pasta do projeto do curso, ao lado de dados/. Antes de renderizar,
+  rode o roteamento_porto_alegre.R, que grava os resultados em
+  dados/projeto_final/porto_alegre/.
+  Renderizar: botão Render do RStudio, ou quarto render relatorio_porto_alegre.qmd
+-->
+
+Este relatório estima quantos empregos cada morador de Porto Alegre alcança em até 60 minutos
+de transporte público, hoje e num cenário sem o quarto das linhas de ônibus com menos viagens,
+e mostra quem perde mais com o corte.
+
+```{r}
+#| label: setup
+library(sf)
+library(ggplot2)
+
+cidade <- "porto_alegre"
+brutos <- file.path("dados/brutos/projeto_final", cidade)   # o pacote da cidade
+pasta  <- file.path("dados/projeto_final", cidade)          # os resultados do roteamento
+
+if (!file.exists(file.path(pasta, "comparacao.rds"))) {
+  stop("Rode antes o roteamento_", cidade, ".R: não achei os resultados em ", pasta, ".")
+}
+
+# resultados do roteamento
+comparacao <- readRDS(file.path(pasta, "comparacao.rds"))
+cortadas   <- readRDS(file.path(pasta, "linhas_cortadas.rds"))
+info       <- readRDS(file.path(pasta, "info.rds"))
+
+# a grade hexagonal do aopdata, com os resultados de acessibilidade de cada hexágono
+acesso <- readRDS(file.path(brutos, paste0("aop_", cidade, ".rds"))) |>
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex) |>
+  sf::st_transform(4326) |>
+  dplyr::left_join(comparacao, by = c("id_hex" = "id"))
+
+gtfs <- gtfstools::read_gtfs(file.path(brutos, paste0("gtfs_", cidade, ".zip")))
+validade <- if (!is.null(gtfs$calendar) && nrow(gtfs$calendar) > 0) {
+  range(c(gtfs$calendar$start_date, gtfs$calendar$end_date))
+} else {
+  range(gtfs$calendar_dates$date)
+}
+operadores <- paste(unique(gtfs$agency$agency_name), collapse = ", ")
+
+# número no formato brasileiro
+num <- function(x, d = 0) format(round(x, d), big.mark = ".", decimal.mark = ",", nsmall = d)
+
+# mapa vazio, enquadrado nos dados
+mapa_base <- function(dados) {
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados, height = "525px")
+}
+
+# acrescenta ao mapa uma camada de hexágonos colorida por uma coluna, com legenda
+camada_hex <- function(mapa, dados, coluna, titulo, cores = c("#F7F6F2", "#E7A07A", "#7A1F0F"),
+                       faixa = range(dados[[coluna]], na.rm = TRUE), visivel = TRUE) {
+  valores <- seq(faixa[1], faixa[2], length.out = length(cores))
+
+  mapa |>
+    mapgl::add_fill_layer(
+      id = titulo, source = dados,
+      fill_color = mapgl::interpolate(column = coluna, values = valores, stops = cores),
+      fill_opacity = 0.75, tooltip = coluna,
+      visibility = if (visivel) "visible" else "none"
+    ) |>
+    mapgl::add_legend(titulo, values = round(faixa), colors = cores,
+                      layer_id = titulo, add = TRUE)
+}
+```
+
+## Dados e método
+
+- **Rede viária:** OpenStreetMap, recorte da região de Porto Alegre do extrato regional da Geofabrik.
+- **Transporte público:** GTFS de `r operadores`, válido de
+  `r format(validade[1], "%d/%m/%Y")` a `r format(validade[2], "%d/%m/%Y")`;
+  `r num(nrow(gtfs$routes))` linhas.
+- **População, empregos e renda:** `aopdata` (Ipea), grade hexagonal H3, dados de 2019;
+  `r num(nrow(acesso))` hexágonos com população.
+- **Roteamento:** `r5r` `r info$r5r`, partida numa quarta-feira (22/10/2025) às 7h, janela de 60
+  minutos, mediana dos tempos, até 20 minutos de caminhada em cada ponta.
+- **Indicador:** empregos acessíveis em até 60 minutos (medida cumulativa).
+
+## A rede de transporte público
+
+Cada ponto é uma parada; o tamanho é o número de viagens que passam por ela no GTFS.
+
+```{r}
+paradas <- gtfstools::convert_stops_to_sf(gtfs) |>
+  dplyr::left_join(dplyr::count(gtfs$stop_times, stop_id, name = "viagens"), by = "stop_id") |>
+  dplyr::filter(!is.na(viagens))
+
+mapa_base(paradas) |>
+  mapgl::add_circle_layer(
+    id = "paradas", source = paradas,
+    circle_radius = mapgl::interpolate(column = "viagens", values = c(0, 1000), stops = c(1.5, 10)),
+    circle_color = "#2F6B9A", circle_opacity = 0.7, tooltip = "viagens"
+  )
+```
+
+## Onde moram as pessoas e onde estão os empregos
+
+Troque a camada no seletor do canto superior direito.
+
+```{r}
+mapa_base(acesso) |>
+  camada_hex(acesso, "populacao", "População") |>
+  camada_hex(acesso, "empregos", "Empregos", cores = c("#F7F6F2", "#7FA7C9", "#173A57"),
+             visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+```
+
+## Até onde se chega a partir do centro
+
+Áreas alcançáveis a partir do Mercado Público em 15, 30, 45 e 60 minutos.
+
+```{r}
+isocronas <- readRDS(file.path(pasta, "isocronas.rds")) |>
+  dplyr::arrange(dplyr::desc(isochrone))          # as faixas menores por cima
+
+cores_iso <- c("#173A57", "#2F6B9A", "#A9C4DA", "#F6DCCB")
+
+mapa_base(isocronas) |>
+  mapgl::add_fill_layer(
+    id = "isocronas", source = isocronas,
+    fill_color = mapgl::match_expr("isochrone", values = c(15, 30, 45, 60), stops = cores_iso),
+    fill_opacity = 0.6, tooltip = "isochrone"
+  ) |>
+  mapgl::add_legend("Minutos a partir do centro", values = c(15, 30, 45, 60),
+                    colors = cores_iso, type = "categorical")
+```
+
+## Um exemplo de viagem
+
+```{r}
+itinerario <- readRDS(file.path(pasta, "itinerario.rds")) |>
+  dplyr::filter(option == 1)
+```
+
+A opção mais rápida da Restinga ao Mercado Público, trecho a trecho:
+`r round(itinerario$total_duration[1])` minutos.
+
+```{r}
+modos <- unique(itinerario$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#2F6B9A", RAIL = "#C2542D", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapa_base(itinerario) |>
+  mapgl::add_line_layer(
+    id = "itinerario", source = itinerario,
+    line_color = mapgl::match_expr("mode", values = modos, stops = unname(cores_modo)),
+    line_width = 5, tooltip = "route"
+  ) |>
+  mapgl::add_legend("Modo", values = modos, colors = unname(cores_modo), type = "categorical")
+
+itinerario |>
+  sf::st_drop_geometry() |>
+  dplyr::select(segment, mode, route, segment_duration, wait, distance) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ".", decimal.mark = ","),
+               col.names = c("Trecho", "Modo", "Linha", "Duração (min)",
+                             "Espera (min)", "Distância (m)"))
+```
+
+## Acessibilidade a empregos hoje
+
+Quantos empregos se alcançam em até 60 minutos de transporte público, a partir de cada hexágono.
+
+```{r}
+cores_acesso <- c("#F6DCCB", "#2F6B9A", "#173A57")
+faixa_acesso <- range(c(acesso$atual, acesso$cenario), na.rm = TRUE)
+
+mapa_base(acesso) |>
+  camada_hex(acesso, "atual", "Empregos em até 60 min", cores = cores_acesso,
+             faixa = faixa_acesso)
+```
+
+## O cenário: sem as linhas de menor oferta
+
+O cenário remove `r length(cortadas)` linhas, o quarto delas com menos viagens no GTFS
+(de `r num(nrow(gtfs$routes))` para `r num(nrow(gtfs$routes) - length(cortadas))` linhas).
+As duas camadas usam a mesma escala de cor; alterne entre elas no seletor.
+
+```{r}
+mapa_base(acesso) |>
+  camada_hex(acesso, "atual", "Atual", cores = cores_acesso, faixa = faixa_acesso) |>
+  camada_hex(acesso, "cenario", "Cenário", cores = cores_acesso, faixa = faixa_acesso,
+             visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+```
+
+## Quem perde acesso
+
+Variação dos empregos acessíveis com o corte: vermelho onde se perde, azul onde se ganha.
+
+```{r}
+limite <- max(abs(acesso$perda_abs), na.rm = TRUE)
+cores_dif <- c("#C2542D", "#F7F6F2", "#2F6B9A")
+
+mapa_base(acesso) |>
+  mapgl::add_fill_layer(
+    id = "variacao", source = acesso,
+    fill_color = mapgl::interpolate(column = "perda_abs", values = c(-limite, 0, limite),
+                                    stops = cores_dif),
+    fill_opacity = 0.8, tooltip = "perda_abs"
+  ) |>
+  mapgl::add_legend("Variação de empregos acessíveis", values = round(c(-limite, 0, limite)),
+                    colors = cores_dif)
+```
+
+## Quem perde mais
+
+A variação média de cada quintil de renda, ponderada pela população (1 = os 20% mais pobres).
+
+```{r}
+por_renda <- comparacao |>
+  dplyr::filter(renda %in% 1:5) |>                # o aopdata tem alguns hexágonos com quintil 0
+  dplyr::summarise(
+    pessoas = sum(populacao),
+    atual = weighted.mean(as.numeric(atual), populacao, na.rm = TRUE),
+    variacao_pct = weighted.mean(perda_pct, populacao, na.rm = TRUE),
+    .by = renda
+  ) |>
+  dplyr::arrange(renda)
+
+knitr::kable(por_renda, digits = 1, format.args = list(big.mark = ".", decimal.mark = ","),
+             col.names = c("Quintil de renda", "Pessoas", "Empregos em 60 min (média)",
+                           "Variação média (%)"))
+
+ggplot(por_renda, aes(factor(renda), variacao_pct)) +
+  geom_col(fill = "#C2542D") +
+  labs(x = "Quintil de renda (1 = mais pobres)",
+       y = "Variação média dos empregos acessíveis (%)") +
+  theme_minimal()
+```
+
+## O carregamento da rede viária
+
+Os trechos mais usados nas viagens de carro entre as áreas mais populosas e as com mais
+empregos; a espessura é o fluxo.
+
+```{r}
+carga <- readRDS(file.path(pasta, "carga.rds")) |>
+  sf::st_transform(4326) |>
+  dplyr::arrange(fluxo)                          # os trechos mais carregados por cima
+
+mapa_base(carga) |>
+  mapgl::add_line_layer(
+    id = "carga", source = carga, line_color = "#1a5b8a", line_opacity = 0.8,
+    line_width = mapgl::interpolate(column = "fluxo", values = range(carga$fluxo),
+                                    stops = c(0.5, 8)),
+    tooltip = "fluxo"
+  )
+```
+
+## Conclusões
+
+```{r}
+q1 <- por_renda[por_renda$renda == 1, ]
+q5 <- por_renda[por_renda$renda == 5, ]
+
+diferenca <- abs(q1$variacao_pct) - abs(q5$variacao_pct)   # em pontos percentuais
+leitura <- if (diferenca >= 1) {
+  "quem já alcança menos empregos é também quem mais perde"
+} else if (diferenca > -1) {
+  "a perda relativa é parecida nos dois extremos de renda, mas parte de bases muito diferentes"
+} else {
+  "a perda relativa é maior entre os mais ricos"
+}
+```
+
+Hoje, um morador dos 20% mais pobres de Porto Alegre alcança, em média, `r num(q1$atual)`
+empregos em até 60 minutos de transporte público; um dos 20% mais ricos, `r num(q5$atual)`,
+ou `r num(q5$atual / q1$atual, 1)` vezes mais. O corte das `r length(cortadas)` linhas de menor
+oferta reduz esse acesso em `r num(abs(q1$variacao_pct), 1)`% no quintil mais pobre e em
+`r num(abs(q5$variacao_pct), 1)`% no mais rico: `r leitura`.
+
+(Complete com o que os mapas mostram: onde ficam as maiores perdas, e o que isso implica para a
+decisão de cortar linhas.)
+
+## Limitações
+
+- O GTFS da EPTC venceu em dezembro de 2025: a análise usa uma quarta-feira de outubro de 2025.
+- O trem metropolitano (Trensurb) não está na rede.
+- Foram removidas as viagens de duração zero do GTFS (6% do total), que o r5r trataria como teletransporte.
+- População, empregos e renda são de 2019; a rede de transporte é a do GTFS acima.
+- O carregamento considera só o carro e um conjunto pequeno de pares origem–destino, com
+  fluxos hipotéticos.
+
+## Anexo: ambiente de execução
+
+O cálculo com o `r5r` levou `r num(info$minutos, 1)` minutos
+(`r num(info$pares)` pares origem–destino na matriz atual e `r num(info$pares_cenario)` na do
+cenário).
+
+```{r}
+sessionInfo()
+```

@@ -225,29 +225,114 @@ antes, `GROUP BY` → `.by`, `HAVING` → `filter` depois, `ORDER BY` → `arran
 
 ## Espacial dentro do banco: `duckspatial`
 
-O DuckDB tem uma extensão espacial, que o `duckspatial` expõe ao R. Vale quando as geometrias
-são muitas: cruzar milhões de pontos de GPS com polígonos de zona, por exemplo.
+O DuckDB tem uma extensão espacial, e o `duckspatial` a leva para o R **no lugar do `sf`**, em
+boa medida. Não é preciso escrever SQL: para cada função `st_*` do `sf` há uma equivalente com
+o prefixo `ddbs_*`, que roda no DuckDB, por baixo.
+
+| `sf` | `duckspatial` |
+|:--|:--|
+| `st_transform()` | `ddbs_transform()` |
+| `st_area()`, `st_length()`, `st_distance()` | `ddbs_area()`, `ddbs_length()`, `ddbs_distance()` |
+| `st_buffer()`, `st_centroid()`, `st_union()` | `ddbs_buffer()`, `ddbs_centroid()`, `ddbs_union()` |
+| `st_intersection()` | `ddbs_intersection()` |
+| `st_join()` | `ddbs_join()` |
+| `st_filter()` | `ddbs_filter()` |
+
+As funções aceitam dois tipos de entrada: **objetos `sf`**, que já estão no R, ou **tabelas
+numa conexão** do DuckDB. Elas se encadeiam com o `|>` e com os verbos do `dplyr`, e devolvem
+uma tabela "preguiçosa": a consulta só roda, e o resultado só vem para o R, no `collect()`, que
+entrega um objeto `sf` comum.
+
+Para o exemplo, 50 mil pontos sorteados no Paraná, como se fossem registros de GPS, e a pergunta
+de sempre: quantos caem em cada município?
+
+```{r}
+#| message: false
+muni_pr <- sf::st_read("dados/brutos/muni_br.gpkg", quiet = TRUE) |>
+  dplyr::filter(abbrev_state == "PR") |>
+  dplyr::select(code_muni, name_muni)
+
+set.seed(42)
+gps <- sf::st_sf(id = 1:50000, geometry = sf::st_sample(muni_pr, 50000))
+```
+
+### Com objetos `sf`
+
+A forma mais direta: os mesmos objetos que iriam para o `sf::st_join()`.
+
+```{r}
+#| message: false
+duckspatial::ddbs_join(gps, muni_pr, join = "within") |>
+  dplyr::count(name_muni, sort = TRUE) |>
+  head(5) |>
+  dplyr::collect()
+```
+
+### Com tabelas numa conexão
+
+Quando a base é grande, o melhor é gravá-la **uma vez** num banco do DuckDB e trabalhar sobre as
+tabelas, pelo nome. Assim os dados não precisam passar pelo R a cada operação. Com
+`dbdir = "dados/processados/espacial.duckdb"`, o banco fica num arquivo e sobrevive à sessão.
+
+```{r}
+#| message: false
+con <- duckspatial::ddbs_create_conn()            # banco na memória
+
+duckspatial::ddbs_write_table(con, muni_pr, "municipios", quiet = TRUE)
+duckspatial::ddbs_write_table(con, gps, "gps", quiet = TRUE)
+
+duckspatial::ddbs_join("gps", "municipios", join = "within", conn = con) |>
+  dplyr::count(name_muni, sort = TRUE) |>
+  head(5) |>
+  dplyr::collect()
+```
+
+O resultado é o mesmo, e a sintaxe também. O que muda é onde os dados moram.
+
+### Uma cadeia de operações
+
+As funções se encadeiam como as do `sf`. A área dos municípios, por exemplo, depois de projetar
+para um sistema métrico:
+
+```{r}
+#| message: false
+duckspatial::ddbs_transform("municipios", "EPSG:5880", conn = con) |>
+  duckspatial::ddbs_area(new_column = "area_m2") |>
+  dplyr::mutate(area_km2 = area_m2 / 1e6) |>
+  dplyr::arrange(dplyr::desc(area_km2)) |>
+  head(3) |>
+  dplyr::collect()
+
+DBI::dbDisconnect(con)
+```
+
+Meça áreas e distâncias **depois de projetar** (`ddbs_transform()`), como no `sf`. Nas versões
+2.x do DuckDB, as funções que medem sobre o elipsoide pedem uma configuração a mais e dão erro
+sem ela.
+
+::: {.callout-tip}
+## O `geobr` já entrega as malhas no DuckDB
+
+As funções do `geobr` aceitam `output = "duckdb"`: em vez de carregar a malha na memória como
+`sf`, devolvem uma tabela do `duckspatial`, pronta para as funções `ddbs_*`. Para malhas
+pesadas, como setores censitários ou a grade estatística, é o caminho natural:
 
 ```{r}
 #| eval: false
-library(duckspatial)
-
-con <- duckdb::dbConnect(duckdb::duckdb())
-duckspatial::ddbs_install(con)
-duckspatial::ddbs_load(con)
-
-duckspatial::ddbs_write_vector(con, zonas, "zonas")
-duckspatial::ddbs_write_vector(con, pontos_gps, "gps")
-
-resultado <- DBI::dbGetQuery(con, "
-  SELECT z.id_zona, COUNT(*) AS n_pontos
-  FROM gps g JOIN zonas z ON ST_Within(g.geom, z.geom)
-  GROUP BY z.id_zona
-")
+geobr::read_municipality(code_muni = "all", year = 2022, output = "duckdb") |>
+  dplyr::filter(abbrev_state == "PR") |>
+  duckspatial::ddbs_transform("EPSG:5880") |>
+  duckspatial::ddbs_area(new_column = "area_m2") |>
+  dplyr::collect()
 ```
+:::
 
-A junção espacial roda no banco, sem materializar nada no R. Para bases menores, `sf::st_join`
-continua sendo mais simples. E a simplicidade tem valor.
+Com 50 mil pontos, o `sf` ainda dá conta, e a diferença de tempo é pequena. O `duckspatial`
+compensa quando as geometrias são milhões, ou quando a base não cabe confortavelmente na
+memória: o ganho é maior com os dados gravados no banco, porque deixam de passar pelo R. Para
+bases menores, o `sf` continua sendo mais simples. E a simplicidade tem valor.
+
+Documentação: <https://cidree.github.io/duckspatial/>.
 
 A base deste capítulo foi sintética de propósito: limpa, com tipos certos, sem surpresas. O
 próximo capítulo leva o DuckDB para uma base real e grande, o Comex Stat, onde o problema

@@ -5,6 +5,7 @@ project:
     - slides/*.pdf
     - recursos/folhas/*.pdf
     - modelos/*.qmd
+    - recursos/projeto_final/*
 
 book:
   title: "Análise de Dados com R Aplicada ao Planejamento de Transportes"
@@ -81,8 +82,10 @@ book:
         - m4-05-r5r.qmd
         - m5-02-quarto.qmd
         - m5-04-projeto.qmd
+        - m5-04b-projeto-sp.qmd
         - m5-05-proximos-passos.qmd
     - a-dados.qmd
+    - a-diagnostico-rede.qmd
     - a-recursos.qmd
 
 format:

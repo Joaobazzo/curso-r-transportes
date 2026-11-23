@@ -1,0 +1,672 @@
+# Diagnóstico de rede {.unnumbered}
+
+Quando o `dodgr` (@sec-m4-roteamento) devolve `NA` para uma rota, ou uma matriz de distâncias
+sai cheia de buracos, o problema quase nunca está na função de roteamento: está na **rede**.
+Pedaços da malha que não se ligam ao resto, vias que se cruzam sem um nó em comum, trechos de
+mão única que levam a um beco. Esta página é um estudo de caso completo, com a malha
+São Paulo–Santos do módulo 4: o diagnóstico de cada problema, os mapas que mostram onde ele
+está, e as soluções, comparadas no fim.
+
+Ela é reproduzível do início ao fim: todos os blocos são executados na construção do site, e
+o mesmo código roda na sua máquina a partir da pasta do curso. Leva uns 4 minutos.
+
+```{r}
+#| message: false
+library(dplyr)
+library(sf)
+library(dodgr)
+
+dodgr::dodgr_cache_off()   # o grafo é editado ao longo da página: sem cache, sem surpresas
+
+crs_metrico <- 31983       # SIRGAS 2000 / UTM 23S: distâncias em metros na região de SP
+
+# mapa vazio, enquadrado nos dados, com a altura usada no site
+mapa_base <- function(dados, altura = "525px") {
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados, height = altura)
+}
+```
+
+## 1. Ler e tratar a malha
+
+A malha é a do capítulo de roteamento: as vias principais do OSM (de `motorway` a
+`secondary`) num retângulo entre São Paulo e Santos.
+
+```{r}
+arquivo_rede <- "dados/brutos/rede_sao_paulo_santos.gpkg"
+
+# o retângulo da consulta ao OSM; é também a borda da área de estudo
+retangulo <- c(xmin = -46.80, ymin = -24.02, xmax = -46.25, ymax = -23.45)
+
+if (!file.exists(arquivo_rede)) {
+  # download lento (vários minutos): o arquivo normalmente já vem no pacote de dados
+  osmdata::set_overpass_url("https://overpass.kumi.systems/api/interpreter")
+
+  res <- osmdata::opq(bbox = unname(retangulo), timeout = 300) |>
+    osmdata::add_osm_feature(key = "highway", value = c(
+      "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
+      "secondary", "secondary_link")) |>
+    osmdata::osmdata_sf()
+
+  res$osm_lines |>
+    dplyr::select(dplyr::any_of(c("osm_id", "name", "ref", "highway", "maxspeed",
+                                  "oneway", "lanes"))) |>
+    sf::st_write(arquivo_rede, quiet = TRUE)
+}
+
+rede_bruta <- sf::st_read(arquivo_rede, quiet = TRUE) |>
+  dplyr::rename(geometry = geom)
+
+table(rede_bruta$oneway, useNA = "ifany")
+```
+
+O tratamento básico resolve o que faria o `dodgr` reclamar ou errar em silêncio:
+
+```{r}
+rede <- rede_bruta |>
+  # geometrias vazias ou inválidas quebram o weight_streetnet()
+  dplyr::filter(!sf::st_is_empty(geometry)) |>
+  sf::st_make_valid() |>
+  # o mesmo trecho do OSM não deve aparecer duas vezes
+  dplyr::distinct(osm_id, .keep_all = TRUE) |>
+  # o dodgr só entende oneway = "yes"/"no"; "alternating" (sentido que alterna ao longo
+  # do dia) e vazio viram "no", isto é, mão dupla
+  dplyr::mutate(oneway = dplyr::if_else(oneway %in% "yes", "yes", "no"))
+
+# se o st_make_valid() gerou MULTILINESTRING ou coleções, separa em LINESTRING
+if (!all(sf::st_geometry_type(rede) == "LINESTRING")) {
+  rede <- rede |>
+    sf::st_collection_extract("LINESTRING") |>
+    sf::st_cast("LINESTRING", warn = FALSE)
+}
+
+c(trechos_brutos = nrow(rede_bruta), trechos_tratados = nrow(rede))
+table(rede$oneway)
+```
+
+Nesta malha, o tratamento não descarta nenhum trecho; o que muda é a coluna `oneway`, que
+deixa de ter valores que o `dodgr` não entende.
+
+A borda da área de estudo é o retângulo da consulta, e não o retângulo da própria malha: o
+OSM devolve as vias inteiras, inclusive o que passa do limite.
+
+```{r}
+area_estudo <- sf::st_bbox(retangulo, crs = sf::st_crs(4326)) |>
+  sf::st_as_sfc() |>
+  sf::st_transform(crs_metrico)
+borda <- sf::st_cast(area_estudo, "MULTILINESTRING")
+borda_mapa <- sf::st_sf(geometry = sf::st_transform(borda, 4326))   # para os mapas
+
+# distância à borda; um ponto fora do retângulo conta como "na borda"
+dist_borda <- function(pontos) {
+  d <- as.numeric(sf::st_distance(pontos, borda))
+  fora <- !lengths(sf::st_intersects(pontos, area_estudo))
+  ifelse(fora, 0, d)
+}
+```
+
+## 2. Montar o grafo e contar os pedaços
+
+```{r}
+grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
+
+arestas_por_comp <- table(grafo$component)
+length(arestas_por_comp)                               # quantos componentes
+head(sort(arestas_por_comp, decreasing = TRUE), 8)     # arestas nos maiores
+```
+
+A coluna `component` diz a que pedaço conectado cada aresta pertence; o componente 1 é sempre
+o maior. A malha tem `r length(arestas_por_comp)` componentes, e o principal concentra
+`r format(round(100 * arestas_por_comp[["1"]] / nrow(grafo), 2), decimal.mark = ",")`% das
+arestas. O resto são pedaços soltos: poucos em arestas, mas cada um é um lugar de onde nenhuma
+rota sai.
+
+## 3. Onde estão os pedaços soltos, e por quê
+
+Para cada vértice dos pedaços soltos, medimos a distância até o vértice mais próximo do
+componente principal e até a borda da área de estudo:
+
+```{r}
+vertices <- dodgr::dodgr_vertices(grafo) |>
+  sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE) |>
+  sf::st_transform(crs_metrico)
+
+principal <- dplyr::filter(vertices, component == 1)
+soltos    <- dplyr::filter(vertices, component > 1)
+
+mais_proximo <- sf::st_nearest_feature(soltos, principal)
+soltos$dist_principal <- as.numeric(sf::st_distance(soltos, principal[mais_proximo, ],
+                                                    by_element = TRUE))
+soltos$id_principal <- principal$id[mais_proximo]
+soltos$dist_borda   <- dist_borda(soltos)
+```
+
+E juntamos as linhas da malha a cada componente, para ver o tipo de via e a extensão, e para
+testar se o pedaço solto **cruza** o principal sem compartilhar um nó:
+
+```{r}
+# as linhas da malha (com geometria, tipo e nome da via) que formam os componentes pedidos
+vias_malha <- dplyr::select(rede, way_id = osm_id, highway, name, geometry)
+
+linhas_por_comp <- function(comps) {
+  # cada via do OSM (way_id) aparece uma vez por componente
+  vias_comp <- grafo |>
+    dplyr::filter(component %in% comps) |>
+    dplyr::distinct(way_id, component)
+
+  vias_comp |>
+    dplyr::left_join(vias_malha, by = "way_id") |>
+    sf::st_as_sf() |>
+    sf::st_transform(crs_metrico)
+}
+
+linhas_soltas    <- linhas_por_comp(unique(soltos$component))
+linhas_principal <- linhas_por_comp(1)
+
+linhas_soltas$cruza <- lengths(sf::st_intersects(linhas_soltas, linhas_principal)) > 0
+```
+
+Com essas medidas, cada pedaço recebe uma **causa provável**, testada nesta ordem:
+
+| Causa | Regra | Solução |
+|:--|:--|:--|
+| Recorte na borda | a menos de 500 m da borda | baixar o OSM com folga e recortar depois |
+| Pontas quase coincidentes | a menos de 5 m do principal | aproximar as pontas (*snap*) |
+| Via fora do perfil ou do download | a menos de 300 m do principal | baixar mais tipos de via, ou criar um conector |
+| Cruza sem nó | cruza o principal sem vértice comum | no OSM, é viaduto (não ligar); fora do OSM, criar os nós |
+| Isolado | nenhuma das anteriores | conector, se fizer sentido, ou descartar |
+
+O resumo junta três tabelas, todas com uma linha por componente solto. Montamos cada uma
+separadamente e depois as unimos.
+
+A primeira vem dos **vértices**: quantos são e a que distância o pedaço chega do principal e da
+borda (a menor distância entre os seus vértices):
+
+```{r}
+por_vertices <- soltos |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(
+    vertices         = dplyr::n(),
+    dist_principal_m = min(dist_principal),
+    dist_borda_m     = min(dist_borda),
+    .by = component
+  )
+```
+
+A segunda vem das **linhas** da malha: os tipos de via do pedaço e quantas das suas linhas cruzam
+o principal:
+
+```{r}
+por_linhas <- linhas_soltas |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(
+    vias        = paste(sort(unique(highway)), collapse = ", "),
+    cruzamentos = sum(cruza),
+    .by = component
+  )
+```
+
+A terceira vem do **grafo**: o número de arestas e a extensão. O grafo tem as duas mãos de cada
+via, por isso a soma das distâncias é dividida por 2:
+
+```{r}
+por_arestas <- grafo |>
+  dplyr::filter(component > 1) |>
+  dplyr::summarise(
+    arestas = dplyr::n(),
+    km      = sum(d) / 2 / 1000,
+    .by = component
+  )
+```
+
+Agora, as três juntas, e a causa provável, pelas regras da tabela acima. O `case_when()` testa as
+regras na ordem e fica com a primeira que vale:
+
+```{r}
+resumo <- por_vertices |>
+  dplyr::left_join(por_linhas,  by = "component") |>
+  dplyr::left_join(por_arestas, by = "component") |>
+  dplyr::mutate(causa = dplyr::case_when(
+    dist_borda_m < 500     ~ "Recorte na borda",
+    dist_principal_m < 5   ~ "Pontas quase coincidentes",
+    dist_principal_m < 300 ~ "Via fora do perfil ou do download",
+    cruzamentos > 0        ~ "Cruza sem nó",
+    TRUE                   ~ "Isolado"
+  )) |>
+  dplyr::arrange(dplyr::desc(arestas))
+
+resumo |>
+  dplyr::select(component, arestas, km, vias, dist_principal_m, dist_borda_m, causa) |>
+  knitr::kable(digits = 1, format.args = list(decimal.mark = ",", big.mark = "."),
+               col.names = c("Componente", "Arestas", "km", "Vias", "Dist. ao principal (m)",
+                             "Dist. à borda (m)", "Causa provável"))
+```
+
+```{r}
+resumo |>
+  dplyr::summarise(pedacos = dplyr::n(), arestas = sum(arestas), km = sum(km), .by = causa) |>
+  dplyr::arrange(dplyr::desc(arestas)) |>
+  knitr::kable(digits = 1, format.args = list(decimal.mark = ","),
+               col.names = c("Causa provável", "Pedaços", "Arestas", "km"))
+```
+
+No mapa, os pedaços soltos coloridos pela causa, sobre as vias do componente principal num
+raio de 1 km deles. Passe o mouse sobre um trecho para ver o componente e a distância:
+
+```{r}
+cores_causa <- c("Recorte na borda" = "#7A1F0F", "Pontas quase coincidentes" = "#E7A07A",
+                 "Via fora do perfil ou do download" = "#C2542D", "Cruza sem nó" = "#2F6B9A",
+                 "Isolado" = "#173A57")
+cores_causa <- cores_causa[names(cores_causa) %in% resumo$causa]
+
+causas <- dplyr::select(resumo, component, causa, dist_principal_m)
+
+soltos_mapa <- linhas_soltas |>
+  dplyr::left_join(causas, by = "component") |>
+  dplyr::mutate(rotulo = paste0("componente ", component, ": ", causa, " (",
+                                round(dist_principal_m), " m do principal)")) |>
+  sf::st_transform(4326)
+
+perto <- sf::st_is_within_distance(linhas_principal, linhas_soltas, dist = 1000)
+contexto <- linhas_principal[lengths(perto) > 0, ] |> sf::st_transform(4326)
+
+mapa_base(soltos_mapa) |>
+  mapgl::add_line_layer(id = "borda", source = borda_mapa,
+                        line_color = "#333333", line_width = 1.5, line_dasharray = c(2, 2)) |>
+  mapgl::add_line_layer(id = "principal", source = contexto,
+                        line_color = "#9a9a9a", line_width = 1.5) |>
+  mapgl::add_line_layer(
+    id = "soltos", source = soltos_mapa, line_width = 4, tooltip = "rotulo",
+    line_color = mapgl::match_expr("causa", values = names(cores_causa),
+                                   stops = unname(cores_causa))
+  ) |>
+  mapgl::add_legend("Causa provável", values = names(cores_causa),
+                    colors = unname(cores_causa), type = "categorical")
+```
+
+### De perto: um pedaço de cada causa
+
+Ampliando um exemplo de cada causa, com uma linha tracejada entre o ponto do pedaço solto e o
+vértice mais próximo do componente principal:
+
+```{r}
+mapa_detalhe <- function(comp) {
+  pedaco <- dplyr::filter(soltos_mapa, component == comp)
+  # o par de vértices mais próximo: um do pedaço solto, outro do principal
+  par  <- dplyr::filter(soltos, component == comp) |> dplyr::slice_min(dist_principal, n = 1)
+  alvo <- dplyr::filter(principal, id == par$id_principal)
+  ponta_a <- sf::st_coordinates(sf::st_transform(par, 4326))
+  ponta_b <- sf::st_coordinates(sf::st_transform(alvo, 4326))
+  ligacao <- sf::st_sf(
+    distancia = paste(round(par$dist_principal, 1), "m"),
+    geometry  = sf::st_sfc(sf::st_linestring(rbind(ponta_a, ponta_b)), crs = 4326)
+  )
+  janela <- sf::st_buffer(sf::st_transform(pedaco, crs_metrico), 400) |>
+    sf::st_union() |>
+    sf::st_transform(4326)
+  vizinhas <- contexto[lengths(sf::st_intersects(contexto, janela)) > 0, ]
+
+  mapa_base(janela, altura = "380px") |>
+    mapgl::add_line_layer(id = paste0("p", comp), source = vizinhas,
+                          line_color = "#9a9a9a", line_width = 2, tooltip = "highway") |>
+    mapgl::add_line_layer(id = paste0("s", comp), source = pedaco, line_width = 5,
+                          line_color = unname(cores_causa[pedaco$causa[1]]), tooltip = "rotulo") |>
+    mapgl::add_line_layer(id = paste0("l", comp), source = ligacao, line_color = "#000000",
+                          line_width = 2, line_dasharray = c(1, 1), tooltip = "distancia")
+}
+
+exemplos <- resumo |> dplyr::slice_max(arestas, n = 1, by = causa)
+```
+
+```{r}
+# um mapa por exemplo, cada um com um título
+htmltools::tagList(lapply(seq_len(nrow(exemplos)), function(i) {
+  htmltools::tagList(
+    htmltools::tags$p(htmltools::tags$strong(exemplos$causa[i]),
+                      sprintf(" (componente %d, %s km, a %s m do principal)",
+                              exemplos$component[i],
+                              format(round(exemplos$km[i], 1), decimal.mark = ","),
+                              format(round(exemplos$dist_principal_m[i], 1), decimal.mark = ","))),
+    mapa_detalhe(exemplos$component[i])
+  )
+}))
+```
+
+O que os exemplos mostram:
+
+- **Pontas quase coincidentes**: a via solta termina a poucos metros de outra, mas o OSM não
+  tem o nó de encontro. É erro de mapeamento, e um conector de poucos metros resolve.
+- **Via fora do perfil ou do download**: o trecho solto se ligaria ao resto por uma via
+  `tertiary` ou local, que não foi baixada. A correção de verdade é incluir esses tipos de
+  via na consulta ao OSM; o conector é um paliativo.
+- **Recorte na borda**: a via sai do retângulo e volta, ou só se liga ao resto fora dele.
+  Baixe o OSM com uma folga de alguns quilômetros e recorte só os resultados.
+- **Isolado**: longe de tudo. Ou se aceita um conector longo, ou se descarta.
+
+## 4. Solução rápida: só o componente principal
+
+Na maioria dos estudos, isto basta. Os pontos de origem e destino passam a ser associados ao
+vértice mais próximo da rede conectada:
+
+```{r}
+grafo_principal <- grafo[grafo$component == 1, ]
+
+c(arestas_antes = nrow(grafo), arestas_depois = nrow(grafo_principal),
+  km_descartados = round(sum(resumo$km), 1))
+```
+
+## 5. Mão única: dá para ir, mas não para voltar
+
+`component` diz se os pedaços **se tocam**, não se é possível ir e voltar respeitando a mão das
+vias. Para isso servem os **componentes fortemente conexos**: dentro de um, de qualquer
+vértice se chega a qualquer outro. Um vértice fora do maior componente forte é um lugar aonde
+se chega mas de onde não se sai (um beco), ou o contrário: a rota dá `NA`, sem erro.
+
+```{r}
+g_igraph <- dodgr::dodgr_to_igraph(grafo_principal)
+fortes   <- igraph::components(g_igraph, mode = "strong")
+ids_fortes <- names(fortes$membership)[fortes$membership == which.max(fortes$csize)]
+
+presos <- setdiff(igraph::V(g_igraph)$name, ids_fortes)
+
+c(componentes_fortes = fortes$no,
+  vertices_presos    = length(presos),
+  pct_presos         = round(100 * length(presos) / igraph::vcount(g_igraph), 1))
+```
+
+Para cada vértice preso, testamos se dá para chegar nele a partir do núcleo, e se dá para
+voltar dele ao núcleo:
+
+```{r}
+um_do_nucleo <- which(igraph::V(g_igraph)$name == ids_fortes[1])
+ida   <- igraph::distances(g_igraph, v = um_do_nucleo, to = presos, mode = "out")
+volta <- igraph::distances(g_igraph, v = um_do_nucleo, to = presos, mode = "in")
+
+v_presos <- vertices |>
+  dplyr::filter(id %in% presos) |>
+  dplyr::left_join(data.frame(id = presos, entra = is.finite(ida[1, ]),
+                              sai = is.finite(volta[1, ])), by = "id") |>
+  dplyr::mutate(tipo = dplyr::case_when(
+    entra & !sai ~ "Beco: entra e não sai",
+    !entra & sai ~ "Fonte: sai e não entra",
+    TRUE         ~ "Nem entra nem sai"
+  ))
+v_presos$dist_borda <- dist_borda(v_presos)
+
+dplyr::count(sf::st_drop_geometry(v_presos), tipo, sort = TRUE)
+
+# perto da borda? e em que tipo de via?
+round(100 * mean(v_presos$dist_borda < 1000))       # % a menos de 1 km da borda
+grafo_principal |>
+  dplyr::filter(from_id %in% presos | to_id %in% presos) |>
+  dplyr::count(highway, sort = TRUE) |>
+  head(6)
+```
+
+No mapa, cada vértice preso, colorido pelo tipo. Aproxime numa alça de acesso ou num
+trevo para ver o padrão:
+
+```{r}
+cores_tipo <- c("Beco: entra e não sai" = "#C2542D", "Fonte: sai e não entra" = "#2F6B9A",
+                "Nem entra nem sai" = "#7A7A7A")
+
+presos_mapa <- v_presos |>
+  dplyr::select(id, tipo) |>
+  sf::st_transform(4326)
+
+mapa_base(presos_mapa) |>
+  mapgl::add_line_layer(id = "borda2", source = borda_mapa,
+                        line_color = "#333333", line_width = 1.5, line_dasharray = c(2, 2)) |>
+  mapgl::add_circle_layer(
+    id = "presos", source = presos_mapa, circle_radius = 2.5, circle_opacity = 0.8,
+    circle_color = mapgl::match_expr("tipo", values = names(cores_tipo),
+                                     stops = unname(cores_tipo)),
+    tooltip = "tipo"
+  ) |>
+  mapgl::add_legend("Vértices presos pela mão única", values = names(cores_tipo),
+                    colors = unname(cores_tipo), type = "categorical")
+```
+
+A maioria dos vértices presos fica longe da borda, em alças (`_link`) e vias secundárias. A
+hipótese provável é que o retorno dependa de vias que não foram baixadas: o mesmo problema da
+seção 3, agora com sentido de circulação. A solução para rotear é ficar só com o núcleo forte:
+
+```{r}
+grafo_forte <- grafo_principal[grafo_principal$from_id %in% ids_fortes &
+                               grafo_principal$to_id   %in% ids_fortes, ]
+nrow(grafo_forte)
+```
+
+## 6. Cruzamentos sem nó: bases fora do OSM
+
+No OSM, vias que se cruzam no mesmo nível compartilham um nó; as que se cruzam sem nó são
+viadutos e túneis, e **não** devem ser ligadas. Nesta malha,
+`r sum(linhas_soltas$cruza)` trechos soltos cruzam o principal sem nó, e são esses casos.
+
+Em bases como o SNV/DNIT ou um *shapefile* próprio, porém, as linhas costumam se cruzar sem
+vértice comum, e o grafo sai todo picado. Um exemplo mínimo, com duas vias em X:
+
+```{r}
+x_sem_no <- sf::st_sf(
+  osm_id  = c("a", "b"), highway = c("primary", "secondary"), oneway = "no",
+  geometry = sf::st_sfc(sf::st_linestring(rbind(c(-46.34, -23.96), c(-46.32, -23.94))),
+                        sf::st_linestring(rbind(c(-46.34, -23.94), c(-46.32, -23.96))),
+                        crs = 4326))
+
+dodgr::weight_streetnet(x_sem_no, wt_profile = "motorcar", type_col = "highway",
+                        id_col = "osm_id")$component |> table()
+```
+
+Dois componentes: as vias se cruzam, mas o grafo não sabe. A função abaixo cria um nó em cada
+cruzamento e aproxima as pontas a menos de 5 m:
+
+```{r}
+nodar_linhas <- function(linhas, tolerancia_m = 5, crs = crs_metrico) {
+  linhas <- sf::st_transform(linhas, crs)
+  linhas <- sf::st_snap(linhas, linhas, tolerance = tolerancia_m)   # junta pontas próximas
+
+  # st_node() cria um nó em cada cruzamento; o st_cast() separa os pedaços entre nós
+  pedacos <- linhas |>
+    sf::st_union() |>
+    sf::st_node() |>
+    sf::st_cast("LINESTRING") |>
+    sf::st_sf(geometry = _)
+
+  # cada pedaço herda os atributos da linha original em que está (pelo ponto do meio)
+  meio   <- sf::st_cast(sf::st_line_sample(pedacos, sample = 0.5), "POINT")
+  origem <- sf::st_nearest_feature(meio, linhas)
+  pedacos <- sf::st_sf(sf::st_drop_geometry(linhas)[origem, , drop = FALSE],
+                       geometry = sf::st_geometry(pedacos))
+  pedacos$osm_id <- paste0(pedacos$osm_id, "_", seq_len(nrow(pedacos)))   # ids únicos
+  sf::st_transform(pedacos, 4326)
+}
+
+x_nodado <- nodar_linhas(x_sem_no)
+x_nodado
+
+dodgr::weight_streetnet(x_nodado, wt_profile = "motorcar", type_col = "highway",
+                        id_col = "osm_id")$component |> table()
+```
+
+Um componente só, com quatro trechos que se encontram no cruzamento. Não aplique isso a uma
+malha do OSM: ligaria cada viaduto à via de baixo.
+
+## 7. Reconectar os pedaços soltos
+
+Quando não se quer perder os pedaços, cria-se uma **aresta de ligação** (nos dois sentidos)
+entre cada pedaço solto e o vértice mais próximo do principal. Um limite de distância evita
+ligações absurdas, e uma penalidade faz o roteamento evitar o conector como atalho:
+
+```{r}
+reconectar_componentes <- function(grafo, limite_m = 300, penalidade = 3, vel_kmh = 20) {
+  v <- dodgr::dodgr_vertices(grafo) |>
+    sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE) |>
+    sf::st_transform(crs_metrico)
+  principal <- v[v$component == 1, ]
+  soltos    <- v[v$component > 1, ]
+  if (nrow(soltos) == 0) return(grafo)
+
+  idx <- sf::st_nearest_feature(soltos, principal)
+  soltos$to_id  <- principal$id[idx]
+  soltos$to_lon <- principal$x[idx]
+  soltos$to_lat <- principal$y[idx]
+  soltos$d      <- as.numeric(sf::st_distance(soltos, principal[idx, ], by_element = TRUE))
+
+  # uma ligação por pedaço: o par de vértices mais próximo, dentro do limite
+  lig <- soltos |>
+    sf::st_drop_geometry() |>
+    dplyr::slice_min(d, n = 1, with_ties = FALSE, by = component) |>
+    dplyr::filter(d <= limite_m)
+  if (nrow(lig) == 0) return(grafo)
+
+  ida <- data.frame(from_id = lig$id,    from_lon = lig$x,      from_lat = lig$y,
+                    to_id   = lig$to_id, to_lon   = lig$to_lon, to_lat   = lig$to_lat,
+                    d = lig$d)
+  volta <- data.frame(from_id = ida$to_id,   from_lon = ida$to_lon,   from_lat = ida$to_lat,
+                      to_id   = ida$from_id, to_lon   = ida$from_lon, to_lat   = ida$from_lat,
+                      d = ida$d)
+
+  novas <- dplyr::bind_rows(ida, volta) |>
+    dplyr::mutate(
+      d             = pmax(d, 1),              # pontas coincidentes: 1 m, nunca zero
+      d_weighted    = d * penalidade,          # desestimula usar o conector
+      highway       = "conector",
+      time          = d / (vel_kmh / 3.6),
+      time_weighted = time * penalidade
+    )
+  novas$edge_id <- max(grafo$edge_id) + seq_len(nrow(novas))
+
+  saida <- dplyr::bind_rows(as.data.frame(grafo), novas)
+  saida$component <- NULL
+  saida <- dodgr::dodgr_components(saida)      # recalcula: o componente 1 volta a ser o maior
+  class(saida) <- class(grafo)                 # devolve a classe do dodgr
+  attr(saida, "wt_profile") <- attr(grafo, "wt_profile")
+  saida
+}
+```
+
+A função roda até o número de componentes parar de mudar: um pedaço longe do principal pode
+ficar perto de outro que acabou de ser ligado.
+
+```{r}
+grafo_rec <- grafo
+rodadas <- c(length(unique(grafo_rec$component)))
+repeat {
+  grafo_rec <- reconectar_componentes(grafo_rec, limite_m = 300)
+  rodadas <- c(rodadas, length(unique(grafo_rec$component)))
+  if (rodadas[length(rodadas)] == rodadas[length(rodadas) - 1]) break
+}
+rodadas                                   # componentes depois de cada rodada
+
+conectores <- grafo_rec[grafo_rec$highway == "conector", ]
+c(conectores = nrow(conectores) / 2, maior_m = round(max(conectores$d)))
+```
+
+No mapa, os conectores criados (em preto) e os pedaços que eles ligam. Repare como quase todos
+são curtíssimos:
+
+```{r}
+conectores_sf <- conectores |>
+  dplyr::filter(from_id < to_id) |>           # um por par (ida e volta são o mesmo traço)
+  dplyr::mutate(geometry = sf::st_sfc(
+    lapply(seq_len(dplyr::n()), \(i) sf::st_linestring(rbind(c(from_lon[i], from_lat[i]),
+                                                             c(to_lon[i], to_lat[i])))),
+    crs = 4326),
+    rotulo = paste(round(d), "m")) |>
+  sf::st_as_sf()
+
+mapa_base(soltos_mapa) |>
+  mapgl::add_line_layer(id = "principal3", source = contexto,
+                        line_color = "#9a9a9a", line_width = 1.5) |>
+  mapgl::add_line_layer(id = "soltos3", source = soltos_mapa, line_width = 4,
+                        line_color = mapgl::match_expr("causa", values = names(cores_causa),
+                                                       stops = unname(cores_causa))) |>
+  mapgl::add_line_layer(id = "conectores", source = conectores_sf, line_color = "#000000",
+                        line_width = 4, tooltip = "rotulo") |>
+  mapgl::add_circle_layer(id = "conectores_ponta", source = sf::st_cast(conectores_sf, "POINT"),
+                          circle_color = "#000000", circle_radius = 3)
+```
+
+Três cuidados:
+
+- **A penalidade importa.** Sem ela, uma rota pode usar o conector como atalho. Ao medir
+  acessibilidade, vale reportar quantas rotas passam por um conector.
+- **Mão única não se resolve aqui.** O conector é de mão dupla, mas o pedaço pode ser de mão
+  única por dentro; a próxima seção mostra quantos sobram.
+- **O conector é um paliativo.** Ele esconde uma falha da malha; a correção de verdade, quando
+  é possível, é baixar ou consertar a via que falta.
+
+## 8. Conferir: rotas antes e depois
+
+Duas amostras de pontos, roteadas em cinco versões do grafo: 300 vértices sorteados em toda a
+rede, e um vértice de cada pedaço solto. A pergunta é simples: de quantos pares não sai rota?
+
+```{r}
+so_o_forte <- function(g) {
+  g1 <- g[g$component == 1, ]
+  f  <- igraph::components(dodgr::dodgr_to_igraph(g1), mode = "strong")
+  ids <- names(f$membership)[f$membership == which.max(f$csize)]
+  g1[g1$from_id %in% ids & g1$to_id %in% ids, ]
+}
+
+grafos <- list(
+  "Original"                       = grafo,
+  "Só o principal"                 = grafo_principal,
+  "Só o principal, núcleo forte"   = grafo_forte,
+  "Reconectado"                    = grafo_rec,
+  "Reconectado, núcleo forte"      = so_o_forte(grafo_rec)
+)
+
+set.seed(42)
+amostra_rede   <- vertices |> sf::st_drop_geometry() |> dplyr::slice_sample(n = 300)
+amostra_soltos <- soltos   |> sf::st_drop_geometry() |> dplyr::slice_sample(n = 1, by = component)
+
+sem_rota <- function(g, pts) {
+  pts <- as.matrix(pts[, c("x", "y")])
+  m <- dodgr::dodgr_dists(g, from = pts, to = pts)
+  100 * mean(is.na(m[row(m) != col(m)]))
+}
+
+comparacao <- data.frame(
+  grafo   = names(grafos),
+  arestas = vapply(grafos, nrow, integer(1)),
+  rede    = vapply(grafos, sem_rota, numeric(1), pts = amostra_rede),
+  soltos  = vapply(grafos, sem_rota, numeric(1), pts = amostra_soltos),
+  row.names = NULL
+)
+
+comparacao |>
+  knitr::kable(digits = 1, format.args = list(decimal.mark = ",", big.mark = "."),
+               col.names = c("Grafo", "Arestas", "Sem rota: toda a rede (%)",
+                             "Sem rota: pedaços soltos (%)"))
+```
+
+```{r}
+ids_nucleo_rec <- unique(c(grafos[["Reconectado, núcleo forte"]]$from_id,
+                           grafos[["Reconectado, núcleo forte"]]$to_id))
+recuperados <- soltos |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(no_nucleo = mean(id %in% ids_nucleo_rec), .by = component)
+```
+
+Num grafo podado, um ponto que estava num pedaço descartado é associado ao vértice mais
+próximo que sobrou, e por isso passa a ter rota; a distância desse "salto" fica fora da conta.
+
+## O que esta malha ensina
+
+- Os **pedaços soltos** são `r nrow(resumo)`, com
+  `r format(round(sum(resumo$km), 1), decimal.mark = ",")` km de via. A causa mais comum é uma
+  ligação por via que não foi baixada: a malha só tem vias até `secondary`.
+- A **mão única** é o problema maior: `r format(length(presos), big.mark = ".", decimal.mark = ",")` vértices
+  (`r format(round(100 * length(presos) / igraph::vcount(g_igraph), 1), decimal.mark = ",")`%)
+  ficam fora do núcleo onde se vai e se volta, e são eles que fazem a rota sair `NA`.
+- **Reconectar** junta os pedaços num só componente, mas só
+  `r sum(recuperados$no_nucleo >= 0.5)` dos `r nrow(recuperados)` passam a ter ida e volta: o
+  conector não resolve a mão única.
+- Para rotear nesta malha, a solução que zera os pares sem rota é o **núcleo forte**, com os
+  pontos associados a ele.
+- Para não perder pedaço nenhum, o caminho é a origem do problema: baixar também as vias
+  `tertiary` e `tertiary_link` e repetir este diagnóstico. Esta página não testou essa
+  hipótese; é o exercício natural para fechá-la.
+
+O mesmo roteiro serve para qualquer malha: monte o grafo, conte os componentes fracos e os
+fortes, ponha os pedaços soltos num mapa, e só então escolha a correção.

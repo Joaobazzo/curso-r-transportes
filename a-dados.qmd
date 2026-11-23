@@ -1,21 +1,129 @@
 # Dados de exemplo {.unnumbered}
 
-Quase todos os dados usados no curso são **públicos**. Os arquivos pequenos ficam no próprio
-repositório, na pasta `dados/`; os grandes são baixados por script, para não inflar o
-repositório. A única exceção é a exportação do modelo quatro etapas, descrita mais abaixo,
-cedida para fins didáticos.
+Quase todos os dados usados no curso são **públicos**. Eles vêm em pacotes, um por módulo,
+publicados como *Releases* do repositório do curso: cada pacote traz os arquivos já baixados e
+tratados, e com eles no lugar o código dos capítulos lê tudo do disco, sem depender de internet
+durante a aula. A única exceção à regra dos dados públicos é o recorte do modelo quatro etapas,
+cedido para fins didáticos.
 
-## No repositório
+## Os pacotes de dados
+
+| Módulo | Pacote | Tamanho | Onde fica | Como instalar |
+|:--|:--|--:|:--|:--|
+| 1 | [`dados_modulo1.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo1/dados_modulo1.zip) | 30 MB | `dados/` | à mão |
+| 2 | [`dados_modulo2.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo2/dados_modulo2.zip) | 57 MB | `dados/brutos/` | à mão ou `R/preparar_modulo2.R` |
+| 3 | [`dados_modulo3.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo3/dados_modulo3.zip) | 41 MB | `dados/brutos/` | à mão ou `R/preparar_modulo3.R` |
+| 4 | [`dados_modulo4.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo4/dados_modulo4.zip) | 67 MB | `dados/brutos/` | à mão ou `R/preparar_modulo4.R` |
+| 5 | [cinco `.7z`, um por cidade](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5) | 40 a 175 MB | `dados/brutos/projeto_final/` | à mão (@sec-m5-projeto) |
+
+Para instalar **à mão** um pacote dos módulos 1 a 4:
+
+1. baixe o `.zip` pelo link da tabela (ou na lista *Assets* da página do Release);
+2. descompacte-o **dentro da pasta do projeto do curso**, a que tem o arquivo
+   `curso-r-transportes.Rproj`. Os pacotes já trazem a pasta `dados/`, e os arquivos caem no
+   lugar certo;
+3. confira o caminho de um arquivo: por exemplo, `curso-r-transportes/dados/brutos/grade_pr.gpkg`.
+   Se aparecer uma pasta a mais no meio (`dados_modulo2/dados/...`), mova a pasta `dados/` um
+   nível para cima. Se o Windows perguntar se deve substituir arquivos, responda **Sim**: alguns
+   arquivos se repetem entre pacotes, e são os mesmos.
+
+Os scripts de preparo dos módulos 2 a 4 fazem isso sozinhos e ainda instalam os pacotes do R
+que faltam. Com o projeto do curso aberto, rode no console, por exemplo:
+
+```r
+source("https://raw.githubusercontent.com/Joaobazzo/curso-r-transportes/main/R/preparar_modulo4.R")
+```
+
+Os pacotes se completam: instalar o do módulo 3 não apaga os arquivos do módulo 2. Cada um traz
+um `LEIA-ME.txt` com as fontes.
+
+### Módulo 1: fundamentos de R
 
 | Arquivo | Descrição | Fonte |
 |:--|:--|:--|
-| `dados/cabotagem_tku_2025.xlsx` | TKU da navegação de cabotagem, 2025, por par de instalações portuárias e grupo de mercadoria (732 registros, 12 colunas) | ANTAQ, Estatístico Aquaviário, tabela TB6.1 |
-| `dados/cabotagem_tku_2025.csv` | O mesmo conteúdo em CSV (UTF-8, separador `,`), para leitura sem `readxl` | idem |
+| `dados/cabotagem_tku_2025.xlsx` e `.csv` | TKU da navegação de cabotagem, 2025, por par de instalações portuárias e grupo de mercadoria (732 registros, 12 colunas) | ANTAQ, Estatístico Aquaviário, tabela TB6.1 |
+| `dados/processados/modelo4etapas/` | recorte do modelo quatro etapas da RMC, hora pico manhã (detalhes abaixo) | exportação PTV VISUM, cedida para fins didáticos |
+| `dados/brutos/EXP_2025_MUN.csv` | exportações por município em 2025, para o desafio do estudo de caso | Comex Stat (MDIC) |
+| `dados/brutos/UF_MUN.csv` | tabela de municípios do Comex Stat (codificação Latin-1) | Comex Stat (MDIC) |
 
-Links diretos:
+A base de cabotagem também está no próprio repositório, com links diretos:
+[cabotagem_tku_2025.xlsx](https://github.com/Joaobazzo/curso-r-transportes/raw/main/dados/cabotagem_tku_2025.xlsx) e
+[cabotagem_tku_2025.csv](https://github.com/Joaobazzo/curso-r-transportes/raw/main/dados/cabotagem_tku_2025.csv).
 
-- [cabotagem_tku_2025.xlsx](https://github.com/Joaobazzo/curso-r-transportes/raw/main/dados/cabotagem_tku_2025.xlsx)
-- [cabotagem_tku_2025.csv](https://github.com/Joaobazzo/curso-r-transportes/raw/main/dados/cabotagem_tku_2025.csv)
+### Módulo 2: objetos espaciais
+
+| Arquivo | Descrição | Fonte |
+|:--|:--|:--|
+| `dados/portos_antaq.csv` | portos de exemplo, com coordenadas | elaboração própria |
+| `muni_br.gpkg` | municípios do Brasil, 2022 (malha simplificada) | IBGE, via `geobr` |
+| `muni_pr_sc.gpkg` | municípios do PR e de SC, 2022 | IBGE, via `geobr` |
+| `pr.gpkg` | limite do Paraná, 2020 | IBGE, via `geobr` |
+| `sedes_2022.gpkg` | sedes municipais, 2022 | IBGE, via `geobr` |
+| `grade_pr.gpkg` | grade estatística do PR: população por célula, Censo 2022 (@sec-m2-estudo-de-caso) | IBGE, via `geobr` |
+| `br116_serra.gpkg` | eixo da BR-116 na Serra do Mar | OpenStreetMap |
+| `dem_morretes.tif` | altimetria de Morretes (PR) (@sec-m2-raster); troque o município no código para gerar outro | AWS Terrain Tiles, via `elevatr` |
+| `dem_br116_perfil.tif` | altimetria da faixa do trecho mais longo da BR-116, para o perfil altimétrico (@sec-m2-exercicios) | AWS Terrain Tiles, via `elevatr` |
+
+Exceto `portos_antaq.csv`, todos ficam em `dados/brutos/`.
+
+### Módulo 3: dados geoespaciais avançados
+
+| Arquivo | Descrição | Fonte |
+|:--|:--|:--|
+| `rede_sao_paulo_santos.gpkg` | vias principais entre São Paulo e Santos, para o roteamento e o diagnóstico de rede | OpenStreetMap |
+| `portos_osm.gpkg`, `pontes_br116.gpkg` | extração de dados do OSM | OpenStreetMap |
+| `br116_serra.gpkg`, `rodovias_serra_pr.gpkg` | estudo de caso de declividade (@sec-m3-declividade) | OpenStreetMap |
+| `dem_serra.tif` | altimetria da Serra do Mar paranaense | AWS Terrain Tiles, via `elevatr` |
+| `muni_br.gpkg`, `uf_br.gpkg` | malhas municipal e estadual | IBGE, via `geobr` |
+| `comexstat/EXP_2024_MUN.csv`, `comexstat/tab_UF_MUN.csv` | exportações municipais de 2024 e tabela de municípios (@sec-m3-comexstat) | Comex Stat (MDIC) |
+
+### Módulo 4: acessibilidade
+
+| Arquivo | Descrição | Fonte |
+|:--|:--|:--|
+| `fortaleza/fortaleza.osm.pbf` | rede viária de Fortaleza, para o `r5r` | OpenStreetMap |
+| `fortaleza/gtfs_fortaleza.zip` | GTFS de Fortaleza, válido de 03/04 a 03/07/2026 (não descompacte) | Etufor, dados abertos da Prefeitura de Fortaleza |
+| `aop_fortaleza.rds` | acessibilidade, população, empregos e renda em Fortaleza, 2019 (@sec-m4-acessibilidade) | Ipea, `aopdata` |
+| `rede_sao_paulo_santos.gpkg`, `portos_osm.gpkg`, `pontes_br116.gpkg` | os mesmos do módulo 3, para quem começa por aqui | OpenStreetMap |
+
+O roteamento com o `r5r` (@sec-m4-r5r) pede também o **Java 21** (`java -version` responde 21).
+
+### Módulo 5: projeto final
+
+Um pacote `.7z` por cidade, para o relatório de acessibilidade do projeto final (@sec-m5-projeto):
+Belo Horizonte, Fortaleza, Porto Alegre, Rio de Janeiro e São Paulo. Baixe só o da cidade que
+escolher e extraia-o em `dados/brutos/projeto_final/`, com o [7-Zip](https://www.7-zip.org/)
+(*Extrair aqui*). Cada pacote traz uma pasta `{cidade}/` com:
+
+| Arquivo | Descrição | Fonte |
+|:--|:--|:--|
+| `{cidade}.osm.pbf` | rede viária recortada em torno da área urbana (os hexágonos com população, com 10 km de folga) | OpenStreetMap, extratos da Geofabrik |
+| `gtfs_{cidade}.zip` | GTFS do transporte público, num único arquivo e já conferido no `r5r` | Mobility Database (SPTrans, SMTR-Rio, EPTC, SUMOB-BH) e Etufor |
+| `aop_{cidade}.rds` | grade hexagonal H3 com população, empregos e renda, 2019 | Ipea, `aopdata` |
+| `LEIA-ME.txt` | validade do GTFS, data de partida recomendada e tratamentos feitos | — |
+
+A tabela das cidades, com tamanhos, validade dos GTFS e cuidados de cada uma, está na
+@sec-m5-projeto. A página do projeto final em São Paulo (@sec-m5-projeto-sp) usa o pacote de
+São Paulo e baixa o relevo com o `elevatr`.
+
+## Gerados pelo próprio código
+
+Alguns dados não vêm em pacote nenhum: o próprio capítulo os gera ou baixa na primeira execução
+e os guarda em disco. Nas execuções seguintes, lê do cache.
+
+| Arquivo | Origem | Capítulo |
+|:--|:--|:--|
+| `dados/brutos/od_sintetica.csv` e `.parquet` | gerado localmente (2 milhões de linhas) | @sec-m3-duckdb |
+| CNEFE | baixado pelo `geocodebr` na primeira geocodificação | @sec-m3-geocodificacao |
+| `dados/projeto_final/*.rds` | resultados do roteamento multimodal | @sec-m4-r5r |
+| `dados/brutos/sao_paulo_relevo/relevo_sao_paulo.tif` | altimetria de São Paulo via `elevatr` | @sec-m5-projeto-sp |
+| `dados/projeto_final_sp/*.rds` | resultados do projeto final em São Paulo | @sec-m5-projeto-sp |
+
+Os scripts que montaram os pacotes estão na pasta `R/` do repositório (`preparar_modulo2.R` a
+`preparar_modulo4.R`, `gerar_release_modulo4.R` e `preparar_projeto_final.R`): com eles, dá para
+baixar de novo cada arquivo das fontes originais.
+
+## A base de cabotagem
 
 ### Dicionário da base de cabotagem
 
@@ -109,22 +217,6 @@ responsável. O script que gera o recorte a partir dos arquivos originais está 
 `scripts/00-gera-recorte-modelo4etapas.R`.
 :::
 
-## Baixados pelo próprio código
-
-Os capítulos baixam estes dados na primeira execução e guardam em `dados/brutos/`, que não vai
-para o repositório. Nas execuções seguintes, leem do cache.
-
-| Arquivo gerado | Origem | Capítulo |
-|:--|:--|:--|
-| `muni_pr_sc.gpkg`, `muni_br.gpkg`, `uf_br.gpkg`, `pr.gpkg` | `geobr` (malhas do IBGE) | módulos 2, 3 e 5 |
-| `grade_pr.gpkg` | `geobr::read_statistical_grid()`: população por célula | @sec-m2-estudo-de-caso |
-| `br116_serra.gpkg`, `pontes_br116.gpkg`, `portos_osm.gpkg`, `rodovias_serra_pr.gpkg` | OpenStreetMap via `osmdata` | módulos 2, 3 e 4 |
-| `dem_morretes.tif` | altimetria de Morretes (PR) via `elevatr` (AWS Terrain Tiles); troque o município no código para gerar outro | @sec-m2-raster |
-| `dem_br116_perfil.tif` | altimetria só da faixa do trecho mais longo da BR-116, para o perfil altimétrico | @sec-m2-exercicios |
-| `dem_serra.tif` | altimetria da Serra do Mar via `elevatr` (bbox fixo) | @sec-m3-declividade |
-| `aop_fortaleza.rds` | `aopdata`: acessibilidade em Fortaleza, 2019 | @sec-m4-acessibilidade |
-| `od_sintetica.csv/.parquet` | gerado localmente (2 milhões de linhas) | @sec-m3-duckdb |
-
 ## Comex Stat (MDIC)
 
 Vem no pacote de dados do módulo 3 (`R/preparar_modulo3.R`), em `dados/brutos/comexstat/`: as
@@ -180,16 +272,6 @@ maior estado exportador do país. A função `co_mun_comex_para_ibge()` está no
 **3. O município é o do domicílio fiscal da empresa exportadora**, não o da produção. Uma
 trading sediada em São Paulo que exporta soja do Mato Grosso aparece como São Paulo. Isso
 invalida o dado municipal como proxy de origem de carga.
-
-## Preparo manual (apenas o `r5r`)
-
-Os blocos do `r5r` (@sec-m4-r5r) não são executados na construção do site. Para rodá-los:
-
-1. **JDK 21** instalado (`java -version` responde 21).
-2. Pasta `dados/brutos/fortaleza/` com:
-   - o `.pbf` do OpenStreetMap, via `osmextract::oe_download(osmextract::oe_match("Ceará")$url, download_directory = "dados/brutos/fortaleza")`;
-   - o **GTFS de Fortaleza** em `.zip`, sem descompactar, de
-     <https://dados.fortaleza.ce.gov.br/dataset/?tags=gtfs>.
 
 ## Outras fontes citadas no material
 

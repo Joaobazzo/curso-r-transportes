@@ -29,13 +29,13 @@ flowchart LR
   A["<b>1. Dados</b><br/>pacote da cidade:<br/>GTFS, OpenStreetMap<br/>e uso do solo (aopdata)"]
   B["<b>2. Roteamento</b><br/>capítulo do r5r:<br/>isócronas, itinerário,<br/>matrizes e cenário"]
   C["<b>3. Relatório</b><br/>blocos desta página:<br/>relatorio.qmd → HTML"]
-  A -- "data_raw/projeto_final/{cidade}/" --> B
+  A -- "dados/brutos/projeto_final/{cidade}/" --> B
   B -- "dados/projeto_final/" --> C
 ```
 
 | Etapa | O que fazer | Onde | Resultado |
 |:--|:--|:--|:--|
-| 1. Dados | baixar e extrair o pacote da cidade | abaixo | `data_raw/projeto_final/{cidade}/` |
+| 1. Dados | baixar e extrair o pacote da cidade | abaixo | `dados/brutos/projeto_final/{cidade}/` |
 | 2. Roteamento | rodar `scripts/m4-05-r5r.R` com as linhas da cidade | @sec-m4-r5r | `dados/projeto_final/*.rds` |
 | 3. Relatório | empilhar os blocos num `relatorio.qmd` e renderizar | esta página | `relatorio.html` |
 
@@ -64,14 +64,14 @@ Para preparar os dados:
 1. **Baixe o pacote** da sua cidade, clicando no nome do arquivo na tabela acima ou na lista
    *Assets* da página do
    [Release](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5).
-2. **Crie a pasta `data_raw/projeto_final/`** dentro da pasta do projeto do curso, a que tem o
-   arquivo `curso-r-transportes.Rproj`.
+2. **Crie a pasta `projeto_final/` dentro de `dados/brutos/`**, na pasta do projeto do curso
+   (a que tem o arquivo `curso-r-transportes.Rproj`). O caminho fica `dados/brutos/projeto_final/`.
 3. **Mova o `.7z` para essa pasta e extraia-o ali.** No Windows, use o
    [7-Zip](https://www.7-zip.org/): clique com o botão direito no arquivo, *7-Zip* → *Extrair
    aqui*. O pacote já traz a pasta da cidade, e o resultado fica assim (com Porto Alegre):
 
 ```
-data_raw/projeto_final/porto_alegre/
+dados/brutos/projeto_final/porto_alegre/
 ├── aop_porto_alegre.rds
 ├── gtfs_porto_alegre.zip
 ├── LEIA-ME.txt
@@ -97,8 +97,8 @@ O capítulo de roteamento multimodal (@sec-m4-r5r) faz todo o cálculo e salva c
 ## Fortaleza
 
 ```r
-arquivo   <- "data_raw/projeto_final/fortaleza/aop_fortaleza.rds"
-pasta     <- "data_raw/projeto_final/fortaleza"
+arquivo   <- "dados/brutos/projeto_final/fortaleza/aop_fortaleza.rds"
+pasta     <- "dados/brutos/projeto_final/fortaleza"
 partida   <- as.POSIXct("2026-05-16 07:00:00", tz = "America/Fortaleza")   # um sábado
 centro    <- data.frame(id = "centro", lon = -38.5267, lat = -3.7275)     # Praça do Ferreira
 messejana <- data.frame(id = "bairro", lon = -38.4920, lat = -3.8300)     # Messejana
@@ -107,8 +107,8 @@ messejana <- data.frame(id = "bairro", lon = -38.4920, lat = -3.8300)     # Mess
 ## Belo Horizonte
 
 ```r
-arquivo   <- "data_raw/projeto_final/belo_horizonte/aop_belo_horizonte.rds"
-pasta     <- "data_raw/projeto_final/belo_horizonte"
+arquivo   <- "dados/brutos/projeto_final/belo_horizonte/aop_belo_horizonte.rds"
+pasta     <- "dados/brutos/projeto_final/belo_horizonte"
 partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
 centro    <- data.frame(id = "centro", lon = -43.9378, lat = -19.9191)    # Praça Sete
 messejana <- data.frame(id = "bairro", lon = -43.9580, lat = -19.8160)    # Venda Nova
@@ -117,8 +117,8 @@ messejana <- data.frame(id = "bairro", lon = -43.9580, lat = -19.8160)    # Vend
 ## Porto Alegre
 
 ```r
-arquivo   <- "data_raw/projeto_final/porto_alegre/aop_porto_alegre.rds"
-pasta     <- "data_raw/projeto_final/porto_alegre"
+arquivo   <- "dados/brutos/projeto_final/porto_alegre/aop_porto_alegre.rds"
+pasta     <- "dados/brutos/projeto_final/porto_alegre"
 partida   <- as.POSIXct("2025-10-22 07:00:00", tz = "America/Sao_Paulo")   # dentro do GTFS
 centro    <- data.frame(id = "centro", lon = -51.2276, lat = -30.0277)    # Mercado Público
 messejana <- data.frame(id = "bairro", lon = -51.1530, lat = -30.1480)    # Restinga
@@ -127,8 +127,8 @@ messejana <- data.frame(id = "bairro", lon = -51.1530, lat = -30.1480)    # Rest
 ## Rio de Janeiro
 
 ```r
-arquivo   <- "data_raw/projeto_final/rio_de_janeiro/aop_rio_de_janeiro.rds"
-pasta     <- "data_raw/projeto_final/rio_de_janeiro"
+arquivo   <- "dados/brutos/projeto_final/rio_de_janeiro/aop_rio_de_janeiro.rds"
+pasta     <- "dados/brutos/projeto_final/rio_de_janeiro"
 partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
 centro    <- data.frame(id = "centro", lon = -43.1910, lat = -22.9035)    # Central do Brasil
 messejana <- data.frame(id = "bairro", lon = -43.3384, lat = -22.8735)    # Madureira
@@ -137,8 +137,8 @@ messejana <- data.frame(id = "bairro", lon = -43.3384, lat = -22.8735)    # Madu
 ## São Paulo
 
 ```r
-arquivo   <- "data_raw/projeto_final/sao_paulo/aop_sao_paulo.rds"
-pasta     <- "data_raw/projeto_final/sao_paulo"
+arquivo   <- "dados/brutos/projeto_final/sao_paulo/aop_sao_paulo.rds"
+pasta     <- "dados/brutos/projeto_final/sao_paulo"
 partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
 centro    <- data.frame(id = "centro", lon = -46.6340, lat = -23.5504)    # Praça da Sé
 messejana <- data.frame(id = "bairro", lon = -46.4020, lat = -23.5830)    # Cidade Tiradentes
@@ -175,7 +175,7 @@ outra sobrescreve os arquivos. Para fazer duas cidades, copie a pasta antes de r
 ## Etapa 3: o relatório
 
 1. **Crie o arquivo `relatorio.qmd` na raiz do projeto do curso**, a mesma pasta que contém
-   `dados/` e `data_raw/`. Os caminhos do relatório são relativos a ela.
+   a pasta `dados/`. Os caminhos do relatório são relativos a ela.
 
 2. **Copie os blocos abaixo, na ordem**, colando cada um no fim do `relatorio.qmd`. Os blocos
    de texto (os que começam com `##`) são um ponto de partida: reescreva com as suas palavras,
@@ -234,7 +234,7 @@ library(ggplot2)
 # a pasta do pacote da cidade: "belo_horizonte", "fortaleza", "porto_alegre",
 # "rio_de_janeiro" ou "sao_paulo"
 cidade <- "fortaleza"
-brutos <- file.path("data_raw/projeto_final", cidade)
+brutos <- file.path("dados/brutos/projeto_final", cidade)
 
 pasta <- "dados/projeto_final"
 
@@ -563,3 +563,53 @@ relatório usa camadas alternáveis.
 Abra uma *issue* no repositório do curso, com o código e a mensagem de erro completa. Dúvidas
 registradas ajudam toda a turma.
 :::
+
+## Resultados
+
+::: {.callout-note}
+## Publicado uma semana depois do projeto final
+
+Os arquivos desta seção foram liberados uma semana depois da entrega do projeto final, para
+você conferir o seu trabalho, ver como ficaria o relatório de outra cidade ou rodar as cinco.
+:::
+
+Para cada cidade há dois arquivos:
+
+- **o roteamento** (`roteamento_{cidade}.R`): todo o cálculo do capítulo de roteamento
+  multimodal, com os parâmetros da cidade já preenchidos. Ele lê o pacote da cidade e grava os
+  resultados intermediários (isócronas, itinerário, matrizes comparadas, carregamento) em
+  `dados/projeto_final/{cidade}/`;
+- **o relatório** (`relatorio_{cidade}.qmd`): o relatório final, com todos os blocos desta página
+  e o texto da cidade, inclusive as limitações e uma primeira conclusão, escrita a partir dos
+  números.
+
+| Cidade | Roteamento | Relatório | Cálculo |
+|:--|:--|:--|:--|
+| Belo Horizonte | [`roteamento_belo_horizonte.R`](recursos/projeto_final/roteamento_belo_horizonte.R){download="roteamento_belo_horizonte.R"} | [`relatorio_belo_horizonte.qmd`](recursos/projeto_final/relatorio_belo_horizonte.qmd){download="relatorio_belo_horizonte.qmd"} | uns 6 min |
+| Fortaleza | [`roteamento_fortaleza.R`](recursos/projeto_final/roteamento_fortaleza.R){download="roteamento_fortaleza.R"} | [`relatorio_fortaleza.qmd`](recursos/projeto_final/relatorio_fortaleza.qmd){download="relatorio_fortaleza.qmd"} | uns 3 min |
+| Porto Alegre | [`roteamento_porto_alegre.R`](recursos/projeto_final/roteamento_porto_alegre.R){download="roteamento_porto_alegre.R"} | [`relatorio_porto_alegre.qmd`](recursos/projeto_final/relatorio_porto_alegre.qmd){download="relatorio_porto_alegre.qmd"} | uns 5 min |
+| Rio de Janeiro | [`roteamento_rio_de_janeiro.R`](recursos/projeto_final/roteamento_rio_de_janeiro.R){download="roteamento_rio_de_janeiro.R"} | [`relatorio_rio_de_janeiro.qmd`](recursos/projeto_final/relatorio_rio_de_janeiro.qmd){download="relatorio_rio_de_janeiro.qmd"} | uns 10 min |
+| São Paulo | [`roteamento_sao_paulo.R`](recursos/projeto_final/roteamento_sao_paulo.R){download="roteamento_sao_paulo.R"} | [`relatorio_sao_paulo.qmd`](recursos/projeto_final/relatorio_sao_paulo.qmd){download="relatorio_sao_paulo.qmd"} | uns 20 min |
+
+Ou baixe os dez de uma vez:
+[`projeto_final_resultados.zip`](recursos/projeto_final/projeto_final_resultados.zip).
+
+Para rodar uma cidade:
+
+1. **Os dados:** extraia o pacote `.7z` da cidade em `dados/brutos/projeto_final/`, como na
+   etapa 1.
+2. **Os arquivos:** salve o `roteamento_{cidade}.R` e o `relatorio_{cidade}.qmd` na **raiz do
+   projeto do curso**, a pasta que contém `dados/`.
+3. **O roteamento:** abra o `roteamento_{cidade}.R` no RStudio e clique em *Source*. No fim, ele
+   avisa quantos arquivos gravou em `dados/projeto_final/{cidade}/`. Cada cidade tem a sua
+   subpasta: rodar uma não apaga os resultados da outra, nem os da etapa 2.
+4. **O relatório:** abra o `relatorio_{cidade}.qmd` e clique em *Render*. O HTML sai ao lado,
+   num arquivo só, com os mapas embutidos.
+
+Os números devem bater com os da tabela da seção "Como saber se ficou bom", acima: com os mesmos
+dados e parâmetros, o `r5r` dá sempre o mesmo resultado. O relatório pede o mesmo que o
+seu: Java 21 para o roteamento e os pacotes do módulo 5.
+
+Os dez arquivos saem de dois modelos, um para o roteamento e outro para o relatório. Eles são
+preenchidos com os parâmetros de cada cidade pelo `R/gerar_resultados_projeto_final.R`, no
+repositório do curso.

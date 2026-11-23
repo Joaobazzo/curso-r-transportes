@@ -32,7 +32,7 @@ modulos <- list(
                  "m5-03-parametrizados.qmd",
                  "m4-06-exercicios.qmd"),
   "modulo5"  = c("m5-00-visao-geral.qmd", "m4-01-r5r-gtfs.qmd",
-                 "m4-05-r5r.qmd", "m5-02-quarto.qmd", "m5-04-projeto.qmd",
+                 "m4-05-r5r.qmd", "m5-02-quarto.qmd", "m5-04-projeto.qmd", "m5-04b-projeto-sp.qmd",
                  "m5-05-proximos-passos.qmd")
 )
 

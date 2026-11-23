@@ -56,6 +56,32 @@ Argumentos que importam:
 - `year`: a malha muda a cada censo e a cada criação de município. **Declare sempre**.
 - `simplified = TRUE` (padrão): geometria leve, para mapas. Use `FALSE` para medir área.
 - `cache = TRUE` (padrão): o arquivo fica guardado localmente após o primeiro *download*.
+- `output`: o tipo de objeto devolvido. O padrão, `"sf"`, carrega tudo na memória; veja abaixo
+  a alternativa para bases grandes.
+
+::: {.callout-tip}
+## Bases grandes: `output = "duckdb"`
+
+Setores censitários, a grade estatística ou a malha municipal sem simplificação pesam centenas
+de MB, e as operações espaciais sobre elas ficam lentas no `sf`. Nesses casos, peça ao `geobr`
+uma tabela do **DuckDB**, com `output = "duckdb"`. Ela não é carregada na memória: o `geobr`
+devolve uma tabela "preguiçosa" do pacote `duckspatial`, e os filtros e as operações espaciais
+rodam no banco. Só o resultado volta para o R, como um objeto `sf` comum, no `collect()`.
+
+```{r}
+#| eval: false
+mun <- geobr::read_municipality(code_muni = "all", year = 2022, output = "duckdb")
+
+mun |>
+  dplyr::filter(abbrev_state == "PR") |>
+  duckspatial::ddbs_transform("EPSG:5880") |>          # projeção métrica, como no sf
+  duckspatial::ddbs_area(new_column = "area_m2") |>
+  dplyr::collect()                                     # só aqui os dados vêm para o R
+```
+
+O `duckspatial` é apresentado no capítulo de DuckDB (@sec-m3-duckdb). Para os exemplos do curso,
+o `sf` basta; o `duckspatial` faz diferença quando a base não cabe confortavelmente na memória.
+:::
 
 ::: {.callout-tip}
 ## Não decorou o código IBGE do município? Procure na própria malha
