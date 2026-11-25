@@ -1,0 +1,339 @@
+# SQL and DuckDB in R {#sec-m3-duckdb}
+
+The previous chapter turned addresses into points. In module 4, the OSM network becomes a graph, and
+routing links the points to one another. The end product of routing, whether by car with
+`dodgr` or by public transport with `r5r`, is always the same: a **table of origin–destination
+pairs**, with distance, time or cost. And that table grows with the square of the number
+of zones:
+
+| Zones | OD pairs |
+|:--|--:|
+| 2 points: São Paulo and Santos (@sec-m4-roteamento) | 4 |
+| 645 municipalities of São Paulo state | 416 thousand |
+| 1,227 hexagons in Porto Alegre (@sec-m4-gtfs) | 1.5 million |
+| 5,570 municipalities in Brazil | 31 million |
+
+Add to this the other attributes of a freight study (mode, commodity, tonnes) and more than
+one scenario, and the table no longer fits comfortably in memory. The same goes for the Ministry's other
+everyday datasets: GTFS, fleet GPS, Comex Stat.
+
+Loading everything into memory and filtering afterwards is the slowest route, and often
+impossible. DuckDB solves this: it is an analytical database that runs **inside** the R process,
+with no server and no separate installation, reading CSV and Parquet straight from disk.
+
+```{r}
+library(dplyr)
+library(DBI)
+library(duckdb)
+```
+
+::: {.callout-warning}
+The examples in this chapter produce a file of about 100 MB in `dados/brutos/`. If your
+repository is inside a synchronised folder (Dropbox, OneDrive, Google Drive), pause
+the synchronisation or mark `dados/brutos/` as ignored. Otherwise, the service tries to sync the
+file in the middle of the render.
+:::
+
+## A large dataset for the example
+
+So that the chapter is reproducible without a *download*, we will generate a synthetic freight OD
+matrix with 2 million pairs: the order of magnitude of Porto Alegre's 1.5-million-pair
+matrix, with what a freight study would add to it. Each row is a pair of zones, with the
+network distance (what routing delivers), the mode and the tonnes carried.
+
+```{r}
+arquivo <- "dados/brutos/od_sintetica.csv"
+
+if (!file.exists(arquivo)) {
+  set.seed(42)
+  n <- 2e6
+  od <- data.frame(
+    origem     = sample(1:2000, n, replace = TRUE),
+    destino    = sample(1:2000, n, replace = TRUE),
+    modo       = sample(c("rodoviario", "ferroviario", "cabotagem"), n,
+                        replace = TRUE, prob = c(0.7, 0.2, 0.1)),
+    distancia_km = round(runif(n, 5, 2500), 1),
+    toneladas    = round(rlnorm(n, meanlog = 3, sdlog = 1.2), 2)
+  )
+  data.table::fwrite(od, arquivo)
+}
+
+round(file.size(arquivo) / 1024^2, 1)   # size in MB
+```
+
+## Three ways to answer the same question
+
+The question: **what is the total TKU by mode** (road, rail, coastal shipping)? That is: sum `distancia_km × toneladas`
+grouping by mode.
+
+```{r}
+# 1. DuckDB: the query runs in the database, only the result (3 rows) comes back to R
+tempo_duckdb <- system.time({
+  con <- duckdb::dbConnect(duckdb::duckdb())
+  resultado_duckdb <- DBI::dbGetQuery(con, sprintf("
+    SELECT modo,
+           COUNT(*)                        AS pares,
+           SUM(distancia_km * toneladas)   AS tku
+    FROM read_csv_auto('%s')
+    GROUP BY modo
+    ORDER BY tku DESC
+  ", arquivo))
+  duckdb::dbDisconnect(con, shutdown = TRUE)
+})
+
+resultado_duckdb
+```
+
+```{r}
+# 2. data.table: fast, but loads the whole dataset into memory
+tempo_dt <- system.time({
+  dt <- data.table::fread(arquivo)
+  resultado_dt <- dt[, .(pares = .N, tku = sum(distancia_km * toneladas)), by = modo]
+})
+```
+
+```{r}
+# 3. readr + dplyr: the most readable, the slowest and the most memory-hungry
+tempo_dplyr <- system.time({
+  resultado_dplyr <- readr::read_csv(arquivo, show_col_types = FALSE, progress = FALSE) |>
+    dplyr::summarise(pares = dplyr::n(), tku = sum(distancia_km * toneladas), .by = modo)
+})
+```
+
+```{r}
+#| label: tbl-desempenho
+data.frame(
+  approach = c("DuckDB (SQL, without loading)", "data.table::fread", "readr + dplyr"),
+  seconds  = round(c(tempo_duckdb[["elapsed"]],
+                      tempo_dt[["elapsed"]],
+                      tempo_dplyr[["elapsed"]]), 2)
+) |>
+  dplyr::arrange(seconds) |>
+  knitr::kable(caption = "Time to aggregate 2 million rows")
+```
+
+The numbers vary with the machine, but the order usually holds. Three observations worth
+more than the times themselves:
+
+1. DuckDB **does not load the file**: it reads, aggregates and discards, in parallel. Memory
+   use stays close to zero, which is what makes it possible to work with files larger than the
+   RAM.
+2. `data.table` is very fast, but needs the dataset to fit in memory.
+3. The difference between the three disappears on small datasets. Below a few hundred
+   thousand rows, use whatever is most readable: `dplyr`.
+
+## `duckplyr`: `dplyr` syntax, DuckDB engine
+
+If you do not want to write SQL, `duckplyr` translates `dplyr` verbs into DuckDB.
+
+```{r}
+#| eval: false
+library(duckplyr)
+
+od_lazy <- duckplyr::read_csv_duckdb(arquivo)     # nothing is read yet
+
+resultado <- od_lazy |>
+  dplyr::filter(modo == "rodoviario", distancia_km > 500) |>
+  dplyr::summarise(tku = sum(distancia_km * toneladas), .by = origem) |>
+  dplyr::arrange(dplyr::desc(tku)) |>
+  dplyr::collect()                              # here the query is run
+```
+
+The difference is the `collect()` at the end. Everything before it is planning; the work only happens
+when the result is requested. This pattern, *lazy evaluation*, is the same as in `arrow` and
+`dbplyr`.
+
+## `dplyr` queries on a database table
+
+A third route, useful when the dataset is already in a database:
+
+```{r}
+con <- duckdb::dbConnect(duckdb::duckdb())
+DBI::dbExecute(con, sprintf("CREATE VIEW od AS SELECT * FROM read_csv_auto('%s')", arquivo))
+
+dplyr::tbl(con, "od") |>
+  dplyr::filter(modo == "cabotagem") |>
+  dplyr::group_by(origem) |>
+  dplyr::summarise(tku = sum(distancia_km * toneladas), pares = dplyr::n()) |>
+  dplyr::arrange(dplyr::desc(tku)) |>
+  head(5) |>
+  dplyr::collect()
+```
+
+```{r}
+# to see the SQL that dplyr generated: great for learning SQL
+dplyr::tbl(con, "od") |>
+  dplyr::filter(modo == "cabotagem") |>
+  dplyr::group_by(origem) |>
+  dplyr::summarise(tku = sum(distancia_km * toneladas)) |>
+  dplyr::show_query()
+```
+
+```{r}
+duckdb::dbDisconnect(con, shutdown = TRUE)
+```
+
+## Parquet: the format for storing large datasets
+
+```{r}
+arquivo_parquet <- "dados/brutos/od_sintetica.parquet"
+
+con <- duckdb::dbConnect(duckdb::duckdb())
+if (!file.exists(arquivo_parquet)) {
+  DBI::dbExecute(con, sprintf(
+    "COPY (SELECT * FROM read_csv_auto('%s')) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)",
+    arquivo, arquivo_parquet))
+}
+
+tamanhos <- c(csv_mb = file.size(arquivo), parquet_mb = file.size(arquivo_parquet)) / 1024^2
+round(tamanhos, 1)
+```
+
+```{r}
+tempo_parquet <- system.time({
+  r <- DBI::dbGetQuery(con, sprintf(
+    "SELECT modo, SUM(distancia_km * toneladas) AS tku FROM '%s' GROUP BY modo",
+    arquivo_parquet))
+})
+duckdb::dbDisconnect(con, shutdown = TRUE)
+
+round(tempo_parquet[["elapsed"]], 2)
+```
+
+Parquet is **columnar and compressed**: it takes a fraction of the CSV's space and, since it stores statistics per
+block, it allows whole chunks of the file to be skipped when reading. For working datasets you
+query repeatedly, converting to Parquet once is usually the best investment of
+time in the project.
+
+::: {.callout-tip}
+## SQL that covers 90% of cases
+
+```sql
+SELECT coluna1, coluna2, SUM(x) AS total   -- what to bring
+FROM 'arquivo.parquet'                     -- from where
+WHERE uf = 'PR' AND ano = 2025             -- row filter
+GROUP BY coluna1, coluna2                  -- aggregation
+HAVING SUM(x) > 1000                       -- filter on the aggregate
+ORDER BY total DESC                        -- ordering
+LIMIT 20;                                  -- cut-off
+```
+
+The mapping to `dplyr` is direct: `SELECT` → `select`/`summarise`, `WHERE` → `filter`
+before, `GROUP BY` → `.by`, `HAVING` → `filter` after, `ORDER BY` → `arrange`,
+`LIMIT` → `head`.
+:::
+
+## Spatial inside the database: `duckspatial`
+
+DuckDB has a spatial extension, and `duckspatial` brings it to R **in place of `sf`**, to a
+large extent. There is no need to write SQL: for each `st_*` function in `sf` there is an equivalent with
+the `ddbs_*` prefix, which runs in DuckDB underneath.
+
+| `sf` | `duckspatial` |
+|:--|:--|
+| `st_transform()` | `ddbs_transform()` |
+| `st_area()`, `st_length()`, `st_distance()` | `ddbs_area()`, `ddbs_length()`, `ddbs_distance()` |
+| `st_buffer()`, `st_centroid()`, `st_union()` | `ddbs_buffer()`, `ddbs_centroid()`, `ddbs_union()` |
+| `st_intersection()` | `ddbs_intersection()` |
+| `st_join()` | `ddbs_join()` |
+| `st_filter()` | `ddbs_filter()` |
+
+The functions accept two kinds of input: **`sf` objects**, which are already in R, or **tables
+in a DuckDB connection**. They chain with `|>` and with the `dplyr` verbs, and return
+a "lazy" table: the query only runs, and the result only comes into R, at `collect()`, which
+returns an ordinary `sf` object.
+
+For the example, 50 thousand points drawn at random in Paraná, as if they were GPS records, and the usual
+question: how many fall in each municipality?
+
+```{r}
+#| message: false
+muni_pr <- sf::st_read("dados/brutos/muni_br.gpkg", quiet = TRUE) |>
+  dplyr::filter(abbrev_state == "PR") |>
+  dplyr::select(code_muni, name_muni)
+
+set.seed(42)
+gps <- sf::st_sf(id = 1:50000, geometry = sf::st_sample(muni_pr, 50000))
+```
+
+### With `sf` objects
+
+The most direct way: the same objects that would go into `sf::st_join()`.
+
+```{r}
+#| message: false
+duckspatial::ddbs_join(gps, muni_pr, join = "within") |>
+  dplyr::count(name_muni, sort = TRUE) |>
+  head(5) |>
+  dplyr::collect()
+```
+
+### With tables in a connection
+
+When the dataset is large, it is best to write it **once** into a DuckDB database and work on the
+tables, by name. That way the data do not need to go through R at each operation. With
+`dbdir = "dados/processados/espacial.duckdb"`, the database lives in a file and survives the session.
+
+```{r}
+#| message: false
+con <- duckspatial::ddbs_create_conn()            # in-memory database
+
+duckspatial::ddbs_write_table(con, muni_pr, "municipios", quiet = TRUE)
+duckspatial::ddbs_write_table(con, gps, "gps", quiet = TRUE)
+
+duckspatial::ddbs_join("gps", "municipios", join = "within", conn = con) |>
+  dplyr::count(name_muni, sort = TRUE) |>
+  head(5) |>
+  dplyr::collect()
+```
+
+The result is the same, and so is the syntax. What changes is where the data live.
+
+### A chain of operations
+
+The functions chain like those of `sf`. The area of the municipalities, for example, after projecting
+to a metric system:
+
+```{r}
+#| message: false
+duckspatial::ddbs_transform("municipios", "EPSG:5880", conn = con) |>
+  duckspatial::ddbs_area(new_column = "area_m2") |>
+  dplyr::mutate(area_km2 = area_m2 / 1e6) |>
+  dplyr::arrange(dplyr::desc(area_km2)) |>
+  head(3) |>
+  dplyr::collect()
+
+DBI::dbDisconnect(con)
+```
+
+Measure areas and distances **after projecting** (`ddbs_transform()`), as in `sf`. In
+DuckDB 2.x, the functions that measure on the ellipsoid require an extra setting and fail
+without it.
+
+::: {.callout-tip}
+## `geobr` already delivers the boundaries in DuckDB
+
+`geobr`'s functions accept `output = "duckdb"`: instead of loading the boundaries into memory as
+`sf`, they return a `duckspatial` table, ready for the `ddbs_*` functions. For heavy
+boundaries, such as census tracts or the statistical grid, it is the natural route:
+
+```{r}
+#| eval: false
+geobr::read_municipality(code_muni = "all", year = 2022, output = "duckdb") |>
+  dplyr::filter(abbrev_state == "PR") |>
+  duckspatial::ddbs_transform("EPSG:5880") |>
+  duckspatial::ddbs_area(new_column = "area_m2") |>
+  dplyr::collect()
+```
+:::
+
+With 50 thousand points, `sf` still copes, and the time difference is small. `duckspatial`
+pays off when the geometries number in the millions, or when the dataset does not fit comfortably in
+memory: the gain is larger with the data stored in the database, because they no longer go through R. For
+smaller datasets, `sf` remains simpler. And simplicity has value.
+
+Documentation: <https://cidree.github.io/duckspatial/>.
+
+The dataset in this chapter was synthetic on purpose: clean, with the right types, no surprises. The
+next chapter takes DuckDB to a real, large dataset, Comex Stat, where the problem
+is no longer only size but also data **quality**.

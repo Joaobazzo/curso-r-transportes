@@ -1,0 +1,245 @@
+# OD matrices and spatial flows {#sec-m3-matrizes}
+
+The origin–destination matrix is the central structure of transport modelling. This chapter deals
+with three things: how to store it without wasting memory, how to turn it into geometry for the
+map, and how to compute indicators from it.
+
+```{r}
+library(sf)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(Matrix)
+```
+
+## Long format and matrix format
+
+An OD matrix can be represented in two ways, and converting between them is routine:
+
+```{r}
+od_longo <- data.frame(
+  origem    = c("AM", "AM", "PA", "SP", "PR"),
+  destino   = c("SP", "PR", "MA", "AM", "AM"),
+  toneladas = c(1200, 450, 980, 310, 120)
+)
+
+od_largo <- od_longo |>
+  tidyr::pivot_wider(names_from = destino, values_from = toneladas, values_fill = 0)
+
+od_matriz <- as.matrix(od_largo[, -1])
+rownames(od_matriz) <- od_largo$origem
+
+od_matriz
+```
+
+The long format is better for storing, filtering and joining; the matrix format is what
+models consume. Note the asymmetry: the flow AM→SP (1200) is not the same as SP→AM (310). That is the
+feature that distinguishes an OD matrix from a distance matrix.
+
+```{r}
+# margins: production and attraction
+data.frame(
+  zona    = rownames(od_matriz),
+  emitido = rowSums(od_matriz)
+) |>
+  dplyr::full_join(
+    data.frame(zona = colnames(od_matriz), atraido = colSums(od_matriz)),
+    by = "zona"
+  ) |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) tidyr::replace_na(x, 0)),
+         saldo = atraido - emitido)
+```
+
+## Sparse matrices
+
+In a real OD matrix, most cells are zero: each zone relates to few
+others. Storing all the zeros wastes memory explosively.
+
+```{r}
+n <- 5000    # zones
+
+# dense matrix: stores n² values
+memoria_densa <- n^2 * 8 / 1024^3       # in GB (double = 8 bytes)
+round(memoria_densa, 2)
+```
+
+A 5,000 × 5,000 matrix takes about 0.2 GB; with 20,000 zones (the number of census
+tracts in a metropolitan region) it would be more than 3 GB just to store zeros.
+
+```{r}
+set.seed(1)
+n_pares <- 50000       # only 0.2% of the pairs have flow
+
+esparsa <- Matrix::sparseMatrix(
+  i = sample(n, n_pares, replace = TRUE),
+  j = sample(n, n_pares, replace = TRUE),
+  x = round(rlnorm(n_pares, 4, 1), 1),
+  dims = c(n, n)
+)
+
+format(object.size(esparsa), units = "MB")
+dim(esparsa)
+```
+
+A few megabytes instead of hundreds. And the usual operations work as normal:
+
+```{r}
+soma_linhas <- Matrix::rowSums(esparsa)
+soma_colunas <- Matrix::colSums(esparsa)
+
+c(total = sum(esparsa),
+  pares_com_fluxo = length(esparsa@x),
+  densidade = round(length(esparsa@x) / (n * n), 5))
+```
+
+```{r}
+# back to the long format, only with the pairs that have flow
+longo <- summary(esparsa) |>
+  as.data.frame() |>
+  dplyr::rename(origem = i, destino = j, fluxo = x)
+
+head(longo, 4)
+nrow(longo)
+```
+
+::: {.callout-tip}
+Travel time matrices from `r5r` and `dodgr` already come in the long format, with one row per
+pair. It is the "natural" sparse form. Convert to `sparseMatrix` when you need matrix
+algebra (trip distribution, gravity models); keep it as a `data.frame` when the
+work is filtering, aggregating and mapping.
+:::
+
+## From OD matrix to spatial flow
+
+The desire line map is the most recognisable representation of an OD matrix. Building it
+takes three steps: the zones' coordinates, lines between the pairs, and a visual scale that does not
+lie.
+
+```{r}
+zonas <- data.frame(
+  zona = c("AM", "PA", "MA", "PR", "SP"),
+  lon  = c(-60.02, -48.50, -44.30, -49.27, -46.63),
+  lat  = c( -3.10,  -1.46,  -2.53, -25.43, -23.55)
+) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4674)
+
+# generic function: OD table + zone points -> desire lines
+od_para_linhas <- function(od, pontos, col_origem = "origem",
+                           col_destino = "destino", col_id = "zona") {
+  xy <- sf::st_coordinates(pontos)
+  idx <- setNames(seq_len(nrow(pontos)), pontos[[col_id]])
+
+  io <- idx[od[[col_origem]]]
+  id <- idx[od[[col_destino]]]
+
+  geom <- Map(\(a, b) sf::st_linestring(rbind(xy[a, ], xy[b, ])), io, id) |>
+    sf::st_sfc(crs = sf::st_crs(pontos))
+
+  sf::st_sf(od, geometry = geom)
+}
+
+linhas <- od_para_linhas(od_longo, zonas)
+linhas
+```
+
+```{r}
+#| label: fig-desejo
+#| fig-cap: "Desire lines: width proportional to the flow"
+#| fig-height: 5
+arquivo <- "dados/brutos/uf_br.gpkg"
+if (!file.exists(arquivo)) {
+  ufs <- geobr::read_state(year = 2020, showProgress = FALSE)
+  sf::st_write(ufs, arquivo, quiet = TRUE)
+}
+ufs <- sf::st_read(arquivo, quiet = TRUE)
+
+ggplot() +
+  geom_sf(data = ufs, fill = "grey97", colour = "grey85", linewidth = 0.2) +
+  geom_sf(data = linhas |> dplyr::arrange(toneladas),
+          aes(linewidth = toneladas, alpha = toneladas), colour = "#1a5b8a") +
+  geom_sf(data = zonas, size = 2, colour = "#0d3b5c") +
+  scale_linewidth_continuous(range = c(0.3, 3), name = "Tonnes") +
+  scale_alpha_continuous(range = c(0.35, 0.9), guide = "none") +
+  theme_void(base_size = 10)
+```
+
+Four representation decisions worth discussing with whoever will read the map:
+
+1. **Width proportional to the flow** is the convention. With very skewed flows (the normal
+   case), use a square-root or logarithmic scale, otherwise the largest line covers the map.
+2. **Sorting from smallest to largest** (`arrange(toneladas)`) makes the large lines
+   drawn on top, not hidden.
+3. **Transparency** helps when many lines overlap.
+4. **Filtering** is legitimate: showing the 30 largest flows and saying that they represent X% of the
+   total usually communicates better than a thousand unreadable lines.
+
+```{r}
+#| eval: false
+# ready-made alternatives for the same task
+stplanr::od2line(flow = od_longo, zones = zonas)   # straight lines from the OD table
+stplanr::od2odf(od_longo, zonas)                   # coordinates of the pairs
+```
+
+::: {.callout-note}
+## A straight line is not a route
+
+The desire line shows **origin, destination and volume**, not the path. To represent the
+flow on the actual infrastructure (a highway, a shipping route), you need to route
+each pair and add up the flows per segment: the **assignment**. The result is a network loading
+map, in which the width sits on the road, not in the air. That is what the `flownet` package and the
+`stplanr::overline()` function do, and what we come back to in module 4.
+:::
+
+## Aggregating and subsetting a matrix
+
+Two routine operations: aggregating zones into larger regions and separating internal flows from
+external ones.
+
+```{r}
+regiao <- c(AM = "Norte", PA = "Norte", MA = "Nordeste", PR = "Sul", SP = "Sudeste")
+
+od_longo |>
+  dplyr::mutate(reg_o = regiao[origem], reg_d = regiao[destino]) |>
+  dplyr::summarise(toneladas = sum(toneladas), .by = c(reg_o, reg_d)) |>
+  tidyr::pivot_wider(names_from = reg_d, values_from = toneladas, values_fill = 0)
+```
+
+```{r}
+od_longo |>
+  dplyr::mutate(tipo = dplyr::if_else(origem == destino, "internal", "external")) |>
+  dplyr::summarise(toneladas = sum(toneladas), pares = dplyr::n(), .by = tipo)
+```
+
+## Indicators from the matrix
+
+```{r}
+# distance between the zones (in km), from the geometry
+d_km <- sf::st_distance(zonas) |> units::set_units(km) |> as.numeric() |>
+  matrix(nrow = nrow(zonas), dimnames = list(zonas$zona, zonas$zona))
+
+od_ind <- od_longo |>
+  dplyr::mutate(
+    dist_km = d_km[cbind(origem, destino)],
+    tku     = toneladas * dist_km
+  )
+
+od_ind |>
+  dplyr::arrange(dplyr::desc(tku)) |>
+  dplyr::mutate(dplyr::across(c(dist_km, tku), \(x) round(x, 1))) |>
+  knitr::kable()
+```
+
+```{r}
+# aggregate indicators
+od_ind |>
+  dplyr::summarise(
+    toneladas = sum(toneladas),
+    tku       = sum(tku),
+    distancia_media_km = round(sum(tku) / sum(toneladas), 1)
+  )
+```
+
+The **average haul distance** (TKU ÷ tonnes) is an indicator that sums up the matrix in
+one number and lets you compare modes, years and scenarios: it is how far, on average, each tonne
+travels. In the following case study, we take the opposite route: we start from the TKU published
+by ANTAQ and estimate the tonnage.

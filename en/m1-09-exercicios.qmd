@@ -1,0 +1,269 @@
+# Exercises {#sec-m1-exercicios}
+
+Do the exercises **before** opening the solutions. They all use the coastal shipping dataset prepared
+below; some ask you to go back to the raw file on purpose.
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(scales)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(uf_origem  = stringr::str_to_upper(uf_origem),
+         uf_destino = stringr::str_to_upper(uf_destino),
+         tku_bi     = tku / 1e9)
+
+nrow(cabotagem)
+```
+
+## 1. Types and inspection
+
+Find out, without looking at the answer: how many text columns and how many numeric columns does the dataset have?
+Which commodity (`sh2`) has the largest number of records?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+table(sapply(cabotagem, class))
+
+cabotagem |> dplyr::count(sh2, sort = TRUE) |> dplyr::slice_head(n = 3)
+```
+:::
+
+## 2. Combined filters
+
+How many links have their destination in the Northeast region **and** the profile "Carga Conteinerizada"
+(container cargo)? What is the total TKU of these links?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+nordeste <- c("AL","BA","CE","MA","PB","PE","PI","RN","SE")
+
+cabotagem |>
+  dplyr::filter(uf_destino %in% nordeste, perfil == "Carga Conteinerizada") |>
+  dplyr::summarise(ligacoes = dplyr::n(), tku_bi = round(sum(tku_bi), 2))
+```
+:::
+
+## 3. Text
+
+Create a `capitulo_sh` column with only the HS chapter code (the characters before the
+hyphen in `sh2`) and count how many distinct chapters there are. Then list the five
+chapters with the highest TKU, with the readable description.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+cabotagem |>
+  dplyr::mutate(
+    capitulo_sh = stringr::str_extract(sh2, "^[^-]+"),
+    descricao   = stringr::str_remove(sh2, "^[^-]+-") |> stringr::str_squish()
+  ) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(capitulo_sh, descricao)) |>
+  dplyr::arrange(dplyr::desc(tku_bi)) |>
+  dplyr::slice_head(n = 5) |>
+  dplyr::mutate(descricao = stringr::str_trunc(descricao, 45), tku_bi = round(tku_bi, 1))
+```
+:::
+
+## 4. Dates
+
+Each module's asynchronous material is released the day after the second session. Given the
+vector with the dates of the second sessions of Option A, compute each module's release date
+and the corresponding day of the week. How many days are there between the first and the last release?
+
+```{r}
+segundos_encontros <- as.Date(c("2026-09-30", "2026-10-07", "2026-10-14",
+                                "2026-10-21", "2026-11-04"))
+```
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+library(lubridate)
+
+liberacao <- segundos_encontros + lubridate::days(1)
+
+data.frame(
+  modulo = 1:5,
+  encontro = format(segundos_encontros, "%d/%m/%Y"),
+  liberacao = format(liberacao, "%d/%m/%Y"),
+  dia_semana = lubridate::wday(liberacao, label = TRUE, abbr = TRUE)
+)
+
+as.numeric(max(liberacao) - min(liberacao))
+```
+:::
+
+## 5. Grouping and shares
+
+For each cargo profile, which destination state is the most important and what percentage of the profile's
+TKU does it represent?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  dplyr::mutate(part = tku_bi / sum(tku_bi), .by = perfil) |>
+  dplyr::slice_max(tku_bi, n = 1, by = perfil) |>
+  dplyr::transmute(perfil, uf_destino,
+            tku_bi = round(tku_bi, 1),
+            part = scales::percent(part, accuracy = 0.1)) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+```
+:::
+
+## 6. *Long* → *wide*
+
+Build a table with one row per destination state and one column per cargo profile, containing the
+TKU in billions, with a final total column, ordered by the total. Zeros where there is no flow.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(uf_destino, perfil)) |>
+  tidyr::pivot_wider(names_from = perfil, values_from = tku_bi, values_fill = 0) |>
+  dplyr::mutate(total = rowSums(dplyr::across(dplyr::where(is.numeric)))) |>
+  dplyr::arrange(dplyr::desc(total)) |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) round(x, 1))) |>
+  knitr::kable()
+```
+:::
+
+## 7. A `join` with a diagnosis
+
+The table below has the estimated population of some port municipalities. Join it with the TKU
+attracted by destination municipality and answer: which municipalities in the coastal shipping dataset are **not**
+in the population table? What is the TKU per inhabitant of those that matched?
+
+```{r}
+populacao <- data.frame(
+  municipio = c("Santos", "Paranaguá", "Itajaí", "São Luís", "Manaus",
+                "Rio de Janeiro", "Salvador", "Suape", "Angra dos Reis"),
+  pop = c(418375, 156174, 223112, 1037775, 2063547, 6211223, 2417678, NA, 182000)
+)
+```
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+por_municipio <- cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(cidade_destino, uf_destino)) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+
+# diagnosis: what does not match (top 10 by TKU)
+por_municipio |>
+  dplyr::anti_join(populacao, by = c("cidade_destino" = "municipio")) |>
+  dplyr::slice_head(n = 10)
+
+# the join, taking care not to lose rows
+resultado <- por_municipio |>
+  dplyr::left_join(populacao, by = c("cidade_destino" = "municipio"),
+            relationship = "many-to-one") |>
+  dplyr::filter(!is.na(pop)) |>
+  dplyr::mutate(tku_por_hab = tku_bi * 1e9 / pop) |>
+  dplyr::arrange(dplyr::desc(tku_por_hab))
+
+resultado |>
+  dplyr::transmute(cidade_destino, uf_destino,
+            tku_bi = round(tku_bi, 1),
+            pop,
+            `t·km per inhabitant` = scales::comma(round(tku_por_hab)))
+```
+
+Note that most destination municipalities are **not** in the population table: in
+real work, that table would come from `censobr`/`sidrar` with the IBGE code as the key, not from
+a typed-in list. That is exactly the subject of modules 2 and 3.
+:::
+
+## 8. A complete chart
+
+Reproduce a horizontal bar chart with the 12 largest destination port facilities
+by TKU, with value labels, a formatted axis, title, subtitle
+and source.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+#| label: fig-ex-instalacoes
+#| fig-cap: "Twelve largest destination facilities by coastal shipping TKU"
+#| fig-height: 5.5
+cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(instalacao_destino, uf_destino)) |>
+  dplyr::slice_max(tku_bi, n = 12) |>
+  dplyr::mutate(rotulo = stringr::str_c(stringr::str_trunc(instalacao_destino, 28), " (", uf_destino, ")")) |>
+  ggplot(aes(x = tku_bi, y = reorder(rotulo, tku_bi))) +
+  geom_col(fill = "#1a5b8a") +
+  geom_text(aes(label = scales::number(tku_bi, accuracy = 0.1)),
+            hjust = -0.15, size = 3) +
+  scale_x_continuous(
+    labels = scales::label_number(big.mark = ","),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(
+    title = "Coastal shipping: destination facilities by TKU",
+    subtitle = "Billions of tonne-kilometres, 2025",
+    x = "TKU (billion t·km)", y = NULL,
+    caption = "Source: ANTAQ, Estatístico Aquaviário (TB6.1)."
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+```
+:::
+
+## 9. Challenge: a reusable function
+
+Write a function `resumir_por(dados, coluna)` that takes the dataset and the **name of a column**
+and returns the total TKU, the number of links and the percentage share for each category of that
+column, sorted. Test it with `perfil`, `uf_destino` and `sh2`.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+resumir_por <- function(dados, coluna) {
+  dados |>
+    dplyr::summarise(
+      ligacoes = dplyr::n(),
+      tku_bi   = sum(tku_bi),
+      .by = {{ coluna }}
+    ) |>
+    dplyr::mutate(part = tku_bi / sum(tku_bi)) |>
+    dplyr::arrange(dplyr::desc(tku_bi)) |>
+    dplyr::mutate(tku_bi = round(tku_bi, 2),
+           part   = scales::percent(part, accuracy = 0.1))
+}
+
+resumir_por(cabotagem, perfil)
+resumir_por(cabotagem, uf_destino) |> dplyr::slice_head(n = 5)
+```
+
+The `{{ coluna }}` (called *embrace*) is `dplyr`'s mechanism for writing functions that
+take unquoted column names. It is what turns an analysis into a reusable
+tool. It will be used in module 5 to produce one report per municipality from a
+single template.
+:::

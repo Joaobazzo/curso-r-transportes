@@ -1,0 +1,414 @@
+# Accessibility to opportunities {#sec-m4-acessibilidade}
+
+Accessibility is the ease of reaching destinations of interest (jobs, health, education)
+from a place, taking into account the actual travel time over the transport network. It is an
+indicator that combines, in one number per place, the **distribution of opportunities** and the
+**performance of the transport system**. It is the measure that answers the question "whose life
+does this project improve?".
+
+The conceptual introduction of this chapter follows Ipea's book *Introduction to urban accessibility*
+(Pereira and Herszenhut, 2023), freely available in English at
+<https://ipeagit.github.io/intro_access_book/>. It is worth reading in full, especially
+chapters 2 (measures) and 3 (calculation in R).
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(accessibility)
+```
+
+## The two ingredients: where people live, where the opportunities are
+
+The chapter's example is Fortaleza, with data from Ipea's Access to Opportunities project: the
+city divided into hexagons of about 0.1 km², with population, income and opportunities in each
+one.
+
+```{r}
+arquivo <- "dados/brutos/aop_fortaleza.rds"
+
+if (!file.exists(arquivo)) {
+  aop <- aopdata::read_access(
+    city = "Fortaleza",
+    mode = "public_transport",
+    year = 2019,
+    peak = TRUE,
+    geometry = TRUE,
+    showProgress = FALSE
+  )
+  saveRDS(aop, arquivo)
+}
+
+aop <- readRDS(arquivo)
+```
+
+Before any measure, the two maps every accessibility analysis combines:
+
+```{r}
+#| label: fig-ingredientes
+#| fig-cap: "Resident population (left) and formal jobs (right) per hexagon, Fortaleza"
+#| fig-height: 4.2
+mapa_hex <- function(dados, coluna, titulo, paleta) {
+  ggplot(dados) +
+    geom_sf(aes(fill = .data[[coluna]]), colour = NA) +
+    scale_fill_viridis_c(option = paleta, direction = -1, transform = "sqrt",
+                         breaks = scales::breaks_pretty(n = 3),
+                         labels = scales::label_number(big.mark = ","), name = NULL) +
+    labs(title = titulo) +
+    theme_void(base_size = 9) +
+    theme(legend.position = "bottom", legend.key.width = unit(1.6, "cm"))
+}
+
+patchwork::wrap_plots(
+  mapa_hex(aop, "P001", "Where people live", "mako"),
+  mapa_hex(aop, "T001", "Where the jobs are", "rocket"),
+  nrow = 1
+)
+```
+
+The mismatch is visible: the population is spread across the whole city, while jobs are concentrated
+in the centre and in a few corridors. **Accessibility is the measure of this mismatch, mediated
+by the transport system**: how much of the map on the right someone can reach from
+each point of the map on the left, within a reasonable time.
+
+## The same yardstick in two places
+
+The most direct way to see this is to choose two starting points and ask: **how many
+jobs are within 30 minutes of here?**
+
+For this example, the travel time is **approximate**: straight-line distance divided by
+a door-to-door speed of 18 km/h, typical of urban public transport. It is a
+simplification, and the section on the `accessibility` package, further down, comes back to it. But it is enough
+to show the idea.
+
+```{r}
+centros_hex <- sf::st_point_on_surface(sf::st_transform(aop, 31984))   # UTM 24S
+
+# two starting points: the hexagon with the most jobs (the centre) and, among the 10% most
+# populous, the farthest from it (a populous neighbourhood on the outskirts)
+i_centro <- which.max(aop$T001)
+dist_ao_centro <- as.numeric(sf::st_distance(centros_hex, centros_hex[i_centro, ]))
+populosos <- which(aop$P001 >= quantile(aop$P001[aop$P001 > 0], 0.9))
+i_periferia <- populosos[which.max(dist_ao_centro[populosos])]
+
+tempo_a_partir_de <- function(i, velocidade_kmh = 18) {
+  dist_km <- as.numeric(sf::st_distance(centros_hex, centros_hex[i, ])) / 1000
+  dist_km / velocidade_kmh * 60
+}
+
+origens <- dplyr::bind_rows(
+  aop |> dplyr::mutate(origem = "Centre", tempo_min = tempo_a_partir_de(i_centro)),
+  aop |> dplyr::mutate(origem = "Outskirts", tempo_min = tempo_a_partir_de(i_periferia))
+)
+
+empregos_30 <- origens |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(empregos = sum(T001[tempo_min <= 30]), .by = origem)
+empregos_30
+```
+
+```{r}
+#| label: fig-regua
+#| fig-cap: "Approximate travel time from two points in Fortaleza. The highlighted hexagons are within 30 minutes."
+#| fig-height: 4.4
+rotulos <- setNames(
+  paste0(empregos_30$origem, ": ",
+         scales::label_number(big.mark = ",")(empregos_30$empregos),
+         " jobs within 30 min"),
+  empregos_30$origem
+)
+
+pontos_partida <- dplyr::bind_rows(
+  aop[i_centro, ] |> dplyr::mutate(origem = "Centre"),
+  aop[i_periferia, ] |> dplyr::mutate(origem = "Outskirts")
+) |>
+  sf::st_point_on_surface()
+
+ggplot(origens) +
+  geom_sf(aes(fill = cut(tempo_min, c(0, 15, 30, 45, 60, Inf),
+                         labels = c("up to 15", "15 to 30", "30 to 45", "45 to 60", "over 60"),
+                         include.lowest = TRUE)),
+          colour = NA) +
+  geom_sf(data = pontos_partida, shape = 21, size = 3, fill = "white", stroke = 1.2) +
+  facet_wrap(~origem, labeller = labeller(origem = rotulos)) +
+  scale_fill_manual(values = c("#1a5b8a", "#5b9bc8", "#e8e8e8", "#f2f2f2", "#fafafa"),
+                    name = "minutes") +
+  theme_void(base_size = 9) +
+  theme(legend.position = "bottom")
+```
+
+The yardstick is the same, 30 minutes; the result is not. Someone living in the centre reaches something like three
+times more jobs than someone living in the outlying neighbourhood. And in practice the difference is even
+bigger, because public transport on the outskirts is usually slower and less frequent
+than the 18 km/h assumed here. Doing this sum for **every** hexagon is computing an
+accessibility measure.
+
+## Place-based and person-based measures
+
+Ipea's book organises the measures into two broad groups:
+
+- **Place-based**: they assign a level of access to each place (hexagon, tract, zone), and
+  everyone who lives there gets the same value. They reflect the distribution of
+  opportunities and the network's performance, but not the characteristics of each person. They need
+  little data, are easy to compute and to communicate. They are the ones used in planning, and the
+  ones in this chapter.
+- **Person-based**: they consider age, income, disability, the day's activity schedule.
+  They are more realistic, but they require travel diaries or an origin–destination survey, are heavy to
+  compute and hard to sum up in one indicator.
+
+## Place-based measures
+
+| Measure | Question it answers | In words | Function |
+|:--|:--|:--|:--|
+| Minimum time | how long to the nearest hospital? | the shortest time to the nearest opportunity | `cost_to_closest()` |
+| Cumulative opportunities | how many jobs can I reach within 30 minutes? | sum of the opportunities within the time limit | `cumulative_cutoff()` |
+| Gravity | how many opportunities, discounting the farthest? | sum of the opportunities, each with a weight that falls with time | `gravity()` |
+| Competition (2SFCA, BFCA) | how many opportunities per person, given the competition? | like gravity, dividing each opportunity by everyone who can also reach it | `floating_catchment_area()` |
+
+The previous figure was a **cumulative** measure for two points. The difference between the measures
+lies in the **weight** each gives an opportunity according to the time to reach it:
+
+```{r}
+#| label: fig-decaimento
+#| fig-cap: "Decay functions: the weight given to an opportunity according to travel time"
+#| fig-height: 3.4
+t <- 0:90
+data.frame(
+  minutos = rep(t, 3),
+  peso = c(exp(-0.05 * t),
+           as.numeric(t <= 30),
+           pmax(0, 1 - t / 60)),
+  funcao = rep(c("exponential (0.05)", "cumulative (30 min)", "linear (60 min)"),
+               each = length(t))
+) |>
+  ggplot(aes(minutos, peso, colour = funcao)) +
+  geom_line(linewidth = 0.8) +
+  scale_colour_manual(values = c("#1a5b8a", "#b3402a", "#e0a03f"), name = NULL) +
+  labs(x = "Travel time (min)", y = "Weight of the opportunity") +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "top")
+```
+
+- The **cumulative** one is the red step: weight 1 up to 30 minutes, zero afterwards. It is the most used
+  because it is the easiest to communicate ("jobs accessible within 30 minutes"). The cost is treating a
+  job 29 minutes away as fully accessible and one 31 minutes away as inaccessible, and a job 5
+  minutes away the same as one 29 minutes away.
+- The **gravity** measure smooths the step: the exponential gives a lot of weight to what is near and little
+  to what is far. It is the most technically defensible, but the decay parameter needs to
+  be calibrated with travel data, and the final number is hard to explain in a meeting.
+- The **minimum time** adds nothing up: it only looks at the nearest opportunity. It is the most suitable
+  for essential and rare services (a high-complexity hospital), but it ignores how many
+  opportunities exist and whether the nearest one is overloaded.
+- The **competition** measures take into account that an ICU bed or a school place is contested
+  by everyone who can reach it. They are the most complete for services with limited capacity, and the
+  hardest to interpret.
+
+The choice changes the result, and that is why it must be stated in the report.
+
+## Ready-made data: `aopdata`
+
+Ipea's Access to Opportunities project publishes, for 20 Brazilian cities, the indicators
+already computed on a hexagonal grid, with population, income, race and opportunities per hexagon. It is the
+`aop` object we loaded at the start. For a diagnosis, it is the quickest route.
+
+```{r}
+dim(aop)
+names(aop) |> head(30)
+```
+
+The column names follow a documented pattern: `P001` is the total population, `R001` the per capita
+income, `T001` the total number of jobs, and the access indicators combine the type of measure
+(`CMA` = active cumulative, `TMI` = minimum time), the activity (`TT` = all jobs,
+`ST` = health, `ET` = education) and the time limit.
+
+```{r}
+cols_cma <- grep("^CMATT", names(aop), value = TRUE)
+cols_cma
+
+# income stratum column: the package has quintile and decile (R002 and R003).
+# Check in the dictionary which is which before labelling the chart:
+# aopdata::aopdata_dictionary(lang = "en")
+col_renda <- dplyr::intersect(c("R002", "R003"), names(aop))[1]
+col_renda
+```
+
+```{r}
+#| label: fig-aop-mapa
+#| fig-cap: "Jobs accessible within 60 minutes by public transport in Fortaleza"
+#| fig-height: 5
+col_60 <- dplyr::intersect(c("CMATT60"), names(aop))[1]
+
+if (!is.na(col_60)) {
+  aop_plot <- aop |>
+    dplyr::filter(!is.na(.data[[col_60]]), P001 > 0) |>
+    dplyr::mutate(acesso = .data[[col_60]])
+
+  ggplot(aop_plot) +
+    geom_sf(aes(fill = acesso), colour = NA) +
+    scale_fill_viridis_c(option = "inferno", direction = -1,
+                         labels = scales::label_number(big.mark = ","),
+                         name = "Jobs\nwithin 60 min") +
+    labs(caption = "Source: Ipea, Access to Opportunities Project (aopdata), 2019.") +
+    theme_void(base_size = 9)
+}
+```
+
+### Accessibility and inequality
+
+The indicator gains meaning when combined with who lives in each place:
+
+```{r}
+if (!is.na(col_60)) {
+  aop |>
+    sf::st_drop_geometry() |>
+    dplyr::filter(P001 > 0, !is.na(.data[[col_60]]), !is.na(.data[[col_renda]])) |>
+    dplyr::mutate(estrato_renda = .data[[col_renda]]) |>
+    dplyr::summarise(
+      pessoas = sum(P001),
+      # as.numeric(): P001 and access are integers, and the product overflows the integer limit
+      acesso_medio = round(weighted.mean(as.numeric(.data[[col_60]]), P001, na.rm = TRUE)),
+      .by = estrato_renda
+    ) |>
+    dplyr::arrange(estrato_renda) |>
+    dplyr::rename(`Income stratum` = estrato_renda, `Population` = pessoas,
+           `Jobs accessible within 60 min (mean)` = acesso_medio) |>
+    knitr::kable(align = "lrr")
+}
+```
+
+The typical reading of this kind of table (the poorest strata with less access) is the
+main equity argument in the appraisal of urban transport projects. The columns
+`R002` and `R003` hold the income strata (quintile and decile); check in the package's dictionary
+which is which before labelling the chart, because swapping them reverses the reading.
+
+## Computing from scratch: the `accessibility` package
+
+When the city is not in `aopdata`, or when you want to assess a **scenario** (a new
+route, a route removed), you have to compute it. The input is a travel time matrix,
+usually coming from `r5r` (@sec-m4-r5r), and a land use table.
+
+To demonstrate the functions in a runnable way, we will build an **approximate** time matrix
+from the distances between the hexagons, assuming an average speed.
+
+```{r}
+set.seed(2026)
+
+hex <- aop |>
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex, P001, T001, dplyr::all_of(col_renda)) |>
+  dplyr::slice_sample(n = 250)          # a sample, so that the example runs quickly
+
+centros <- sf::st_point_on_surface(sf::st_transform(hex, 31984))   # UTM 24S (Fortaleza)
+
+d <- sf::st_distance(centros) |> units::set_units(km) |> as.numeric()
+d <- matrix(d, nrow = nrow(hex))
+
+velocidade_kmh <- 18    # typical door-to-door speed of urban public transport
+
+matriz <- expand.grid(from_id = hex$id_hex, to_id = hex$id_hex,
+                      stringsAsFactors = FALSE) |>
+  dplyr::mutate(travel_time = round(as.vector(d) / velocidade_kmh * 60, 1)) |>
+  dplyr::filter(travel_time <= 90)
+
+uso_solo <- hex |>
+  sf::st_drop_geometry() |>
+  dplyr::rename(id = id_hex, populacao = P001, empregos = T001)
+
+head(matriz, 3)
+```
+
+::: {.callout-warning}
+This matrix is **illustrative**: straight-line distance divided by an average speed is not
+public transport travel time. It serves to show how the `accessibility` functions
+work. In any real use, the matrix comes from `r5r`, with the network, the GTFS and the
+departure time. The difference between the two is large, especially in cities with physical
+barriers.
+:::
+
+```{r}
+# 1. cumulative opportunities within 30, 60 and 90 minutes
+cma <- accessibility::cumulative_cutoff(
+  travel_matrix = matriz,
+  land_use_data = uso_solo,
+  opportunity   = "empregos",
+  travel_cost   = "travel_time",
+  cutoff        = c(30, 60, 90)
+)
+
+head(cma, 4)
+```
+
+```{r}
+# 2. time to the nearest opportunity
+tmi <- accessibility::cost_to_closest(
+  travel_matrix = matriz,
+  land_use_data = uso_solo,
+  opportunity   = "empregos",
+  travel_cost   = "travel_time",
+  n             = 1
+)
+
+summary(tmi[[ncol(tmi)]])   # the last column holds the time to the nearest opportunity
+```
+
+```{r}
+# 3. gravity measure, with exponential decay
+grav <- accessibility::gravity(
+  travel_matrix = matriz,
+  land_use_data = uso_solo,
+  opportunity   = "empregos",
+  travel_cost   = "travel_time",
+  decay_function = accessibility::decay_exponential(decay_value = 0.05)
+)
+
+head(grav, 4)
+```
+
+## Comparing scenarios
+
+The most valuable application in planning is not the absolute value of the indicator. It is the
+**difference between two scenarios**. So that the example runs, the scenario is also illustrative: a
+new, hypothetical route that cuts by 40% the time of trips starting or ending in the western
+half of the sample. With the real network, the two matrices come from `r5r`: the current one and the one computed with the
+edited GTFS, as in @sec-m4-r5r.
+
+The limit is **30 minutes**, not 60, for a reason that applies to any study: with 60
+minutes, almost every hexagon in the sample already reaches almost every job, and no
+intervention shows up in the indicator. A cumulative measure only shows a difference when the time
+limit is below the point at which it saturates.
+
+```{r}
+# illustrative scenario: the new route serves the hexagons in the western half of the sample
+x <- sf::st_coordinates(centros)[, "X"]
+oeste <- hex$id_hex[x < stats::median(x)]
+
+matriz_atual   <- matriz
+matriz_cenario <- matriz |>
+  dplyr::mutate(travel_time = dplyr::if_else(from_id %in% oeste | to_id %in% oeste,
+                                             travel_time * 0.60, travel_time))
+
+acesso_atual  <- accessibility::cumulative_cutoff(matriz_atual,  uso_solo, "empregos", "travel_time", 30)
+acesso_novo   <- accessibility::cumulative_cutoff(matriz_cenario, uso_solo, "empregos", "travel_time", 30)
+
+comparacao <- acesso_atual |>
+  dplyr::rename(acesso_atual = empregos) |>
+  dplyr::left_join(dplyr::rename(acesso_novo, acesso_novo = empregos), by = "id") |>
+  dplyr::mutate(
+    variacao_abs = acesso_novo - acesso_atual,
+    # with no access in the current scenario, the percentage change does not exist
+    variacao_pct = dplyr::if_else(acesso_atual > 0, 100 * (acesso_novo / acesso_atual - 1), NA_real_)
+  ) |>
+  dplyr::left_join(uso_solo, by = "id")
+
+# the number that matters to the manager: how many people gained access, and who they are
+comparacao |>
+  dplyr::summarise(
+    pessoas_beneficiadas = sum(populacao[variacao_abs > 0]),
+    ganho_medio_pct = weighted.mean(variacao_pct, populacao, na.rm = TRUE),
+    .by = dplyr::all_of(col_renda)
+  )
+```
+
+It is this table, people benefiting by income bracket, that turns a transport analysis
+into a public policy argument. The final project
+(@sec-m5-projeto) follows exactly this path.

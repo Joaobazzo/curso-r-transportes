@@ -1,0 +1,39 @@
+/* tema escuro do site (botão de modo escuro na barra lateral).
+   Mesma estrutura de styles.scss, com cores para fundo escuro. */
+
+/*-- scss:defaults --*/
+$font-family-sans-serif: "Helvetica Neue", "Segoe UI", Arial, sans-serif !default;
+$body-bg: #1b2027 !default;
+$body-color: #dde3ea !default;
+$primary: #6fb3e6 !default;
+$link-color: #7cc0f0 !default;
+$code-block-bg: #232a33 !default;
+$code-color: #9fd0f5 !default;
+$code-bg: #232a33 !default;
+$sidebar-bg: #1b2027 !default;
+$input-bg: #232a33 !default;
+$input-color: #dde3ea !default;
+
+/*-- scss:rules --*/
+.sidebar-title { font-weight: 600; }
+
+div.callout-note { border-left-color: #6fb3e6; }
+
+pre.sourceCode {
+  border: 1px solid #343d48;
+  border-radius: 4px;
+}
+
+table { font-size: 0.9em; }
+
+.modulo-meta {
+  background: #232a33;
+  border: 1px solid #343d48;
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  margin-bottom: 1.2rem;
+  font-size: 0.92em;
+}
+
+/* figuras e mapas com fundo branco: um respiro nas bordas para não "colar" no fundo escuro */
+.cell-output-display img { background: #fff; border-radius: 4px; }

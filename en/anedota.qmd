@@ -1,0 +1,46 @@
+# An anecdote {.unnumbered}
+
+Which map took you the longest to make?
+
+![Source: Ipea, [repositorio.ipea.gov.br/handle/11058/10713](https://repositorio.ipea.gov.br/handle/11058/10713).](../img/map_years_BR21.png)
+
+This is my answer. Analysing how the motorisation rate changed in every Brazilian city looks simple. On
+paper, it is. There are two sources: population, from IBGE, and the vehicle fleet, from Denatran. Two tables,
+one division. I expected to finish it in an afternoon.
+
+The first obstacle was downloading the data. Denatran publishes the fleet split by
+year and by month, each slice in its own file. That meant hundreds of manual downloads.
+I wrote code to automate it. But the files followed no pattern at all: the address for
+2001 was not the one for 2010, which was not the one for 2020. I ended up with a download routine
+for each year. The automation I had written to save time became a small project of its
+own.
+
+Then came the population data, and with them a subtler trap: some years have count data, others
+have projections. These are numbers of different natures, and putting them in the same
+series requires knowing that. Nothing in the file warns you.
+
+But what really ate up the time was matching the two datasets. Denatran's old tables
+had no municipality code: only the city name, typed in, decade after decade. And a Brazilian
+city name is not a reliable key. I standardised everything: removed accents, cedillas, hyphens,
+letter case. Even so, the matching kept failing. Paraty appears with a "y" in one dataset and with
+an "i" in the other. Old spellings with "ph" that current rules no longer use. Connectives such as "de",
+"do" and "da" appeared in one file and were missing in the other. Municipalities that changed name,
+became independent or merged in the meantime.
+
+There was no shortcut. I had to build by hand a lookup table linking each historical
+spelling to the current IBGE code. And the only way to know whether it was making progress was
+visual: I plotted the map of each state highlighting the municipalities with no match and
+watched the holes close. The map was my debugging tool.
+
+That took days. Producing the final chart in R took one or two more. Testing colour palettes and
+typography until the figure was readable took the rest of the week.
+
+I tell this story for two reasons. The first is that the heavy lifting in data analysis is almost
+never in the modelling. It is in making two datasets talk to each other. The second is what this story
+teaches about checking: a badly resolved `join` does not throw an error. It runs, returns a table, and
+you move on without knowing that you lost three hundred municipalities along the way, or that you duplicated
+rows and inflated your totals. The result looks nice and is wrong.
+
+Throughout the course, whenever we integrate datasets, we will repeat the same discipline: check the
+row count before and after the `join`, look at what was left out, compare the aggregate with the
+official source.

@@ -1,0 +1,419 @@
+# Data cleaning {#sec-m1-limpeza}
+
+In analyses with administrative data, cleaning takes more time than the analysis. The difference
+between doing it in a spreadsheet and doing it in R is that here the cleaning is **written down**: when the dataset
+is updated next year, you just run it again. And anyone can audit what was
+done.
+
+The ANTAQ dataset we use is a good case because, in 732 rows, it has almost every problem
+you will meet in real datasets.
+
+```{r}
+library(dplyr)
+library(stringr)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx")
+stopifnot(ncol(bruto) == length(colunas))
+names(bruto) <- colunas
+```
+
+## First diagnosis
+
+Before fixing anything, look at the dataset. A five-command routine:
+
+```{r}
+dim(bruto)
+sapply(bruto, class)
+```
+
+```{r}
+colSums(is.na(bruto))            # declared missing values
+```
+
+```{r}
+bruto |>
+  dplyr::summarise(dplyr::across(dplyr::where(is.character), n_distinct)) |>
+  t()
+```
+
+```{r}
+summary(bruto$tku)
+```
+
+No `NA` and no negative value. But notice two odd things: the **minimum TKU is
+zero** and there are only 2 distinct values in the `pais_origem` (country of origin) column, which should contain only
+"Brasil" in a coastal shipping dataset.
+
+```{r}
+dplyr::count(bruto, pais_origem, pais_destino)
+```
+
+`janitor` has ready-made summaries that are very useful at this stage:
+
+```{r}
+#| eval: false
+janitor::tabyl(bruto, uf_destino)     # frequency with percentage
+skimr::skim(bruto)                    # full summary, column by column
+```
+
+## Disguised missing values
+
+The `-` is the most common case of an **undeclared** missing value: it is not `NA`, it is text. Since the column
+is text, R has no way of knowing that it means "no information".
+
+```{r}
+bruto |>
+  dplyr::filter(pais_origem == "-") |>
+  dplyr::count(tku_zero = tku == 0)
+```
+
+There are **120 rows** in which every identification field is `-` and the TKU is zero: they are
+combinations of cargo profile and commodity group **with no flow** in the period, published
+by the system as empty rows. They are neither a data error nor useful information for the analysis:
+they are the table's "zero".
+
+```{r}
+bruto |> dplyr::filter(pais_origem == "-") |> dplyr::select(perfil, sh2, uf_origem, tku) |> head(3)
+```
+
+The right way to handle them: convert the `-` into `NA` explicitly, so that any later calculation
+fails visibly instead of silently.
+
+```{r}
+base <- bruto |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), \(x) dplyr::na_if(stringr::str_squish(x), "-")))
+
+colSums(is.na(base))
+```
+
+Now the missing values are declared. `readxl` and `readr` accept this instruction already when reading,
+which is even better:
+
+```{r}
+#| eval: false
+readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-", "n/d", "..."))
+```
+
+A related precaution: in spreadsheets, numbers sometimes come as text with a decimal comma.
+In that case the whole column is read as text.
+
+```{r}
+valores <- c("1250,75", "n/d", "-", "890,10")
+
+tku_corrigido <- valores |>
+  dplyr::na_if("n/d") |>
+  dplyr::na_if("-") |>
+  stringr::str_replace(",", ".") |>
+  as.numeric()
+
+tku_corrigido
+sum(is.na(tku_corrigido))
+```
+
+**Always** check how many `NA`s the conversion created. If many appeared, the number format
+was not what you assumed. And `as.numeric()` turned them into missing values without warning.
+
+## True zeros
+
+Setting the `-` rows aside, 12 rows remain with zero TKU and complete identification:
+
+```{r}
+base |>
+  dplyr::filter(tku == 0, !is.na(uf_destino)) |>
+  dplyr::select(perfil, uf_origem, cidade_origem, uf_destino, cidade_destino, tku)
+```
+
+Here navigation was recorded, but the rounded TKU came out as zero (very small distances and tonnages).
+The decision is analytical, not technical: for TKU sums, including or excluding them changes
+nothing; for **counting active links**, including or excluding them changes the result. What matters
+is to record the choice:
+
+```{r}
+base <- base |> dplyr::filter(tku > 0)
+nrow(base)
+```
+
+## *Encoding*
+
+The problem shows up like this: `São Gonçalo` read as `SÃ£o GonÃ§alo` (a UTF-8 file read as
+Latin-1) or `S?o Gon?alo` (the reverse). It is frequent in extracts from legacy systems.
+
+```{r}
+readr::guess_encoding("dados/cabotagem_tku_2025.csv", n_max = 1000)
+```
+
+```{r}
+#| eval: false
+# reading with the correct encoding
+readr::read_csv2("arquivo.csv", locale = readr::locale(encoding = "latin1"))
+read.csv2("arquivo.csv", fileEncoding = "latin1")
+
+# converting a vector that has already been read
+x <- iconv(x, from = "latin1", to = "UTF-8")
+```
+
+A quick check that there is no encoding garbage in the municipality names:
+
+```{r}
+base |>
+  dplyr::filter(stringr::str_detect(cidade_destino, "Ã|Â|�")) |>
+  dplyr::distinct(cidade_destino) |>
+  nrow()
+```
+
+::: {.callout-tip}
+On Windows, save scripts in UTF-8 (`File > Save with Encoding > UTF-8`) and check
+`Sys.getlocale("LC_CTYPE")`. In recent versions of R (4.2+) UTF-8 support on Windows has
+improved a lot, but old files still come in Latin-1.
+:::
+
+## Standardising text
+
+Before counting categories, standardise. Otherwise `"Paranaguá"`, `"PARANAGUÁ"` and `" Paranagua "`
+count as three different ports.
+
+```{r}
+base <- base |>
+  dplyr::mutate(
+    dplyr::across(dplyr::where(is.character), str_squish),
+    uf_origem  = stringr::str_to_upper(uf_origem),
+    uf_destino = stringr::str_to_upper(uf_destino),
+    chave_destino = cidade_destino |>
+      stringr::str_to_lower() |>
+      stringi::stri_trans_general("Latin-ASCII") |>
+      stringr::str_squish()
+  )
+
+base |> dplyr::distinct(cidade_destino, chave_destino) |> head(4)
+```
+
+The `chave_destino` (destination key) column is not meant for reading. It is meant for **joining** with other datasets, in the
+next chapter.
+
+## Duplicates
+
+There are two kinds: a whole row repeated (an extraction error) and a repeated **key** where it
+should be unique (a conceptual error). The second is the dangerous one.
+
+```{r}
+sum(duplicated(base))        # identical rows
+```
+
+None. But which key should be unique? Test the most natural hypothesis: one pair of
+facilities for each commodity.
+
+```{r}
+base |>
+  dplyr::count(instalacao_origem, instalacao_destino, sh2) |>
+  dplyr::filter(n > 1) |>
+  nrow()
+```
+
+There are repetitions. Before "removing duplicates", investigate **one concrete case**:
+
+```{r}
+caso <- base |>
+  dplyr::count(instalacao_origem, instalacao_destino, sh2) |>
+  dplyr::filter(n > 1) |>
+  dplyr::slice(1)
+
+base |>
+  dplyr::semi_join(caso, by = c("instalacao_origem", "instalacao_destino", "sh2")) |>
+  dplyr::select(perfil, instalacao_origem, instalacao_destino, sh2, tku)
+```
+
+What sets the rows apart is the **cargo profile**: the same commodity, between the same
+facilities, moved partly as general cargo and partly as bulk. In other words, the
+real granularity of the dataset is *profile × commodity × origin facility × destination
+facility*:
+
+```{r}
+base |>
+  dplyr::count(perfil, sh2, instalacao_origem, instalacao_destino) |>
+  dplyr::filter(n > 1) |>
+  nrow()
+```
+
+Zero: the key is identified. This matters because it is what allows TKU to be summed in any
+broader aggregation without counting anything twice.
+
+```{r}
+#| eval: false
+# how to remove duplicates when they really are an error
+base |> dplyr::distinct()                                          # identical rows
+base |> dplyr::distinct(uf_origem, uf_destino, .keep_all = TRUE)   # 1st row of each key
+base |> dplyr::slice_max(tku, n = 1, by = c(uf_origem, uf_destino), with_ties = FALSE)
+base |> dplyr::summarise(tku = sum(tku), .by = c(uf_origem, uf_destino))  # aggregate
+```
+
+::: {.callout-important}
+Never remove duplicates by reflex. First ask: **what is the unit of observation of this
+table?** If the answer is "one row per profile, commodity and pair of facilities", then
+aggregating is correct and removing is a loss of information.
+:::
+
+## *Outliers*
+
+```{r}
+q <- quantile(base$tku, c(0.25, 0.5, 0.75, 0.95, 0.99))
+round(q / 1e6, 1)      # in millions of t·km
+
+limite_sup <- q[["75%"]] + 3 * IQR(base$tku)
+
+base |>
+  dplyr::filter(tku > limite_sup) |>
+  dplyr::arrange(dplyr::desc(tku)) |>
+  dplyr::transmute(cidade_origem, uf_origem, cidade_destino, tku_bi = round(tku / 1e9, 1)) |>
+  head(5)
+```
+
+In transport flows the distribution is strongly skewed: a few pairs concentrate most
+of the TKU.
+
+```{r}
+base |>
+  dplyr::arrange(dplyr::desc(tku)) |>
+  dplyr::mutate(part = tku / sum(tku), part_acum = cumsum(part)) |>
+  dplyr::transmute(cidade_origem, cidade_destino,
+            part = scales::percent(part, accuracy = 0.1),
+            part_acum = scales::percent(part_acum, accuracy = 0.1)) |>
+  head(10)
+```
+
+::: {.callout-warning}
+An *outlier* in flow data is rarely an error. It is concentration. The largest links being an
+order of magnitude above the median is a feature of the system, not a defect of the data. Treat
+as an error only what is **impossible** (see below); for the rest, use a logarithmic scale in the
+chart instead of excluding the observation.
+:::
+
+## Unrealistic and incorrect values, and special categories
+
+This is the step that requires domain knowledge. Translate business rules into explicit
+checks (negative TKU, year out of range, invalid state codes, country other than Brazil):
+
+```{r}
+ufs_validas <- c("AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA",
+                 "PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO")
+
+base |>
+  dplyr::summarise(
+    tku_negativo    = sum(tku < 0),
+    ano_fora        = sum(!ano %in% 2000:2026),
+    uf_origem_fora  = sum(!uf_origem %in% ufs_validas),
+    uf_destino_fora = sum(!uf_destino %in% ufs_validas),
+    pais_nao_brasil = sum(pais_origem != "Brasil" | pais_destino != "Brasil")
+  ) |>
+  t()
+```
+
+The state check flagged rows. Before concluding there is an error, look at **which** values they are:
+
+```{r}
+base |>
+  dplyr::filter(!uf_origem %in% ufs_validas) |>
+  dplyr::count(uf_origem, wt = tku / 1e9, name = "tku_bi") |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+```
+
+Two categories that are neither an error nor a state:
+
+- **ZEE/Plat. Continental**: origin at sea, on the platforms of the Exclusive Economic Zone.
+  These are **37 links** accounting for about **109 billion t·km**, almost 40% of the total
+  TKU: it is the oil leaving the platforms for the terminals on the mainland. Excluding these
+  rows as an "invalid state" would destroy the largest component of the dataset.
+- **Indeterminado** (undetermined): origin not identified in the record.
+
+The right treatment is to create a column that makes these categories **explicit**, instead of
+deleting them (offshore, undetermined, intrastate, interstate):
+
+```{r}
+cabotagem <- base |>
+  dplyr::mutate(
+    origem_offshore = uf_origem == "ZEE/PLAT. CONTINENTAL",
+    origem_indefinida = uf_origem == "INDETERMINADO",
+    tipo_ligacao = dplyr::case_when(
+      origem_offshore   ~ "offshore",
+      origem_indefinida ~ "indeterminada",
+      uf_origem == uf_destino ~ "intraestadual",
+      .default = "interestadual"
+    ),
+    tku_bi = tku / 1e9
+  )
+
+cabotagem |>
+  dplyr::summarise(ligacoes = dplyr::n(), tku_bi = round(sum(tku_bi), 1), .by = tipo_ligacao) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+```
+
+This table is, on its own, a result worth a paragraph in a report: 38% of Brazilian
+coastal shipping TKU **does not leave from a port on land**, but from offshore platforms.
+
+::: {.callout-note}
+## The lesson of the chapter
+
+Cleaning is not "deleting what does not fit". Both times the data looked wrong
+(the repeated keys and the invalid states), the investigation revealed **structure**: an
+extra dimension (cargo profile) and a legitimate category (offshore). What gets deleted without
+investigation is precisely what tends to be most informative.
+:::
+
+## The complete cleaning script
+
+Putting it all together, what we hand over to the next chapters:
+
+```{r}
+#| eval: false
+# ---------------------------------------------------------------
+# 02-limpeza.R: ANTAQ coastal shipping (TB6.1)
+# Input:  dados/cabotagem_tku_2025.xlsx
+# Output: dados/cabotagem_limpa.rds
+# ---------------------------------------------------------------
+library(dplyr); library(stringr); library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+stopifnot(ncol(cabotagem) == length(colunas))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(
+    uf_origem  = stringr::str_to_upper(uf_origem),
+    uf_destino = stringr::str_to_upper(uf_destino),
+    tku_bi = tku / 1e9,
+    tipo_ligacao = dplyr::case_when(
+      uf_origem == "ZEE/PLAT. CONTINENTAL" ~ "offshore",
+      uf_origem == "INDETERMINADO"         ~ "indeterminada",
+      uf_origem == uf_destino              ~ "intraestadual",
+      .default = "interestadual"
+    )
+  )
+
+# safeguards: if the dataset changes, the script stops here
+stopifnot(
+  nrow(cabotagem) == 600,
+  all(cabotagem$tku > 0),
+  all(cabotagem$pais_destino == "Brasil"),
+  dplyr::n_distinct(cabotagem[c("perfil", "sh2", "instalacao_origem",
+                         "instalacao_destino")]) == nrow(cabotagem)
+)
+
+saveRDS(cabotagem, "dados/cabotagem_limpa.rds")
+```
+
+The `stopifnot()` with the expected number of rows deserves a comment: it **will fail**
+next year, when the dataset is updated. And that is the goal. The failure forces you to review the
+number and confirm the change was expected, instead of publishing a report with a different
+total without anyone noticing.

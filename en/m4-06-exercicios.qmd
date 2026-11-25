@@ -1,0 +1,102 @@
+# Exercises {#sec-m4-exercicios}
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+```
+
+## 1. Extracting from OSM
+
+Extract from OpenStreetMap all the railway stations (`railway = station`) in the state of
+Paraná and count how many there are. Then mark on the map those less than 20 km from the Port
+of Paranaguá.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+#| eval: false
+res <- osmdata::opq(bbox = c(-54.62, -26.72, -48.02, -22.52), timeout = 180) |>
+  osmdata::add_osm_feature(key = "railway", value = "station") |>
+  osmdata::osmdata_sf()
+
+estacoes <- res$osm_points |> dplyr::filter(!is.na(name)) |> dplyr::select(osm_id, name)
+nrow(estacoes)
+
+porto <- sf::st_sfc(sf::st_point(c(-48.5119, -25.5016)), crs = 4326)
+
+proximas <- estacoes[sf::st_is_within_distance(estacoes, porto, 20000, sparse = FALSE)[, 1], ]
+proximas$name
+```
+:::
+
+## 2. Generalised cost
+
+Using the generalised cost function from @sec-m4-roteamento, compare three transport
+alternatives for the same cargo between Manaus and Santos: coastal shipping (2,800 km, 12 days),
+road (3,900 km, 5 days) and a combination (2,000 km of coastal shipping + 400 km by road).
+Assume the per-km costs you think reasonable and **document the assumptions**.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+premissas <- data.frame(
+  modo          = c("cabotagem", "rodoviario"),
+  custo_ton_km  = c(0.12, 0.42),
+  custo_ton_dia = c(1.50, 8.00)
+)
+
+alternativas <- data.frame(
+  alternativa = c("Direct coastal shipping", "Road", "Combined", "Combined"),
+  modo        = c("cabotagem", "rodoviario", "cabotagem", "rodoviario"),
+  km          = c(2800, 3900, 2000, 400),
+  dias        = c(12, 5, 9, 1)
+)
+
+alternativas |>
+  dplyr::left_join(premissas, by = "modo") |>
+  dplyr::mutate(custo = km * custo_ton_km + dias * custo_ton_dia) |>
+  dplyr::summarise(custo_por_tonelada = round(sum(custo), 2), .by = alternativa) |>
+  dplyr::arrange(custo_por_tonelada) |>
+  knitr::kable()
+```
+
+The values are illustrative: the exercise is about the **structure** of the calculation and about recording
+the assumptions in a way that someone else can challenge them. That is what distinguishes an analysis
+from an opinion.
+:::
+
+## 3. Accessibility and income
+
+With the `aopdata` data for Fortaleza, compute the ratio between the average access of the highest
+income stratum and that of the lowest, for 30 and for 60 minutes. Does inequality increase or decrease
+with the time limit?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+aop <- readRDS("dados/brutos/aop_fortaleza.rds")
+col_renda <- dplyr::intersect(c("R002", "R003"), names(aop))[1]
+
+razao <- function(col) {
+  d <- aop |>
+    sf::st_drop_geometry() |>
+    dplyr::filter(P001 > 0, !is.na(.data[[col]]), !is.na(.data[[col_renda]])) |>
+    dplyr::summarise(acesso = weighted.mean(as.numeric(.data[[col]]), P001),
+                     .by = dplyr::all_of(col_renda)) |>
+    dplyr::arrange(.data[[col_renda]])
+
+  # highest stratum divided by the lowest (not the largest access by the smallest)
+  d$acesso[nrow(d)] / d$acesso[1]
+}
+
+c(`30 min` = razao("CMATT30"), `60 min` = razao("CMATT60")) |> round(2)
+```
+
+The ratio usually falls as the time limit grows: with more time available, even outlying
+places reach the job centres. It is an important argument, and often misused,
+because "reachable in 90 minutes" is not adequate accessibility.
+:::

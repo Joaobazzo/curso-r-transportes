@@ -1,0 +1,88 @@
+# Good practice and next steps {#sec-m5-proximos-passos}
+
+## What to take away from the course
+
+If everything else is forgotten, let these six habits remain:
+
+1. **Projects and relative paths.** No `setwd("C:/Users/...")`. It is what lets the
+   script run on a colleague's machine.
+2. **Raw data are never edited.** All cleaning happens in code, which makes it auditable
+   and repeatable when the dataset is updated.
+3. **Explicit checks.** `stopifnot()` wherever an assumption must hold, and
+   row counts before and after each `join`.
+4. **Investigate before discarding.** Both times ANTAQ's data looked wrong, the
+   investigation revealed structure: an extra dimension and a legitimate category (@sec-m1-limpeza).
+5. **State your choices.** CRS, classification method, grade limit, correction factor,
+   departure time: everything that changes the result must be written down.
+6. **The report is code.** If it does not render from scratch, it is not ready.
+
+## Mistakes that keep coming back
+
+| Symptom | Likely cause |
+|:--|:--|
+| "The layers don't overlap" | different CRS: `st_transform()`, never `st_set_crs()` |
+| *Buffer* with an odd shape or an absurd area | metric operation on geographic coordinates |
+| The report's total doubled | `join` with a duplicated key on the right-hand side |
+| A numeric column became text | decimal separator, `-` or `n/d` instead of `NA` |
+| The chart came out empty | `NA` introduced by silent conversion |
+| Tracts "with no population" | municipality name spelt differently in the other dataset |
+| `Inf` in routing | points in disconnected components of the network |
+| The map lost flow | pairs without a coordinate; check the sum before and after |
+
+## How to keep learning
+
+**Everyday reference**
+
+- [R for Data Science (2nd ed.)](https://r4ds.hadley.nz/): wrangling and visualisation.
+- [Geocomputation with R](https://r.geocompx.org/): the reference book for spatial analysis.
+- [Introduction to urban accessibility with R](https://ipeagit.github.io/intro_access_book/):
+  from the group that makes `r5r` and `aopdata`.
+- The [*cheat sheets*](https://posit.co/resources/cheatsheets/) for `dplyr`, `ggplot2`, `sf` and
+  Quarto, printed and next to the keyboard.
+
+**Communities**
+
+- Packages' *issues* sections: that is where the authors answer, and where the real problems are.
+- [R-bloggers](https://www.r-bloggers.com/) and the [Posit Community](https://forum.posit.co/) forum.
+- The [ipeaGIT](https://github.com/ipeaGIT) ecosystem, which maintains `geobr`, `censobr`, `r5r`,
+  `aopdata`, `gtfstools` and `geocodebr`. It is worth following the releases.
+
+**Natural next topics for this team**
+
+| Topic | Where to start |
+|:--|:--|
+| Demand models (generation, distribution, mode choice) | `mlogit`, `apollo` |
+| Spatial regression | `spatialreg`, `GWmodel` |
+| Time series and forecasting | `fable`, `forecast` |
+| Interactive dashboards | `shiny`, `flexdashboard`, `mapgl` |
+| Automating routines and APIs | `httr2`, `targets`, GitHub Actions |
+| Large volumes | `arrow`, `duckdb`, `sfarrow` |
+
+The `targets` package deserves a special mention: it organises long analyses as a
+chain of steps, rerunning only what changed. It is the natural next step once a
+project's script goes past a few hundred lines.
+
+## Keeping the material alive
+
+This site remains available after the course and can receive additions: new case studies,
+corrections and code the team itself develops. Contributions are welcome through the
+repository:
+
+```bash
+git clone https://github.com/Joaobazzo/curso-r-transportes.git
+cd curso-r-transportes
+quarto preview
+```
+
+Corrections and suggestions through the
+[*issues*](https://github.com/Joaobazzo/curso-r-transportes/issues), including typos,
+which are the easiest to fix and the most useful for whoever comes next.
+
+## Closing
+
+The goal of the course was never to teach a language, but to change the way work is done: moving from
+analyses that exist once, inside a spreadsheet, to analyses that are recorded,
+can be audited, corrected and rerun when the data change.
+
+If, at the end, a routine that today takes a day comes to take ten minutes, and can be repeated
+by any colleague on the team, the course has done what it set out to do.

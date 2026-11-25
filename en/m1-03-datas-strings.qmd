@@ -1,0 +1,240 @@
+# Dates and text {#sec-m1-datas-strings}
+
+In transport datasets, two kinds of column cause more work than all the others combined:
+**dates** (in inconsistent formats) and **text** (names of municipalities, facilities,
+commodities, addresses). This chapter handles both with `lubridate` and `stringr`.
+
+```{r}
+library(lubridate)
+library(stringr)
+```
+
+## Dates with `lubridate`
+
+### Reading
+
+`lubridate`'s functions are named after the order of the components: `lubridate::dmy()` for
+day-month-year, `lubridate::ymd()` for year-month-day, and so on. They tolerate different separators.
+Brazilian data usually come as day/month/year.
+
+```{r}
+lubridate::dmy("28/09/2026")
+lubridate::ymd("2026-09-28")
+lubridate::dmy(c("28/09/2026", "05-10-2026", "3 nov 2026"))
+lubridate::ymd_hms("2026-09-28 14:00:00")
+```
+
+Note that `R` always **stores** a date in the `YYYY-MM-DD` format (it is the `Date` object, a number
+under the hood). The `28/09/2026` format only exists when **displaying** the date. To
+display or export in the Brazilian format, use `format()`:
+
+```{r}
+d <- lubridate::ymd("2026-09-28")
+
+format(d, "%d/%m/%Y")          # "28/09/2026"
+format(d, "%d de %B de %Y")    # written out, in the system locale
+```
+
+The `%d/%m/%Y` pattern (day, month, 4-digit year) is the same vocabulary as `dmy()`/`ymd()`, only
+for formatting instead of reading: `%d` day, `%m` month, `%Y` 4-digit year, `%y` 2-digit year.
+
+```{r}
+#| error: true
+lubridate::dmy("2026-09-28")   # wrong order: returns NA with a warning
+```
+
+This is the most frequent error: reading a date column with the order swapped and getting `NA` in
+part of the rows. Always check:
+
+```{r}
+datas_texto <- c("28/09/2026", "30/09/2026", "31/02/2026", "")
+datas <- lubridate::dmy(datas_texto)
+datas
+sum(is.na(datas))    # how many failed?
+datas_texto[is.na(datas)]  # which ones?
+```
+
+### Components and arithmetic
+
+```{r}
+d <- lubridate::ymd("2026-09-28")
+
+lubridate::year(d); lubridate::month(d); lubridate::day(d)
+lubridate::wday(d, label = TRUE, abbr = FALSE)   # depends on the system locale
+lubridate::quarter(d)
+lubridate::yday(d)          # day of the year
+
+d + lubridate::days(15)
+d + months(1)
+d - lubridate::years(1)
+lubridate::floor_date(d, "month")   # first day of the month
+lubridate::ceiling_date(d, "month") - lubridate::days(1)  # last day of the month
+```
+
+### Intervals and durations
+
+```{r}
+inicio <- lubridate::ymd("2026-09-28")
+fim    <- lubridate::ymd("2026-11-05")
+
+fim - inicio                                  # difftime, in days
+as.numeric(fim - inicio, units = "days")
+lubridate::interval(inicio, fim) / months(1)             # in months
+lubridate::time_length(lubridate::interval(inicio, fim), "weeks")   # in weeks
+```
+
+Typical application: trip duration from two timestamps (departure, `partida`, and arrival,
+`chegada`, of three ships).
+
+```{r}
+viagens <- data.frame(
+  navio   = c("Navio A", "Navio B", "Navio C"),
+  partida = lubridate::ymd_hms(c("2026-03-01 08:30:00", "2026-03-02 22:10:00", "2026-03-04 06:00:00")),
+  chegada = lubridate::ymd_hms(c("2026-03-04 17:45:00", "2026-03-07 09:05:00", "2026-03-05 23:30:00"))
+)
+
+viagens$horas <- as.numeric(difftime(viagens$chegada, viagens$partida, units = "hours"))
+viagens$dia_semana <- lubridate::wday(viagens$partida, label = TRUE, abbr = TRUE)
+viagens
+```
+
+### Aggregating by period
+
+```{r}
+viagens$mes <- lubridate::floor_date(viagens$partida, "month")
+aggregate(horas ~ mes, data = viagens, FUN = mean)
+```
+
+::: {.callout-tip}
+## Time zone
+
+`lubridate::ymd_hms()` assumes UTC by default. For Brazilian GPS or GTFS data, give
+the time zone: `lubridate::ymd_hms(x, tz = "America/Sao_Paulo")`. Ignoring this produces three-hour errors in
+travel-time calculations. It is a recurring problem when comparing data from different sources.
+:::
+
+## Text with `stringr`
+
+All of the package's functions start with `str_`, take the text as their first argument and are
+vectorised.
+
+```{r}
+cidades <- c("  Paranaguá ", "SÃO GONÇALO DO AMARANTE", "Rio Grande", "itajaí")
+
+stringr::str_trim(cidades)                    # removes spaces at the ends
+stringr::str_squish("Porto   de    Santos")   # also removes repeated spaces
+stringr::str_to_upper(cidades)
+stringr::str_to_lower(cidades)
+stringr::str_to_title(stringr::str_to_lower(cidades))
+stringr::str_length(cidades)
+```
+
+### Search, detect, replace
+
+```{r}
+instalacoes <- c("Terminal Portuário do Pecém", "Porto de Santos",
+                 "IP4 Itacoatiara", "Terminais Fluviais do Brasil")
+
+stringr::str_detect(instalacoes, "Terminal")          # TRUE/FALSE
+stringr::str_subset(instalacoes, "Port")              # returns those that match
+stringr::str_which(instalacoes, "Port")               # positions
+stringr::str_replace(instalacoes, "Terminal", "Term.")    # first occurrence
+stringr::str_replace_all(instalacoes, " ", "_")           # all of them
+stringr::str_remove_all(instalacoes, "^IP\\d+ ")          # prefix such as "IP4 "
+```
+
+### Extract and split
+
+```{r}
+sh2 <- c("CT-Contêineres", "27-Combustíveis", "10-Cereais")
+
+stringr::str_sub(sh2, 1, 2)                       # fixed position
+stringr::str_split(sh2, "-", simplify = TRUE)     # splits into a matrix
+stringr::str_extract(sh2, "^[A-Z0-9]+")           # before the hyphen
+stringr::str_extract(sh2, "(?<=-).*$")            # after the hyphen
+```
+
+A very common case: splitting municipality and state from a single field.
+
+```{r}
+locais <- c("Paranaguá/PR", "Santos/SP", "São Luís/MA")
+
+data.frame(
+  municipio = stringr::str_extract(locais, "^[^/]+"),
+  uf        = stringr::str_extract(locais, "[A-Z]{2}$")
+)
+```
+
+### Regular expressions in a table
+
+| Pattern | Meaning | Example |
+|:--|:--|:--|
+| `^` / `$` | start / end of the text | `^BR` matches "BR-116" |
+| `\\d` | one digit | `BR-\\d{3}` matches "BR-116" |
+| `\\s` | space | `\\s+` one or more spaces |
+| `[A-Z]{2}` | two capital letters | state abbreviation |
+| `.` | any character | `a.c` matches "abc" |
+| `*` `+` `?` | 0+, 1+, 0 or 1 repetitions | `\\d+` a number |
+| `(?<=x)` | *lookbehind*: after "x" | `(?<=-)\\d+` |
+| `|` | or | `Porto|Terminal` |
+
+In R, the backslash must be doubled inside a string: `"\\d"` is the digit.
+
+```{r}
+rodovias <- c("BR-116/PR", "BR 277", "PR-508", "br-153 km 45")
+
+stringr::str_extract(rodovias, "\\d{3}")
+stringr::str_detect(stringr::str_to_upper(rodovias), "^BR")
+stringr::str_extract(rodovias, "(?i)km\\s*\\d+")
+```
+
+### Standardising to join datasets
+
+The most important use of `stringr` in the course: preparing a join **key**. Municipality
+names come with different accents, case and spacing in each dataset.
+
+```{r}
+padronizar <- function(x) {
+  x |>
+    stringr::str_squish() |>
+    stringr::str_to_lower() |>
+    stringi::stri_trans_general("Latin-ASCII") |>  # removes accents
+    stringr::str_remove_all("[^a-z ]")                      # removes punctuation
+}
+
+base_a <- c("São Gonçalo do Amarante", "Paranaguá", " Rio  Grande ")
+base_b <- c("SAO GONCALO DO AMARANTE", "PARANAGUA", "RIO GRANDE")
+
+data.frame(
+  base_a, base_b,
+  igual_cru  = base_a == base_b,
+  igual_pad  = padronizar(base_a) == padronizar(base_b)
+)
+```
+
+::: {.callout-warning}
+Standardising municipality names solves most cases, but **not all**: there are
+municipalities with the same name in different states (for example, *Bonito* exists in MS, PA, PE and BA).
+Whenever possible, use the **7-digit IBGE code** as the key, and the name only for
+human reading. We deal with this in @sec-m1-joins.
+:::
+
+### Building text
+
+```{r}
+uf <- "PR"; tku <- 8.33
+
+stringr::str_c("Ligação com destino ", uf, ": ", tku, " bi TKU")
+stringr::str_glue("Ligação com destino {uf}: {tku} bi TKU")
+sprintf("Ligação com destino %s: %.2f bi TKU", uf, tku)
+stringr::str_pad(c("1", "23", "456"), width = 3, pad = "0")   # codes with leading zeros
+```
+
+::: {.callout-note}
+We use `stringi::stri_trans_general()` instead of `iconv(to = "ASCII//TRANSLIT")` because
+`iconv`'s result varies between Windows, macOS and Linux. On Windows, it sometimes returns
+`?` instead of the accented letter. `stringi` is already installed together with `stringr`.
+:::
+
+`str_pad()` solves a classic problem: municipality or census tract codes read
+as numbers lose their leading zero. `str_pad(cod, 7, pad = "0")` restores them.

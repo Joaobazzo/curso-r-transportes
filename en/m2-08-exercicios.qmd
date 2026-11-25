@@ -1,0 +1,188 @@
+# Exercises {#sec-m2-exercicios}
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+# default basemap for mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+
+crs_trabalho <- 31982
+
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+if (!file.exists(arquivo)) {
+  # one state at a time, then stack them
+  muni_pr <- geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE)
+  muni_sc <- geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  muni <- dplyr::bind_rows(muni_pr, muni_sc)
+
+  sf::st_write(muni, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE) |> sf::st_transform(crs_trabalho)
+
+portos <- data.frame(
+  nome = c("Paranaguá", "Antonina", "São Francisco do Sul", "Itajaí", "Imbituba"),
+  lon  = c(-48.5119, -48.7119, -48.6383, -48.6486, -48.6706),
+  lat  = c(-25.5016, -25.4283, -26.2400, -26.9077, -28.2300)
+) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  sf::st_transform(crs_trabalho)
+```
+
+## 1. From CSV to map
+
+The table of ports below is in geographic coordinates. Turn it into `sf`, reproject to
+UTM 22S, and find out which municipality each port falls in.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+portos |>
+  sf::st_join(muni |> dplyr::select(name_muni, abbrev_state, code_muni)) |>
+  sf::st_drop_geometry() |>
+  knitr::kable()
+```
+
+If a port does not match (a coordinate falling in the sea), the fix is
+`st_join(..., join = st_nearest_feature)`.
+:::
+
+## 2. Checking units
+
+Compute the area of the municipality of Guaraqueçaba in km² in three ways: in `EPSG:4326`, in
+`EPSG:31982` and with `simplified = TRUE` versus `FALSE` in the `geobr` boundaries. Do the differences
+matter?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+gq <- muni |> dplyr::filter(name_muni == "Guaraqueçaba")
+
+c(
+  utm_km2 = as.numeric(units::set_units(sf::st_area(gq), km^2)),
+  geo_km2 = as.numeric(units::set_units(sf::st_area(sf::st_transform(gq, 4326)), km^2))
+) |> round(1)
+```
+
+The two are close: `s2` computes the correct geodesic area in degrees. The relevant difference
+lies in the **simplification** of the boundaries, which can change the area by a few per cent. That is why you should use
+`simplified = FALSE` to measure.
+:::
+
+## 3. Right-of-way
+
+Create a 100 m strip on each side of the BR-116 axis (the approximate "right-of-way") and
+compute its area in hectares. How many municipalities does it cross?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+br116 <- sf::st_read("dados/brutos/br116_serra.gpkg", quiet = TRUE) |>
+  sf::st_transform(crs_trabalho)
+
+dominio <- sf::st_union(br116) |> sf::st_buffer(100)
+
+c(
+  hectares = round(as.numeric(units::set_units(sf::st_area(dominio), ha)), 1),
+  municipios = sum(sf::st_intersects(muni, dominio, sparse = FALSE)[, 1])
+)
+
+muni[sf::st_intersects(muni, dominio, sparse = FALSE)[, 1], ] |>
+  sf::st_drop_geometry() |>
+  dplyr::pull(name_muni)
+```
+:::
+
+## 4. Neighbourhood
+
+Build the list of municipalities bordering Paranaguá and compute, for each one, the
+length of the shared border in km.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+pgua <- muni |> dplyr::filter(name_muni == "Paranaguá")
+vizinhos <- muni[sf::st_touches(muni, pgua, sparse = FALSE)[, 1], ]
+
+vizinhos |>
+  dplyr::mutate(
+    fronteira_km = as.numeric(units::set_units(
+      sf::st_length(sf::st_intersection(geom, sf::st_boundary(pgua$geom))), km))
+  ) |>
+  sf::st_drop_geometry() |>
+  dplyr::select(name_muni, fronteira_km) |>
+  dplyr::arrange(dplyr::desc(fronteira_km)) |>
+  dplyr::mutate(fronteira_km = round(fronteira_km, 1)) |>
+  knitr::kable()
+```
+:::
+
+## 5. Raster: elevation profile
+
+Extract the elevation along the BR-116 axis, every 500 m, and plot the profile
+(distance on the x axis, elevation on the y axis).
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+#| label: fig-ex-perfil
+#| fig-cap: "Approximate elevation profile along the BR-116 axis"
+library(terra)
+
+# a single continuous segment, so that the profile makes sense
+trecho <- br116 |>
+  dplyr::mutate(comp = as.numeric(sf::st_length(geom))) |>
+  dplyr::slice_max(comp, n = 1)
+
+# DEM covering only the chosen segment (with a margin), not the whole municipality from the
+# raster chapter: the BR-116 axis is much longer than one municipality
+arquivo_dem_perfil <- "dados/brutos/dem_br116_perfil.tif"
+if (!file.exists(arquivo_dem_perfil)) {
+  area_trecho <- sf::st_buffer(trecho, dist = 2000) |> sf::st_transform(4326)
+  dem_raw <- elevatr::get_elev_raster(locations = area_trecho, z = 10, clip = "bbox")
+  terra::writeRaster(terra::rast(dem_raw), arquivo_dem_perfil, overwrite = TRUE)
+}
+dem <- terra::rast(arquivo_dem_perfil) |> terra::project("EPSG:31982")
+
+pontos <- sf::st_line_sample(sf::st_geometry(trecho), density = 1 / 500) |>
+  sf::st_cast("POINT") |>
+  sf::st_as_sf()
+
+perfil <- data.frame(
+  dist_km = seq_len(nrow(pontos)) * 0.5,
+  alt_m   = terra::extract(dem, terra::vect(pontos), ID = FALSE)[[1]]
+)
+
+ggplot(perfil, aes(dist_km, alt_m)) +
+  geom_line(colour = "#1a5b8a", linewidth = 0.8) +
+  geom_area(fill = "#1a5b8a", alpha = 0.15) +
+  labs(x = "Distance along the segment (km)", y = "Elevation (m)") +
+  theme_minimal(base_size = 10)
+```
+
+`st_line_sample(density = 1/500)` produces one point every 500 m. It is the basis of any analysis "along
+the axis", which in module 4 becomes the slope calculation per segment.
+:::
+
+## 6. A map for checking
+
+Build a `mapview` with the BR-116's 5 km band over a satellite image and check
+visually whether it covers the expected corridor.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+#| eval: false
+faixa5 <- sf::st_union(br116) |> sf::st_buffer(5000) |> sf::st_as_sf()
+
+mapview::mapview(faixa5, map.types = "Esri.WorldImagery") +
+  mapview::mapview(br116)
+```
+:::

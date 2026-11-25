@@ -1,0 +1,455 @@
+# Public transport routing with `r5r` {#sec-m4-gtfs}
+
+For cars (@sec-m4-roteamento), the cost of an edge is fixed: length divided by
+speed. For public transport, it is not. A bus trip is made of legs, and the time of
+each one depends on the clock:
+
+1. **walk** from the origin to the stop, over the road network;
+2. **wait** for the bus, which depends on when it comes;
+3. **ride** the route, at the timetable's pace;
+4. possibly **transfer**: walk to another stop and wait again;
+5. **walk** from the last stop to the destination.
+
+That is why a public transport router needs two things: the road network, for the
+walking legs, and the **route schedules**, for the rest. `r5r` is the R interface to R5, the
+Conveyal engine that does exactly this.
+
+::: {.callout-important}
+## What runs and what does not when the site is built
+
+The blocks that call `r5r` require **JDK 21** (see @sec-r5r-java) and are not run when the
+site is built. But the whole example uses the **Porto Alegre data that come inside the
+package itself**: there is nothing to download, and the code runs on your machine as soon as Java
+is installed. Exploring the GTFS, which does not need Java, is run as usual.
+:::
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+```
+
+## Before you start: which Java does R see? {#sec-r5r-java}
+
+`r5r` needs **JDK 21**. There are three different questions, and the answers may not match:
+
+```{r}
+#| eval: false
+# 1. which java does the system find on the PATH? (the version is on the first line)
+system2("java", "-version")
+
+# 2. which folder does the JAVA_HOME variable point to? ("" = not set)
+Sys.getenv("JAVA_HOME")
+
+# 3. which Java does rJava actually load? This is the one that counts for r5r
+rJava::.jinit()
+rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")
+```
+
+There may be more than one Java installed on the computer. What matters is the third answer, which
+should start with `21`. An error such as `JAVA_HOME cannot be determined from the Registry` means
+that `rJava` did not find any Java installed.
+
+If the version is not 21, the `rJavaEnv` package installs the JDK without needing administrator
+permission and sets up the project to use it:
+
+```{r}
+#| eval: false
+install.packages("rJavaEnv")
+rJavaEnv::java_quick_install(version = 21)
+```
+
+Restart R after the installation and run the third check again.
+
+## The R5 engine: the `.jar` file {#sec-r5r-jar}
+
+`r5r` does not bundle R5. The first time it builds a network, it downloads the engine, a
+`.jar` file of about 60 MB, from Conveyal's *releases* page on GitHub
+(<https://github.com/conveyal/r5/releases>), and stores it in a cache folder. On later
+runs, it uses the stored copy.
+
+On the Ministry's network, this *download* may hang or fail: GitHub redirects the file
+to another address (`objects.githubusercontent.com`), which the network often blocks. If
+`build_network()` stops at the R5 download, first try Windows' download method,
+which goes through the system proxy, like the browser:
+
+```{r}
+#| eval: false
+options(download.file.method = "wininet")
+r5r::download_r5()
+```
+
+If that does not work, download the `.jar` in the browser and put it in the cache folder. The link and the
+folder depend on the installed version of `r5r`; this snippet shows both for your machine:
+
+```{r}
+#| eval: false
+packageVersion("r5r")
+r5r:::fileurl_from_metadata()                    # link to the .jar
+r5r:::r5r_env$cache_dir                          # folder to paste it in
+dir.create(r5r:::r5r_env$cache_dir, recursive = TRUE, showWarnings = FALSE)
+shell.exec(r5r:::r5r_env$cache_dir)              # opens the folder in Windows Explorer
+```
+
+With `r5r` 2.4.0, which asks for R5 7.5.1, they are:
+
+- **Link:** <https://github.com/conveyal/r5/releases/download/v7.5.1/r5-v7.5-1-gf3631e9-all.jar>
+- **Folder:** `C:\Users\<user>\AppData\Local\R\cache\R\r5r\r5_jar_v7.5.1`
+
+Copy the file with its original name, without renaming it.
+
+::: {.callout-note}
+## Updated `r5r`? Check the `.jar` again
+
+Each version of `r5r` asks for a version of R5. The development version (2.4.0.9001), for
+example, already asks for R5 7.6.0, in another folder (`r5_jar_v7.6.0`) and with another link. After
+updating the package, run the snippet above again and, if needed, repeat the manual download.
+:::
+
+## The input: a folder with `.pbf` and GTFS
+
+`r5r` works with a **data folder**: just put in it the OSM `.pbf` (the same as in
+@sec-m4-osm) and one or more GTFS files, and it builds the network. The package's example folder:
+
+```{r}
+pasta_poa <- system.file("extdata/poa", package = "r5r")
+
+list.files(pasta_poa, pattern = "\\.(pbf|zip)$")
+```
+
+They are the road network of a part of Porto Alegre (`poa_osm.pbf`) and two GTFS feeds: EPTC's buses
+and Trensurb's metropolitan train.
+
+## Inside the GTFS
+
+GTFS (*General Transit Feed Specification*) is the standard format for publishing public transport
+schedules. It is a `.zip` with several text tables, linked by keys.
+`gtfstools` reads them all at once:
+
+```{r}
+gtfs <- gtfstools::read_gtfs(file.path(pasta_poa, "poa_eptc.zip"))
+
+names(gtfs)
+```
+
+The tables that matter for routing:
+
+| Table | What it has | Key that links it to the others |
+|:--|:--|:--|
+| `routes` | the routes (number, name, vehicle type) | `route_id` |
+| `trips` | each trip of each route, in one direction | `trip_id`, `route_id`, `service_id` |
+| `stops` | the stops, with coordinates | `stop_id` |
+| `stop_times` | the time of each trip at each stop | `trip_id`, `stop_id` |
+| `calendar` | which days each service runs, and the validity period | `service_id` |
+| `shapes` | the routes' alignments, for drawing | `shape_id` |
+
+How the tables link through the keys (`route_id`, `trip_id`, `stop_id`, `service_id`,
+`shape_id`):
+
+![Diagram of the GTFS tables and the keys that link them. Source: Ipea, repository [`gtfs2gps-time_geography`](https://github.com/ipeaGIT/gtfs2gps-time_geography).](https://raw.githubusercontent.com/ipeaGIT/gtfs2gps-time_geography/main/figures/flowchart_GTFS_scheme.png){#fig-gtfs-esquema fig-alt="Diagram of the GTFS schema: the agency, routes, trips, stop_times, stops, calendar and shapes tables, linked by their identifier columns."}
+
+The routes:
+
+```{r}
+gtfs$routes |>
+  dplyr::select(route_id, route_short_name, route_long_name, route_type) |>
+  head()
+
+nrow(gtfs$routes)
+```
+
+`route_type` 3 is bus. The heart of GTFS is `stop_times`, the timetable
+itself:
+
+```{r}
+gtfs$stop_times |>
+  dplyr::select(trip_id, stop_sequence, stop_id, arrival_time, departure_time) |>
+  head(8)
+
+nrow(gtfs$stop_times)
+```
+
+Notice the blank times: GTFS only requires the time at timing points. Between them,
+R5 interpolates. And notice the size: more than 130 thousand rows just for the trips in this
+extract.
+
+`calendar` holds the information that causes the most errors:
+
+```{r}
+gtfs$calendar |> head(3)
+```
+
+This GTFS is valid from **15/04/2019 to 15/07/2019**, Monday to Friday. A query for a
+Saturday, or for 2026, finds no bus at all: R5 returns walking only, without warning. The
+`departure_datetime` of every query must fall within the validity period and on a service day.
+
+A look at the stops and alignments:
+
+```{r}
+paradas   <- gtfstools::convert_stops_to_sf(gtfs)
+tracados  <- gtfstools::convert_shapes_to_sf(gtfs)
+
+c(paradas = nrow(paradas), tracados = nrow(tracados))
+
+# mapgl wants coordinates in degrees (EPSG:4326)
+paradas  <- sf::st_transform(paradas, 4326)
+tracados <- sf::st_transform(tracados, 4326)
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = tracados, height = "525px") |>
+  mapgl::add_line_layer(id = "Alignments", source = tracados, line_color = "#1a5b8a",
+                        line_width = 1.5, tooltip = "shape_id") |>
+  mapgl::add_circle_layer(id = "Stops", source = paradas, circle_color = "#b3402a",
+                          circle_radius = 3, tooltip = "stop_name") |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE)
+```
+
+### Why the departure time matters
+
+Counting how many trips start in each hour of the day:
+
+```{r}
+#| label: fig-viagens-hora
+#| fig-cap: "Bus trips started per hour of the day, EPTC GTFS (r5r sample)"
+#| fig-height: 3.4
+inicio_viagens <- gtfs$stop_times |>
+  dplyr::filter(stop_sequence == 1) |>
+  dplyr::mutate(hora = as.integer(substr(departure_time, 1, 2)))
+
+ggplot(inicio_viagens, aes(factor(hora))) +     # each hour as a category
+  geom_bar(fill = "#1a5b8a") +
+  labs(x = "Trip start hour", y = "Trips") +
+  theme_minimal(base_size = 10)
+```
+
+The figure holds a surprise: there are buses only between 11:00 and 17:50. That is not Porto
+Alegre's real operation, but a cut the package makes to fit the size of an example. But it is a
+useful lesson, because `r5r` does not warn you when you query a time with no service: a matrix
+computed for 8:00 with this GTFS would come out with walking times only, with no error. That is why
+the examples below use 14:00.
+
+In a complete GTFS, the figure would show the typical pattern, with morning and late-afternoon peaks and
+little service at night. The same trip, between the same two points, has different waiting times
+depending on the hour. That is why every `r5r` result must say **for which day
+and time** it was computed, and why it is worth looking at this figure before choosing the time.
+
+## Building the network
+
+```{r}
+#| eval: false
+options(java.parameters = "-Xmx2G")    # memory for Java, BEFORE loading the package
+library(r5r)
+
+# copy the example folder: R5 writes the built network (network.dat) inside it
+pasta <- "dados/brutos/poa"
+dir.create(pasta, recursive = TRUE, showWarnings = FALSE)
+file.copy(list.files(pasta_poa, full.names = TRUE), pasta, recursive = TRUE)
+
+rede <- r5r::build_network(data_path = pasta)
+```
+
+::: {.callout-note}
+## `setup_r5()` or `build_network()`?
+
+Up to version 2.3, the function was called `setup_r5()`. Current versions use
+`build_network()`, with the same behaviour. If your R says the function does not exist, change
+the name and check with `packageVersion("r5r")`.
+:::
+
+The first time, R5 builds the network and writes `network.dat` in the folder, which can take a few
+minutes for a large city. On later runs, it reuses it. Before computing anything,
+check that the GTFS went in:
+
+```{r}
+#| eval: false
+r5r::street_network_to_sf(rede)$edges |> nrow()      # road segments
+r5r::transit_network_to_sf(rede)$routes |> nrow()    # public transport routes
+```
+
+If the second line gives zero, the GTFS was not recognised: it was unzipped, outside the folder
+or malformed.
+
+## Travel time matrix
+
+The origin and destination points need three columns: `id`, `lon` and `lat`. The package's
+example has some well-known places in Porto Alegre:
+
+```{r}
+pontos <- read.csv(file.path(pasta_poa, "poa_points_of_interest.csv"))
+head(pontos)
+```
+
+```{r}
+#| eval: false
+ttm <- r5r::travel_time_matrix(
+  rede,
+  origins            = pontos,
+  destinations       = pontos,
+  mode               = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2019-05-13 14:00:00",     # a Monday, within the
+                                  tz = "America/Sao_Paulo"),  # GTFS validity period
+  time_window        = 30,           # simulates 30 departures, minute by minute, from 14:00
+  percentiles        = c(25, 50, 75),
+  max_walk_time      = 20,           # maximum minutes of walking at each end
+  max_trip_duration  = 90
+)
+
+head(ttm)
+```
+
+The result comes in **long format**: one row per origin–destination pair, with one
+time column per percentile (`travel_time_p25`, `travel_time_p50`, `travel_time_p75`).
+
+The arguments that change the result, and that must be stated in the report:
+
+- **`mode`**: the main mode and the access mode. `c("WALK", "TRANSIT")` is bus with access on foot;
+  `c("BICYCLE", "TRANSIT")`, with access by bike; `"CAR"` and `"WALK"` on their own also
+  work.
+- **`departure_datetime`**: day and time. Within the GTFS validity period, and on a day the service
+  runs.
+- **`time_window` and `percentiles`**: instead of a single departure time, R5 simulates every
+  departure in the window and returns the distribution of times. That captures the luck of arriving at the
+  stop just before or just after the bus. The 50th percentile is the usual choice; the 75th is more
+  honest for people who depend on a low-frequency route.
+- **`max_walk_time`** and **`walk_speed`** (default 3.6 km/h): limit and define the access
+  walk. A limit that is too low leaves points without service.
+- **`max_rides`**: the maximum number of boardings, that is, transfers plus one.
+- **`max_trip_duration`**: cuts the matrix and speeds up the calculation a lot.
+
+To see the effect of the time of day, just repeat the query at 18:30, when this GTFS's buses
+have stopped and only the train is left, and compare:
+
+```{r}
+#| eval: false
+ttm_noite <- r5r::travel_time_matrix(
+  rede, origins = pontos, destinations = pontos,
+  mode = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2019-05-13 18:30:00", tz = "America/Sao_Paulo"),
+  time_window = 30, percentiles = 50, max_walk_time = 20, max_trip_duration = 90
+)
+
+dplyr::inner_join(ttm, ttm_noite, by = c("from_id", "to_id"),
+                  suffix = c("_14h", "_18h30")) |>
+  dplyr::mutate(diferenca_min = travel_time_p50_18h30 - travel_time_p50_14h) |>
+  dplyr::arrange(dplyr::desc(diferenca_min)) |>
+  head()
+```
+
+## Detailed itineraries
+
+The matrix says how long it takes; `detailed_itineraries()` says **how**: each leg of the trip,
+with mode, route, duration and geometry.
+
+```{r}
+#| eval: false
+det <- r5r::detailed_itineraries(
+  rede,
+  origins            = pontos[pontos$id == "farrapos_station", ],
+  destinations       = pontos[pontos$id == "pucrs", ],
+  mode               = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2019-05-13 14:00:00", tz = "America/Sao_Paulo"),
+  shortest_path      = FALSE        # returns the alternatives, not only the fastest
+)
+```
+
+```{r}
+#| include: false
+# the site does not run r5r: it loads the result of the block above, computed with the same
+# example network by R/preparar_exemplos_r5r.R
+det <- readRDS("dados/processados/poa/itinerario.rds")
+```
+
+Each row is a leg of one trip option:
+
+```{r}
+det |>
+  sf::st_drop_geometry() |>
+  dplyr::select(option, segment, mode, route, segment_duration, wait, distance)
+```
+
+On the map, the first option, with one colour per mode. Hover over a leg to see the
+route:
+
+```{r}
+opcao <- dplyr::filter(det, option == 1)
+modos <- unique(opcao$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#1a5b8a", RAIL = "#b3402a", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = opcao, height = "525px") |>
+  mapgl::add_line_layer(
+    id = "itinerario", source = opcao,
+    line_color = mapgl::match_expr("mode", values = modos, stops = unname(cores_modo)),
+    line_width = 5, tooltip = "route"
+  ) |>
+  mapgl::add_legend("Mode", values = modos, colors = unname(cores_modo), type = "categorical")
+```
+
+It is by looking at the legs (walking, waiting, riding, transferring) that you explain a travel time
+that looks too high. The culprit is almost always the wait or a long walk to the stop.
+
+## Isochrones
+
+How far you get from a point in 15, 30 and 45 minutes:
+
+```{r}
+#| eval: false
+iso <- r5r::isochrone(
+  rede,
+  origins            = pontos[pontos$id == "bus_central_station", ],
+  mode               = c("WALK", "TRANSIT"),
+  departure_datetime = as.POSIXct("2019-05-13 14:00:00", tz = "America/Sao_Paulo"),
+  cutoffs            = c(15, 30, 45)
+)
+```
+
+```{r}
+#| include: false
+iso <- readRDS("dados/processados/poa/isocronas.rds")
+```
+
+```{r}
+#| fig-height: 5
+iso <- dplyr::arrange(iso, dplyr::desc(isochrone))   # the smaller bands on top
+
+ggplot(iso) +
+  geom_sf(aes(fill = factor(isochrone)), alpha = 0.5, colour = NA) +
+  scale_fill_brewer(palette = "YlOrRd", direction = -1, name = "minutes") +
+  theme_void()
+```
+
+## Cars in `r5r`?
+
+`r5r` also routes cars (`mode = "CAR"`), on the same network. But, like `dodgr`, it uses
+free-flow speeds, and it requires Java and building the network. For cars and
+freight, module 4's `dodgr` (@sec-m4-roteamento) is usually simpler and
+faster.
+
+| For... | Use |
+|:--|:--|
+| Road distances and times, freight, large matrices between municipalities | `dodgr` |
+| Public transport, urban accessibility, isochrones, GTFS scenarios | `r5r` |
+| One specific route to illustrate a map | either |
+
+In the next chapter (@sec-m4-r5r), `r5r` comes back for a complete study: Fortaleza, with GTFS editing
+to simulate an intervention and an accessibility calculation.
+
+## From the matrix to accessibility
+
+The time matrix says how long it takes from each place to every other. On its own, it does not yet say
+whether that is good or bad: you also need to know **what exists at each destination**. The Porto Alegre example
+has exactly that other half, a hexagonal grid with population and opportunities in each
+hexagon:
+
+```{r}
+hex <- read.csv(file.path(pasta_poa, "poa_hexgrid.csv"))
+
+head(hex)
+
+c(hexagonos = nrow(hex),
+  pares_od  = nrow(hex)^2)
+```
+
+Putting the two together (how long it takes from each hexagon to every other, and how many jobs,
+schools or health services there are in each) is computing **accessibility**: how many
+opportunities a person can reach from where they live. That is the subject of
+@sec-m4-acessibilidade, after the scenario study in Fortaleza.

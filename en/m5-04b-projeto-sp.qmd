@@ -1,0 +1,986 @@
+# Final project 2: São Paulo on foot, by bike and by public transport {#sec-m5-projeto-sp}
+
+This page redoes the final project study (@sec-m5-projeto) for **São Paulo**, the largest network in the
+package, and goes beyond public transport in two directions:
+
+1. **The terrain.** São Paulo is not flat: between the Tietê valley and the ridge of Avenida Paulista there
+   are about 100 metres of difference in elevation. On foot and by bike, the climb weighs. `r5r` takes the terrain into account
+   when the network folder has a digital elevation model (`.tif`).
+2. **Cyclist stress.** Not every street is rideable for everyone. `r5r` classifies each
+   segment with a **Level of Traffic Stress** (LTS), from 1 (tolerable
+   for children) to 4 (only for those who face heavy traffic), and restricts routes to the level the
+   cyclist accepts.
+
+The questions:
+
+- **How much does cutting the bus routes with the least service reduce access to jobs, and who loses
+  most?** (the same as in the final project)
+- **How much does the terrain reduce access to jobs on foot and by bike?**
+- **How much of bike access depends on accepting stressful streets?**
+
+::: {.callout-important}
+## The `r5r` blocks are not run when the site is built
+
+As in the multimodal routing chapter (@sec-m4-r5r), the blocks that build the network and compute
+the matrices require JDK 21, about 8 GB of memory for the JVM and the São Paulo data. They are
+ready to run on your machine; the page's maps, tables and charts use the results that
+this same code produced. The full calculation takes about 45 minutes.
+
+`R/gerar_resultados_projeto_sp.R` runs, in order, every calculation block on this page
+(those labelled `calc-`), and it is what produced the results.
+:::
+
+## The data
+
+There are three sources:
+
+- the São Paulo package from the final project (`sao_paulo.7z`, in the
+  [`dados-modulo5` Release](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5)),
+  extracted in `data_raw/projeto_final/sao_paulo/`: the OpenStreetMap network, the SPTrans GTFS and
+  the `aopdata` grid;
+- the **digital elevation model** from AWS terrain *tiles* (derived from SRTM and
+  Copernicus), downloaded with `elevatr` in the terrain block, as in the raster data chapter;
+- and nothing else: everything the page computes comes from these files.
+
+The results go to `dados/projeto_final_sp/`, separate from those of the Fortaleza final project.
+
+```{r}
+#| label: setup
+library(sf)
+library(ggplot2)
+
+pasta_sp <- "data_raw/projeto_final/sao_paulo"     # network, GTFS and aopdata from the package
+saidas   <- "dados/projeto_final_sp"                # this page's results
+dir.create(saidas, recursive = TRUE, showWarnings = FALSE)
+
+partida <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")   # a Wednesday
+
+# the populated hexagons: population, jobs and income quintile
+aop <- readRDS(file.path(pasta_sp, "aop_sao_paulo.rds")) |>
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex, populacao = P001, empregos = T001, renda = R002)
+
+# one origin and destination point at the centre of each hexagon
+xy <- sf::st_coordinates(sf::st_centroid(sf::st_geometry(aop)))
+pontos <- data.frame(id = aop$id_hex, lon = xy[, 1], lat = xy[, 2])
+
+# the places in the examples
+se     <- data.frame(id = "se", lon = -46.6340, lat = -23.5504)                # Praça da Sé
+bairro <- data.frame(id = "cidade_tiradentes", lon = -46.4020, lat = -23.5830) # Cidade Tiradentes
+batata <- data.frame(id = "largo_da_batata", lon = -46.6936, lat = -23.5668)   # Pinheiros
+
+nrow(pontos)
+```
+
+The page's maps are of hexagons. To keep the file light, each map loads the grid
+only once (`add_source()`) and draws several layers on top of it, switchable in the selector:
+
+```{r}
+#| label: funcoes-mapa
+num <- function(x, d = 0) format(round(x, d), big.mark = ",", nsmall = d)
+
+# map with the grid as a single data source, with only the columns requested in ...
+mapa_hex <- function(dados, ...) {
+  dados <- dplyr::select(dados, ...)
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados, height = "525px") |>
+    mapgl::add_source(id = "hex", data = dados)
+}
+
+# one layer of the grid, coloured by a column
+camada <- function(mapa, coluna, titulo, faixa, cores = c("#F6DCCB", "#2F6B9A", "#173A57"),
+                   visivel = TRUE) {
+  mapa |>
+    mapgl::add_fill_layer(
+      id = titulo, source = "hex",
+      fill_color = mapgl::interpolate(column = coluna,
+                                      values = seq(faixa[1], faixa[2], length.out = length(cores)),
+                                      stops = cores),
+      fill_opacity = 0.75, tooltip = coluna,
+      visibility = if (visivel) "visible" else "none"
+    ) |>
+    mapgl::add_legend(titulo, values = round(faixa), colors = cores, layer_id = titulo, add = TRUE)
+}
+
+seletor <- function(mapa) {
+  mapgl::add_layers_control(mapa, position = "top-right", collapsible = FALSE, mode = "single")
+}
+```
+
+```{r}
+#| label: mapa-pop
+grade <- aop |>
+  sf::st_transform(4326)
+
+mapa_hex(grade, populacao, empregos) |>
+  camada("populacao", "Population", range(grade$populacao),
+         cores = c("#F7F6F2", "#E7A07A", "#7A1F0F")) |>
+  camada("empregos", "Jobs", c(0, stats::quantile(grade$empregos, 0.99)),
+         cores = c("#F7F6F2", "#7FA7C9", "#173A57"), visivel = FALSE) |>
+  seletor()
+```
+
+There are `r num(nrow(aop))` hexagons with `r num(sum(aop$populacao))` residents. Jobs are
+concentrated in the expanded centre; population, on the outskirts. The jobs scale stops at the
+99th percentile, so that the few hexagons with tens of thousands of jobs do not wash out the rest.
+
+## The terrain
+
+The elevation model comes from `elevatr`, the same source as in the raster data chapter: AWS terrain
+*tiles*, derived from SRTM and Copernicus. The study area is the populated hexagons,
+with a 10 km margin, the same rule as the OpenStreetMap crop; that way the terrain covers the whole network.
+At zoom 10, each cell is about 70 metres.
+
+```{r}
+#| label: calc-relevo
+#| eval: false
+pasta_relevo <- "dados/brutos/sao_paulo_relevo"     # the network with terrain: .pbf + .tif, no GTFS
+dir.create(pasta_relevo, recursive = TRUE, showWarnings = FALSE)
+
+# the study area: the populated hexagons with a 10 km margin
+area <- aop |>
+  sf::st_union() |>
+  sf::st_buffer(dist = 10000) |>
+  sf::st_transform(4326) |>
+  sf::st_sf()
+
+dem_raw <- elevatr::get_elev_raster(locations = area, z = 10, clip = "bbox")
+relevo  <- terra::rast(dem_raw)
+names(relevo) <- "altitude"
+
+# r5r requires the .tif in degrees (EPSG:4326); elevatr already returns that system
+terra::crs(relevo) <- "EPSG:4326"
+terra::writeRaster(relevo, file.path(pasta_relevo, "relevo_sao_paulo.tif"), overwrite = TRUE)
+file.copy(file.path(pasta_sp, "sao_paulo.osm.pbf"), pasta_relevo, overwrite = TRUE)
+
+# mean elevation and slope of each hexagon
+declividade <- terra::terrain(relevo, v = "slope", unit = "degrees")
+
+hexagonos <- aop |>
+  sf::st_transform(4326) |>       # the same system as the raster
+  terra::vect()                   # terra wants the polygons in its own format
+
+altitude_hex    <- terra::extract(relevo, hexagonos, fun = mean, na.rm = TRUE)
+declividade_hex <- terra::extract(declividade, hexagonos, fun = mean, na.rm = TRUE)
+
+relevo_hex <- data.frame(
+  id_hex      = aop$id_hex,       # extract returns the rows in the order of the polygons
+  altitude    = altitude_hex$altitude,
+  declividade = declividade_hex$slope
+)
+saveRDS(relevo_hex, file.path(saidas, "relevo_hex.rds"))
+
+# a light version of the terrain for the static map: about 280 m, with hillshading
+leve <- terra::aggregate(relevo, fact = 4, fun = "mean")
+inclinacao  <- terra::terrain(leve, "slope", unit = "radians")
+orientacao  <- terra::terrain(leve, "aspect", unit = "radians")
+sombra <- terra::shade(inclinacao, orientacao, angle = 40, direction = 315)
+grade_relevo <- as.data.frame(c(leve, sombra), xy = TRUE, na.rm = TRUE)
+names(grade_relevo) <- c("x", "y", "altitude", "sombra")
+saveRDS(grade_relevo, file.path(saidas, "relevo_grade.rds"))
+```
+
+```{r}
+#| include: false
+relevo_hex   <- readRDS(file.path(saidas, "relevo_hex.rds"))
+grade_relevo <- readRDS(file.path(saidas, "relevo_grade.rds"))
+```
+
+```{r}
+#| label: fig-relevo
+#| fig-height: 6.5
+#| fig-cap: "Terrain of the São Paulo region (AWS Terrain Tiles via `elevatr`), with hillshading and the outline of the populated hexagons."
+contorno <- aop |>
+  sf::st_union() |>
+  sf::st_transform(4326)
+
+ggplot(grade_relevo, aes(x, y)) +
+  geom_raster(aes(fill = altitude)) +
+  geom_raster(aes(alpha = sombra), fill = "grey10") +
+  scale_alpha(range = c(0.35, 0), guide = "none") +
+  scale_fill_gradientn(colours = c("#2F6B9A", "#A9C4DA", "#F7F6F2", "#E7A07A", "#7A1F0F"),
+                       name = "Elevation (m)") +
+  geom_sf(data = contorno, inherit.aes = FALSE, fill = NA, colour = "grey20", linewidth = 0.3) +
+  coord_sf(xlim = range(xy[, 1]), ylim = range(xy[, 2])) +
+  theme_void()
+```
+
+```{r}
+#| label: mapa-relevo
+grade <- grade |>
+  dplyr::left_join(relevo_hex, by = "id_hex") |>
+  dplyr::mutate(altitude = round(altitude), declividade = round(declividade, 1))
+
+mapa_hex(grade, declividade, altitude) |>
+  camada("declividade", "Mean slope (degrees)", c(0, stats::quantile(grade$declividade, 0.99, na.rm = TRUE)),
+         cores = c("#F7F6F2", "#E7A07A", "#7A1F0F")) |>
+  camada("altitude", "Mean elevation (m)", range(grade$altitude, na.rm = TRUE),
+         cores = c("#2F6B9A", "#F7F6F2", "#7A1F0F"), visivel = FALSE) |>
+  seletor()
+```
+
+On the population-weighted average, each resident lives in a hexagon with a slope of
+`r num(weighted.mean(grade$declividade, grade$populacao, na.rm = TRUE), 1)` degrees.
+The steepest slopes are at the edges: the Cantareira range, to the north, and the hills of the far south and
+far east, where much of the outskirts is.
+
+## Public transport: the final project study
+
+This is the multimodal routing chapter with São Paulo's data, as in step 2 of the
+final project, in a single block: the network, the time matrix, the isochrone from Sé, the itinerary from
+Cidade Tiradentes to Sé, the road loading, the scenario without the quarter of routes with the fewest
+trips and the comparison.
+
+```{r}
+#| label: calc-transporte-publico
+#| eval: false
+options(java.parameters = "-Xmx8G")     # before the first use of r5r
+
+rede <- r5r::build_network(data_path = pasta_sp)   # no .tif in the folder: no terrain
+
+matriz_tp <- function(r) {
+  r5r::travel_time_matrix(
+    r, origins = pontos, destinations = pontos,
+    mode = c("WALK", "TRANSIT"), departure_datetime = partida,
+    time_window = 60, percentiles = 50, max_walk_time = 20, max_trip_duration = 90
+  )
+}
+ttm <- matriz_tp(rede)
+
+iso <- r5r::isochrone(rede, origins = se, mode = c("WALK", "TRANSIT"),
+                      departure_datetime = partida, cutoffs = c(15, 30, 45, 60),
+                      time_window = 60, max_walk_time = 20)
+saveRDS(iso, file.path(saidas, "isocronas_tp.rds"))
+
+itinerario <- r5r::detailed_itineraries(rede, origins = bairro, destinations = se,
+                                        mode = c("WALK", "TRANSIT"), departure_datetime = partida,
+                                        max_walk_time = 20, shortest_path = FALSE)
+saveRDS(itinerario, file.path(saidas, "itinerario_tp.rds"))
+
+# loading: from the 30 most populous hexagons to the 10 with the most jobs, by car
+origens <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::slice_max(populacao, n = 30, with_ties = FALSE) |>
+  dplyr::select(origem = id_hex, populacao)
+
+destinos <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::slice_max(empregos, n = 10, with_ties = FALSE) |>
+  dplyr::select(destino = id_hex, empregos)
+
+# every origin–destination pair, with a hypothetical flow: the origin's population split
+# among the destinations, in proportion to each one's jobs
+pares_od <- expand.grid(origem = origens$origem, destino = destinos$destino,
+                        stringsAsFactors = FALSE) |>
+  dplyr::filter(origem != destino) |>
+  dplyr::left_join(origens, by = "origem") |>
+  dplyr::left_join(destinos, by = "destino") |>
+  dplyr::mutate(fluxo = populacao * empregos / sum(destinos$empregos))
+
+rotas_carro <- r5r::detailed_itineraries(
+  rede,
+  origins      = pontos[match(pares_od$origem, pontos$id), ],
+  destinations = pontos[match(pares_od$destino, pontos$id), ],
+  mode = "CAR", departure_datetime = partida, shortest_path = TRUE
+)
+
+# each route gets its pair's flow; overline adds the flows up segment by segment
+fluxos <- dplyr::select(pares_od, origem, destino, fluxo)
+rotas_carro <- rotas_carro |>
+  dplyr::left_join(fluxos, by = c("from_id" = "origem", "to_id" = "destino"))
+
+carga <- stplanr::overline(rotas_carro, attrib = "fluxo")
+saveRDS(carga, file.path(saidas, "carga.rds"))
+
+# the scenario: without the quarter of routes with the fewest trips
+gtfs <- gtfstools::read_gtfs(file.path(pasta_sp, "gtfs_sao_paulo.zip"))
+viagens  <- dplyr::count(gtfs$trips, route_id, name = "viagens")
+cortadas <- viagens$route_id[viagens$viagens <= stats::quantile(viagens$viagens, 0.25)]
+saveRDS(cortadas, file.path(saidas, "linhas_cortadas.rds"))
+
+gtfs_cenario <- gtfstools::filter_by_route_id(gtfs, route_id = cortadas, keep = FALSE)
+
+pasta_cenario <- "dados/brutos/sao_paulo_cenario"
+dir.create(pasta_cenario, showWarnings = FALSE)
+file.copy(file.path(pasta_sp, "sao_paulo.osm.pbf"), pasta_cenario, overwrite = TRUE)
+gtfstools::write_gtfs(gtfs_cenario, file.path(pasta_cenario, "gtfs_cenario.zip"))
+unlink(file.path(pasta_cenario, "network.dat"))     # forces a rebuild with the new GTFS
+
+r5r::stop_r5(rede)
+rede_cenario <- r5r::build_network(data_path = pasta_cenario)
+ttm_cenario  <- matriz_tp(rede_cenario)
+r5r::stop_r5(rede_cenario)
+
+uso_solo <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::rename(id = id_hex)
+
+acesso_cum <- function(m, minutos) {
+  accessibility::cumulative_cutoff(travel_matrix = m, land_use_data = uso_solo,
+                                   opportunity = "empregos", travel_cost = "travel_time_p50",
+                                   cutoff = minutos)
+}
+
+# jobs within 60 minutes, today and in the scenario, each in its own column
+acesso_atual   <- acesso_cum(ttm, 60) |> dplyr::rename(atual = empregos)
+acesso_cenario <- acesso_cum(ttm_cenario, 60) |> dplyr::rename(cenario = empregos)
+moradores      <- dplyr::select(uso_solo, id, populacao, renda)
+
+comparacao_tp <- acesso_atual |>
+  dplyr::left_join(acesso_cenario, by = "id") |>
+  dplyr::left_join(moradores, by = "id") |>
+  dplyr::mutate(perda_abs = cenario - atual,
+                perda_pct = dplyr::if_else(atual > 0, 100 * (cenario / atual - 1), NA_real_))
+saveRDS(comparacao_tp, file.path(saidas, "comparacao_tp.rds"))
+```
+
+```{r}
+#| include: false
+iso_tp        <- readRDS(file.path(saidas, "isocronas_tp.rds"))
+itinerario_tp <- readRDS(file.path(saidas, "itinerario_tp.rds"))
+carga         <- readRDS(file.path(saidas, "carga.rds"))
+cortadas      <- readRDS(file.path(saidas, "linhas_cortadas.rds"))
+comparacao_tp <- readRDS(file.path(saidas, "comparacao_tp.rds"))
+```
+
+### How far you get from Sé, and how you get there from Cidade Tiradentes
+
+```{r}
+#| label: mapa-isocrona-tp
+iso_tp <- dplyr::arrange(iso_tp, dplyr::desc(isochrone))      # the smaller bands on top
+cores_iso <- c("#173A57", "#2F6B9A", "#A9C4DA", "#F6DCCB")
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = iso_tp, height = "525px") |>
+  mapgl::add_fill_layer(id = "isocronas", source = iso_tp,
+                        fill_color = mapgl::match_expr("isochrone", values = c(15, 30, 45, 60),
+                                                       stops = cores_iso),
+                        fill_opacity = 0.6, tooltip = "isochrone") |>
+  mapgl::add_legend("Minutes from Sé", values = c(15, 30, 45, 60), colors = cores_iso,
+                    type = "categorical")
+```
+
+```{r}
+#| label: mapa-itinerario-tp
+opcao <- dplyr::filter(itinerario_tp, option == 1)
+modos <- unique(opcao$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#2F6B9A", RAIL = "#C2542D", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = opcao, height = "525px") |>
+  mapgl::add_line_layer(id = "itinerario", source = opcao,
+                        line_color = mapgl::match_expr("mode", values = modos,
+                                                       stops = unname(cores_modo)),
+                        line_width = 5, tooltip = "route") |>
+  mapgl::add_legend("Mode", values = modos, colors = unname(cores_modo), type = "categorical")
+```
+
+The fastest trip from Cidade Tiradentes to Sé takes `r round(opcao$total_duration[1])` minutes,
+combining `r paste(setdiff(unique(opcao$route), ""), collapse = ", ")`. In São Paulo, unlike
+the other cities in the package, the SPTrans GTFS includes the metro and the CPTM trains, and it is
+through them that the long trips from the eastern outskirts go.
+
+### The scenario: who loses access with the cut
+
+```{r}
+#| label: mapa-cenario-tp
+resultado_tp <- dplyr::select(comparacao_tp, id_hex = id, atual, cenario, perda_abs)
+grade <- dplyr::left_join(grade, resultado_tp, by = "id_hex")
+
+faixa_tp <- c(0, max(grade$atual, na.rm = TRUE))
+limite   <- max(abs(grade$perda_abs), na.rm = TRUE)
+
+mapa_hex(grade, atual, cenario, perda_abs) |>
+  camada("atual", "Jobs within 60 min: today", faixa_tp) |>
+  camada("cenario", "Jobs within 60 min: scenario", faixa_tp, visivel = FALSE) |>
+  camada("perda_abs", "Change with the cut", c(-limite, limite),
+         cores = c("#C2542D", "#F7F6F2", "#2F6B9A"), visivel = FALSE) |>
+  seletor()
+```
+
+The scenario removes `r length(cortadas)` routes. The average change for each income quintile,
+weighted by population (1 = the poorest 20%):
+
+```{r}
+#| label: tab-renda-tp
+por_renda_tp <- comparacao_tp |>
+  dplyr::filter(renda %in% 1:5) |>
+  dplyr::summarise(pessoas = sum(populacao),
+                   atual = weighted.mean(as.numeric(atual), populacao, na.rm = TRUE),   # integers would overflow
+                   variacao_pct = weighted.mean(perda_pct, populacao, na.rm = TRUE),
+                   .by = renda) |>
+  dplyr::arrange(renda)
+
+knitr::kable(por_renda_tp, digits = 1, format.args = list(big.mark = ","),
+             col.names = c("Income quintile", "People", "Jobs within 60 min (mean)",
+                           "Change with the cut (%)"))
+```
+
+The poorest reach far fewer jobs today and lose a bigger share with the cut: the routes
+with the least service are, to a large extent, those that feed the distant neighbourhoods.
+
+### Road network loading
+
+```{r}
+#| label: mapa-carga
+carga <- carga |>
+  sf::st_transform(4326) |>
+  dplyr::arrange(fluxo)
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = carga, height = "525px") |>
+  mapgl::add_line_layer(id = "carga", source = carga, line_color = "#1a5b8a", line_opacity = 0.8,
+                        line_width = mapgl::interpolate(column = "fluxo",
+                                                        values = range(carga$fluxo),
+                                                        stops = c(0.5, 8)),
+                        tooltip = "fluxo")
+```
+
+## On foot and by bike, with and without terrain
+
+To measure the effect of terrain, the same matrix is computed on two networks:
+
+- the **flat** one, the package's, with no `.tif` in the folder;
+- the one **with terrain**, a folder with the same `.pbf` and the `.tif` from the previous block. With the `.tif` there,
+  `build_network()` uses Tobler's function (`elevation = "TOBLER"`, the default), which reduces
+  speed on climbs and increases it slightly on gentle descents, on foot and by bike.
+
+The indicator is the number of jobs reachable within **30 minutes**, at 3.6 km/h on foot and
+12 km/h by bike. For the bike, `r5r`'s default stress level applies, `max_lts = 2`: the
+ordinary cyclist, who only rides on cycle paths, cycle lanes and quiet streets (the next section varies
+this level).
+
+The block has four steps: two functions that repeat, the two measures on the flat network, the two on the
+network with terrain and, at the end, the four measures in a single table.
+
+```{r}
+#| label: calc-ativo
+#| eval: false
+pasta_relevo <- "dados/brutos/sao_paulo_relevo"
+
+# ---- 1. The block's two functions ------------------------------------
+
+# travel time matrix on foot or by bike, from every hexagon to every other.
+# max_trip_duration = 30: longer trips do not even enter the matrix.
+# lts: the maximum stress level the cyclist accepts (r5r ignores it on foot)
+matriz_ativa <- function(rede, modo, lts = 2) {
+  r5r::travel_time_matrix(
+    rede, origins = pontos, destinations = pontos, mode = modo,
+    departure_datetime = partida, max_trip_duration = 30,
+    walk_speed = 3.6, bike_speed = 12, max_lts = lts
+  )
+}
+
+# jobs reachable within 30 minutes from each hexagon.
+# Returns a table with two columns: id (the hexagon) and empregos (jobs)
+acesso_30 <- function(matriz) {
+  accessibility::cumulative_cutoff(travel_matrix = matriz, land_use_data = uso_solo,
+                                   opportunity = "empregos", travel_cost = "travel_time_p50",
+                                   cutoff = 30)
+}
+
+# ---- 2. Flat network (the package's, already built in the public transport block) ----
+rede_plana <- r5r::build_network(data_path = pasta_sp)
+
+# each measure gets the name of its mode and network combination, so they do not get mixed up later
+a_pe_plano <- matriz_ativa(rede_plana, "WALK") |>
+  acesso_30() |>
+  dplyr::rename(a_pe_plano = empregos)
+
+bici_plano <- matriz_ativa(rede_plana, "BICYCLE") |>
+  acesso_30() |>
+  dplyr::rename(bici_plano = empregos)
+
+# the bike route from Largo da Batata to Sé, for the next subsection
+rota_plana <- r5r::detailed_itineraries(rede_plana, origins = batata, destinations = se,
+                                        mode = "BICYCLE", bike_speed = 12, max_lts = 2,
+                                        departure_datetime = partida)
+r5r::stop_r5(rede_plana)
+
+# ---- 3. Network with terrain: the same measures ----------------------
+# overwrite = TRUE rebuilds the network if the .tif changes
+rede_relevo <- r5r::build_network(data_path = pasta_relevo, elevation = "TOBLER",
+                                  overwrite = TRUE)
+
+a_pe_relevo <- matriz_ativa(rede_relevo, "WALK") |>
+  acesso_30() |>
+  dplyr::rename(a_pe_relevo = empregos)
+
+bici_relevo <- matriz_ativa(rede_relevo, "BICYCLE") |>
+  acesso_30() |>
+  dplyr::rename(bici_relevo = empregos)
+
+rota_relevo <- r5r::detailed_itineraries(rede_relevo, origins = batata, destinations = se,
+                                         mode = "BICYCLE", bike_speed = 12, max_lts = 2,
+                                         departure_datetime = partida)
+# rede_relevo stays open: the following blocks use it
+
+# ---- 4. The four measures in a single table, one row per hexagon ----
+# full_join: if a hexagon is missing from one of the tables, it stays, with NA in that table's column
+ativo <- a_pe_plano |>
+  dplyr::full_join(bici_plano,  by = "id") |>
+  dplyr::full_join(a_pe_relevo, by = "id") |>
+  dplyr::full_join(bici_relevo, by = "id")
+
+saveRDS(ativo, file.path(saidas, "acesso_ativo.rds"))
+```
+
+```{r}
+#| include: false
+ativo <- readRDS(file.path(saidas, "acesso_ativo.rds"))
+```
+
+The `ativo` table has one row per hexagon and one column for each measure. To take the city
+average, each hexagon must be weighted by its number of residents: a hexagon with 5,000 people counts
+more than one with 50. So the first step is to bring in the population:
+
+```{r}
+#| label: tab-ativo
+# 1. the population and income of each hexagon, without the geometry
+moradores <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::select(id = id_hex, populacao, renda)
+
+# 2. join with the access measures. A hexagon with no result (NA) reaches
+#    no job within 30 minutes: it becomes 0
+ativo_pop <- ativo |>
+  dplyr::left_join(moradores, by = "id") |>
+  dplyr::mutate(
+    a_pe_plano  = dplyr::coalesce(a_pe_plano, 0),
+    bici_plano  = dplyr::coalesce(bici_plano, 0),
+    a_pe_relevo = dplyr::coalesce(a_pe_relevo, 0),
+    bici_relevo = dplyr::coalesce(bici_relevo, 0)
+  )
+
+# 3. the mean of each measure, weighted by population
+medias <- ativo_pop |>
+  dplyr::summarise(
+    a_pe_plano  = weighted.mean(a_pe_plano, populacao),
+    bici_plano  = weighted.mean(bici_plano, populacao),
+    a_pe_relevo = weighted.mean(a_pe_relevo, populacao),
+    bici_relevo = weighted.mean(bici_relevo, populacao)
+  )
+
+# 4. the table for the reader: one row per mode, without and with terrain
+resumo_ativo <- data.frame(
+  modo   = c("On foot", "Bike (LTS 2)"),
+  plano  = c(medias$a_pe_plano, medias$bici_plano),
+  relevo = c(medias$a_pe_relevo, medias$bici_relevo)
+) |>
+  dplyr::mutate(variacao = 100 * (relevo / plano - 1))
+
+knitr::kable(resumo_ativo, digits = 1, format.args = list(big.mark = ","),
+             col.names = c("Mode", "Without terrain", "With terrain", "Change (%)"),
+             caption = "Jobs reachable within 30 minutes, population-weighted mean")
+```
+
+Terrain reduces access on foot by `r num(abs(resumo_ativo$variacao[1]), 1)`% and by bike by
+`r num(abs(resumo_ativo$variacao[2]), 1)`%, on the population average. The average effect hides the
+geography: where it weighs is on the slopes. The map shows the change for each hexagon by bike:
+
+```{r}
+#| label: mapa-ativo
+# the measures that go on the map, with the grid's column name (id_hex)
+medidas_mapa <- dplyr::select(ativo_pop, id_hex = id, bici_plano, bici_relevo, a_pe_relevo)
+
+# the change for each hexagon by bike, in %. With no access on the flat network, the calculation does not exist
+grade <- grade |>
+  dplyr::left_join(medidas_mapa, by = "id_hex") |>
+  dplyr::mutate(var_relevo = dplyr::if_else(bici_plano > 0,
+                                            round(100 * (bici_relevo / bici_plano - 1), 1),
+                                            NA_real_))
+
+# the access scale stops at the 99th percentile, as in the jobs map
+faixa_bici <- c(0, stats::quantile(grade$bici_plano, 0.99, na.rm = TRUE))
+faixa_a_pe <- c(0, stats::quantile(grade$a_pe_relevo, 0.99, na.rm = TRUE))
+
+mapa_hex(grade, var_relevo, bici_plano, bici_relevo, a_pe_relevo) |>
+  camada("var_relevo", "Effect of terrain on cycling (%)", c(-50, 50),
+         cores = c("#C2542D", "#F7F6F2", "#2F6B9A")) |>
+  camada("bici_plano", "Bike, without terrain", faixa_bici, visivel = FALSE) |>
+  camada("bici_relevo", "Bike, with terrain", faixa_bici, visivel = FALSE) |>
+  camada("a_pe_relevo", "On foot, with terrain", faixa_a_pe, visivel = FALSE) |>
+  seletor()
+```
+
+The change scale runs from −50% to +50%; the effect is almost entirely negative. Bluish hexagons are
+those that sit high up and go down to the jobs: the gentle descent speeds the bike up.
+
+### A route over the ridge
+
+The city average says how much the terrain weighs, but it does not show **how**. For that, it is worth looking at a
+single trip. From Largo da Batata, in Pinheiros, to Praça da Sé, the bike has to climb the Paulista
+ridge and go down to the Anhangabaú valley. With terrain, `r5r` estimates a longer time and
+may choose another path, one that climbs less.
+
+The two routes were already computed in the previous block (`rota_plana` and `rota_relevo`). To
+compare them, we still need the **elevation profile** of each one: the elevation along the path, read from the
+same `.tif` used by the network. The function below does this in five steps:
+
+```{r}
+#| label: calc-perfil
+#| eval: false
+perfil_rota <- function(rota) {
+  # 1. the route's legs, in the order of the trip
+  rota <- rota[order(rota$segment), ]
+
+  # 2. the coordinates of every vertex, in a matrix (X and Y columns),
+  #    and with them a single line, from the start to the end of the trip
+  vertices <- sf::st_coordinates(rota)[, c("X", "Y")]
+  linha <- sf::st_sfc(sf::st_linestring(vertices), crs = 4326)
+
+  # 3. one point every 25 m along the line; to measure in metres, the line goes
+  #    to SIRGAS 2000 / UTM 23S
+  linha_m  <- sf::st_transform(linha, 31983)
+  pontos_m <- sf::st_line_sample(linha_m, density = 1 / 25) |>
+    sf::st_cast("POINT")
+
+  # 4. the distance travelled up to each point: the sum of the steps between neighbouring points
+  passos <- sf::st_distance(pontos_m[-length(pontos_m)], pontos_m[-1], by_element = TRUE)
+  distancia_km <- c(0, cumsum(as.numeric(passos))) / 1000
+
+  # 5. the elevation of each point, read from the .tif (which is in degrees)
+  mde <- terra::rast(file.path(pasta_relevo, "relevo_sao_paulo.tif"))
+  pontos_graus <- terra::vect(sf::st_transform(pontos_m, 4326))
+  altitude <- terra::extract(mde, pontos_graus)$altitude
+
+  data.frame(distancia = distancia_km, altitude = altitude)
+}
+```
+
+With the function ready, it remains to apply it to the routes. A third route joins the comparison: that of the
+cyclist who accepts **any street**, including avenues with heavy traffic (`max_lts = 4`).
+It anticipates the next section, on traffic stress.
+
+```{r}
+#| label: calc-rotas
+#| eval: false
+# the third route: on the network with terrain, with no stress restriction
+rota_lts4 <- r5r::detailed_itineraries(rede_relevo, origins = batata, destinations = se,
+                                       mode = "BICYCLE", bike_speed = 12, max_lts = 4,
+                                       departure_datetime = partida)
+
+# the three routes in a single table, with a column that says which is which
+rotas_bici <- rbind(
+  dplyr::mutate(rota_plana,  rede = "Flat, LTS 2"),
+  dplyr::mutate(rota_relevo, rede = "Terrain, LTS 2"),
+  dplyr::mutate(rota_lts4,   rede = "Terrain, LTS 4")
+)
+saveRDS(rotas_bici, file.path(saidas, "rotas_bici.rds"))
+
+# the profile of each route, one at a time, then the three stacked
+perfis <- list()
+for (nome in unique(rotas_bici$rede)) {
+  rota   <- rotas_bici[rotas_bici$rede == nome, ]
+  perfil <- perfil_rota(rota)
+  perfis[[nome]] <- data.frame(rede = nome, perfil)
+}
+perfis <- dplyr::bind_rows(perfis)
+saveRDS(perfis, file.path(saidas, "perfis_bici.rds"))
+```
+
+```{r}
+#| include: false
+rotas_bici <- readRDS(file.path(saidas, "rotas_bici.rds"))
+perfis     <- readRDS(file.path(saidas, "perfis_bici.rds"))
+
+# the saved results come from the Portuguese version of this page: translate the labels
+rotulos <- c("Sem relevo, LTS 2" = "Flat, LTS 2",
+             "Com relevo, LTS 2" = "Terrain, LTS 2",
+             "Com relevo, LTS 4" = "Terrain, LTS 4")
+traduzir <- function(x) dplyr::coalesce(unname(rotulos[x]), x)
+rotas_bici$rede <- traduzir(rotas_bici$rede)
+perfis$rede     <- traduzir(perfis$rede)
+```
+
+First, the path. On the map, the two routes of the ordinary cyclist (LTS 2), without and with terrain:
+
+```{r}
+#| label: mapa-rotas-relevo
+duas <- rotas_bici |>
+  dplyr::filter(rede != "Terrain, LTS 4") |>
+  sf::st_transform(4326)
+cores_rota <- c("Flat, LTS 2" = "#7A7A7A", "Terrain, LTS 2" = "#C2542D")
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = duas, height = "525px") |>
+  mapgl::add_line_layer(id = "rotas", source = duas,
+                        line_color = mapgl::match_expr("rede", values = names(cores_rota),
+                                                       stops = unname(cores_rota)),
+                        line_width = 5, line_opacity = 0.8, tooltip = "total_duration") |>
+  mapgl::add_legend("Bike route", values = names(cores_rota),
+                    colors = unname(cores_rota), type = "categorical")
+```
+
+Then, the terrain along each path. The profile shows where the climbs are:
+
+```{r}
+#| label: fig-perfil
+#| fig-height: 3.5
+#| fig-cap: "Elevation profile of the bike routes from Largo da Batata to Praça da Sé."
+ggplot(perfis, aes(distancia, altitude, colour = rede)) +
+  geom_line(linewidth = 0.9) +
+  scale_colour_manual(values = c(cores_rota, "Terrain, LTS 4" = "#2F6B9A"), name = NULL) +
+  labs(x = "Distance travelled (km)", y = "Elevation (m)") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+Finally, the numbers for each route. Time and distance come from `r5r`; the cumulative climb is the
+sum of every stretch in which the profile goes up:
+
+```{r}
+#| label: tab-rotas
+# time and distance: r5r repeats the trip total on each leg, one value per route is enough
+tempo_rotas <- rotas_bici |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(minutos = max(total_duration), km = max(total_distance) / 1000, .by = rede)
+
+# cumulative climb: the positive elevation differences between neighbouring points of the profile
+subida_rotas <- perfis |>
+  dplyr::summarise(subida = sum(pmax(diff(altitude), 0), na.rm = TRUE), .by = rede)
+
+tab_rotas <- dplyr::left_join(tempo_rotas, subida_rotas, by = "rede")
+
+knitr::kable(tab_rotas, digits = 1,
+             col.names = c("Route", "Time (min)", "Distance (km)", "Cumulative climb (m)"))
+```
+
+```{r}
+#| include: false
+rota_tab <- function(nome) tab_rotas[tab_rotas$rede == nome, ]
+plana_2  <- rota_tab("Flat, LTS 2")
+relevo_2 <- rota_tab("Terrain, LTS 2")
+relevo_4 <- rota_tab("Terrain, LTS 4")
+```
+
+With terrain, the same trip goes from `r num(plana_2$minutos, 1)` to
+`r num(relevo_2$minutos, 1)` minutes: `r5r` slows the bike down on climbs. The cyclist
+who accepts any street, on the other hand, arrives in `r num(relevo_4$minutos, 1)` minutes, by a shorter path
+(`r num(relevo_4$km, 1)` km) with less climbing (`r num(relevo_4$subida)` m): the avenues,
+out of the ordinary cyclist's reach, shorten the trip. How much this weighs on the whole city's access
+is the subject of the next section.
+
+## Cycling and traffic stress
+
+`r5r` assigns each street segment a stress level from OpenStreetMap
+tags: road type, number of lanes, speed and the presence of a cycle path or cycle lane.
+With `max_lts = 2`, the route only uses level 1 and 2 segments; on the others, the cyclist gets off and pushes the
+bike, at walking speed.
+
+The block below uses the network with terrain, still open, for three things: access to jobs with
+each tolerated stress level, the length of streets at each level and the streets in the corridor between
+Pinheiros and Sé, for the map.
+
+```{r}
+#| label: calc-lts
+#| eval: false
+# ---- 1. Access with each tolerated stress level ----------------------
+# LTS 2 was already computed in the bike-with-terrain block: only the column name changes
+lts2 <- dplyr::rename(bici_relevo, lts2 = bici_relevo)
+
+# the other three levels: one matrix for each
+lts1 <- matriz_ativa(rede_relevo, "BICYCLE", lts = 1) |>
+  acesso_30() |>
+  dplyr::rename(lts1 = empregos)
+
+lts3 <- matriz_ativa(rede_relevo, "BICYCLE", lts = 3) |>
+  acesso_30() |>
+  dplyr::rename(lts3 = empregos)
+
+lts4 <- matriz_ativa(rede_relevo, "BICYCLE", lts = 4) |>
+  acesso_30() |>
+  dplyr::rename(lts4 = empregos)
+
+# the four in a single table, one row per hexagon
+acesso_lts <- lts1 |>
+  dplyr::full_join(lts2, by = "id") |>
+  dplyr::full_join(lts3, by = "id") |>
+  dplyr::full_join(lts4, by = "id")
+saveRDS(acesso_lts, file.path(saidas, "acesso_lts.rds"))
+
+# ---- 2. The stress level of each rideable street segment -------------
+ruas <- r5r::street_network_to_sf(rede_relevo)$edges |>
+  dplyr::filter(bicycle) |>
+  # the network has one record per direction of each segment: keep just one
+  dplyr::mutate(par = paste(pmin(from_vertex, to_vertex), pmax(from_vertex, to_vertex))) |>
+  dplyr::filter(!duplicated(par))
+
+km_lts <- ruas |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(km = sum(length) / 1000, .by = bicycle_lts) |>
+  dplyr::arrange(bicycle_lts)
+saveRDS(km_lts, file.path(saidas, "km_lts.rds"))
+
+# ---- 3. For the map: the streets in a 1.5 km corridor around the Pinheiros–Sé line ----
+corredor <- rbind(batata, se) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  sf::st_union() |>
+  sf::st_cast("LINESTRING") |>
+  sf::st_transform(31983) |>           # for the buffer in metres
+  sf::st_buffer(1500) |>
+  sf::st_transform(4326)
+
+ruas_corredor <- ruas |>
+  sf::st_filter(corredor) |>           # only the streets touching the corridor
+  dplyr::select(osm_id, street_class, bicycle_lts)
+saveRDS(ruas_corredor, file.path(saidas, "ruas_corredor.rds"))
+
+r5r::stop_r5(rede_relevo)
+```
+
+```{r}
+#| include: false
+acesso_lts    <- readRDS(file.path(saidas, "acesso_lts.rds"))
+km_lts        <- readRDS(file.path(saidas, "km_lts.rds"))
+ruas_corredor <- readRDS(file.path(saidas, "ruas_corredor.rds"))
+```
+
+The length of rideable streets at each level, across the whole OpenStreetMap crop (the city and
+part of the neighbouring municipalities):
+
+```{r}
+#| label: tab-km-lts
+km_lts |>
+  dplyr::mutate(pct = 100 * km / sum(km)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","),
+               col.names = c("Stress level (LTS)", "Length (km)", "% of the rideable network"))
+```
+
+In the corridor between Pinheiros and Sé, the LTS 4 avenues form the main grid, and the
+cycle paths and quiet streets appear as disconnected stretches between them:
+
+```{r}
+#| label: mapa-lts
+cores_lts <- c("#2F6B9A", "#7FA7C9", "#E7A07A", "#7A1F0F")
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = ruas_corredor,
+                height = "525px") |>
+  mapgl::add_line_layer(id = "lts", source = ruas_corredor,
+                        line_color = mapgl::match_expr("bicycle_lts", values = 1:4,
+                                                       stops = cores_lts),
+                        line_width = 2, tooltip = "street_class") |>
+  mapgl::add_legend("Stress level (LTS)", values = 1:4, colors = cores_lts,
+                    type = "categorical")
+```
+
+How much of bike access depends on accepting more stressful streets? The jobs reachable
+within 30 minutes, on the network with terrain, for each maximum tolerated level. The route is the same as for the terrain
+table: bring in the population, replace missing results with zero and take the weighted mean,
+now by income quintile:
+
+```{r}
+#| label: tab-lts-renda
+# 1. bring in population and income (the moradores table, from the on-foot and bike table)
+lts_pop <- acesso_lts |>
+  dplyr::left_join(moradores, by = "id") |>
+  dplyr::mutate(
+    lts1 = dplyr::coalesce(lts1, 0),
+    lts2 = dplyr::coalesce(lts2, 0),
+    lts3 = dplyr::coalesce(lts3, 0),
+    lts4 = dplyr::coalesce(lts4, 0)
+  )
+
+# 2. the weighted mean of each level, by income quintile
+por_renda_lts <- lts_pop |>
+  dplyr::filter(renda %in% 1:5) |>               # aopdata has a few hexagons with quintile 0
+  dplyr::summarise(
+    lts1 = weighted.mean(lts1, populacao),
+    lts2 = weighted.mean(lts2, populacao),
+    lts3 = weighted.mean(lts3, populacao),
+    lts4 = weighted.mean(lts4, populacao),
+    .by = renda
+  ) |>
+  dplyr::arrange(renda)
+
+# 3. how much of the "any street" access (LTS 4) the ordinary cyclist (LTS 2) keeps
+por_renda_lts <- por_renda_lts |>
+  dplyr::mutate(pct_lts2 = 100 * lts2 / lts4)
+
+knitr::kable(por_renda_lts, digits = 0, format.args = list(big.mark = ","),
+             col.names = c("Income quintile", "LTS 1", "LTS 2", "LTS 3", "LTS 4",
+                           "LTS 2 / LTS 4 (%)"))
+```
+
+```{r}
+#| label: fig-lts
+#| fig-height: 4
+#| fig-cap: "Jobs reachable by bike within 30 minutes, by tolerated stress level and income quintile (population-weighted mean)."
+# for the chart, one row per quintile and level
+por_renda_lts_longa <- por_renda_lts |>
+  tidyr::pivot_longer(lts1:lts4, names_to = "lts", values_to = "empregos") |>
+  dplyr::mutate(lts = sub("lts", "LTS ", lts))
+
+ggplot(por_renda_lts_longa, aes(factor(renda), empregos, fill = lts)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = cores_lts, name = NULL) +
+  scale_y_continuous(labels = scales::label_number(big.mark = ",")) +
+  labs(x = "Income quintile (1 = poorest)", y = "Jobs within 30 min by bike") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+```{r}
+#| label: mapa-lts-acesso
+# the measures that go on the map, with the grid's column name (id_hex)
+lts_mapa <- dplyr::select(lts_pop, id_hex = id, lts1, lts2, lts4)
+
+grade <- grade |>
+  dplyr::left_join(lts_mapa, by = "id_hex") |>
+  dplyr::mutate(pct_lts2 = dplyr::if_else(lts4 > 0, round(100 * lts2 / lts4), NA_real_))
+
+faixa_lts <- c(0, stats::quantile(grade$lts4, 0.99, na.rm = TRUE))
+
+mapa_hex(grade, pct_lts2, lts1, lts2, lts4) |>
+  camada("pct_lts2", "Access with LTS 2, as % of LTS 4", c(0, 100),
+         cores = c("#7A1F0F", "#E7A07A", "#F7F6F2")) |>
+  camada("lts1", "Bike, LTS 1", faixa_lts, visivel = FALSE) |>
+  camada("lts2", "Bike, LTS 2", faixa_lts, visivel = FALSE) |>
+  camada("lts4", "Bike, LTS 4", faixa_lts, visivel = FALSE) |>
+  seletor()
+```
+
+```{r}
+#| label: mapa-rotas-lts
+duas_lts <- rotas_bici |>
+  dplyr::filter(rede != "Flat, LTS 2") |>
+  sf::st_transform(4326)
+cores_rota_lts <- c("Terrain, LTS 2" = "#C2542D", "Terrain, LTS 4" = "#2F6B9A")
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = duas_lts, height = "525px") |>
+  mapgl::add_line_layer(id = "rotas_lts", source = duas_lts,
+                        line_color = mapgl::match_expr("rede", values = names(cores_rota_lts),
+                                                       stops = unname(cores_rota_lts)),
+                        line_width = 5, line_opacity = 0.8, tooltip = "total_duration") |>
+  mapgl::add_legend("Bike route", values = names(cores_rota_lts),
+                    colors = unname(cores_rota_lts), type = "categorical")
+```
+
+With LTS 2, the average resident reaches
+`r num(weighted.mean(lts_pop$lts2, lts_pop$populacao))` jobs within 30 minutes by bike;
+accepting any street (LTS 4), `r num(weighted.mean(lts_pop$lts4, lts_pop$populacao))`. The
+difference is the size of the problem a continuous cycle network would solve: the jobs that
+are within reach of the bike, but only for those who face the traffic.
+
+## Conclusions
+
+(What the results show about each question, who is most affected and what this implies for
+public transport, pavement and cycle path policy.)
+
+## Limitations
+
+- The SPTrans GTFS was converted from frequencies to fixed times only between 5:00 and 11:00; the
+  result holds for the morning peak.
+- `elevatr`'s *tiles* are good for exploratory analysis, but they mix sources (SRTM,
+  Copernicus) and, in dense areas, part of the buildings and trees gets into the elevation. For an official
+  study, prefer a citable source, such as TOPODATA/INPE.
+- Tobler's function was estimated for walking; R5 also applies it to cycling. E-bikes,
+  increasingly common, hardly feel the terrain.
+- The stress level comes from OpenStreetMap tags: an unmapped cycle path, or a street
+  without the number of lanes and speed, may fall into the wrong level.
+- Population, jobs and income are from 2019 (`aopdata`); the transport network is from 2026.
+- The loading considers only cars and a small set of origin–destination pairs, with
+  hypothetical flows.
+
+## Annex: execution environment
+
+```{r}
+#| label: sessao
+sessionInfo()
+```

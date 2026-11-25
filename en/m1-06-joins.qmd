@@ -1,0 +1,308 @@
+# Combining datasets: `join` and `merge` {#sec-m1-joins}
+
+Almost no analysis uses a single table. The real work is combining: freight flows with
+population, highways with municipal GDP, port facilities with IBGE codes. This
+chapter is about making that combination and, above all, about **finding out what did not match**.
+
+```{r}
+library(dplyr)
+library(stringr)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+stopifnot(ncol(cabotagem) == length(colunas))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(uf_origem  = stringr::str_to_upper(uf_origem),
+         uf_destino = stringr::str_to_upper(uf_destino),
+         tku_bi     = tku / 1e9)
+
+nrow(cabotagem)
+```
+
+## The types of join
+
+We will use two small tables to see how each `join` behaves without noise: flows by
+destination state (`fluxos`) and GDP by state (`pib`).
+
+```{r}
+fluxos <- data.frame(
+  uf_destino = c("PR", "SP", "BA", "AM"),
+  tku_bi     = c(4.8, 12.3, 3.1, 0.4)
+)
+
+pib <- data.frame(
+  uf   = c("PR", "SP", "BA", "CE"),
+  pib_bi = c(613, 2720, 400, 220)
+)
+```
+
+### `left_join()`: keeps the left table
+
+This is what you will use in 90% of cases: it keeps every row of the main dataset and brings in the
+columns of the auxiliary one.
+
+```{r}
+fluxos |> dplyr::left_join(pib, by = c("uf_destino" = "uf"))
+```
+
+`AM` got `NA` because it does not exist in the GDP table. **That is information**, not an error. And
+it must be investigated, never ignored.
+
+### `inner_join()`: only what exists in both
+
+```{r}
+fluxos |> dplyr::inner_join(pib, by = c("uf_destino" = "uf"))
+```
+
+Careful: `inner_join` **silently drops rows**. Always compare `nrow()` before and
+after.
+
+### `full_join()`: the union
+
+```{r}
+fluxos |> dplyr::full_join(pib, by = c("uf_destino" = "uf"))
+```
+
+### `anti_join()` and `semi_join()`: the diagnostic tools
+
+```{r}
+# what is in the flows and has NO GDP
+fluxos |> dplyr::anti_join(pib, by = c("uf_destino" = "uf"))
+
+# what is in the GDP table and does not appear in the flows
+pib |> dplyr::anti_join(fluxos, by = c("uf" = "uf_destino"))
+
+# filters the flows, keeping only those with a match in GDP (without bringing columns)
+fluxos |> dplyr::semi_join(pib, by = c("uf_destino" = "uf"))
+```
+
+::: {.callout-tip}
+## The routine that prevents errors when combining
+
+Always, in this order:
+
+1. `anti_join()` in both directions, to see what does not match.
+2. `left_join()`.
+3. Check `nrow()` before and after. If it grew, the key on the right is duplicated.
+4. Count the `NA`s in the columns brought in.
+:::
+
+### Summary table
+
+| Function | Rows kept | Typical use |
+|:--|:--|:--|
+| `left_join()` | all from the left | add attributes to the main dataset |
+| `inner_join()` | only those that match | when the analysis needs both pieces of information |
+| `full_join()` | all from both | consolidate complementary datasets |
+| `anti_join()` | left without a match | **diagnosing** keys that do not match |
+| `semi_join()` | left with a match | filter by a list of codes |
+
+The base R equivalent is `merge()`, with the arguments `all.x`, `all.y`:
+
+```{r}
+merge(fluxos, pib, by.x = "uf_destino", by.y = "uf", all.x = TRUE)
+```
+
+## The row duplication problem
+
+If the key of the right-hand table has repeated values, the `join` **multiplies** the rows.
+It is the most common cause of inflated totals in reports.
+
+```{r}
+pib_dup <- dplyr::bind_rows(pib, data.frame(uf = "PR", pib_bi = 999))
+
+nrow(fluxos)
+fluxos |> dplyr::left_join(pib_dup, by = c("uf_destino" = "uf")) |> nrow()
+```
+
+Modern `dplyr` warns you about this if you declare the expected relationship:
+
+```{r}
+#| error: true
+fluxos |>
+  dplyr::left_join(pib_dup, by = c("uf_destino" = "uf"), relationship = "one-to-one")
+```
+
+Declaring `relationship = "one-to-one"` (or `"many-to-one"`) turns a silent error into
+an explicit one. It is worth always using it in production routines.
+
+## Fixing data before merging
+
+In practice, the problem is never the `join`. It is the key. Four fixes solve almost everything.
+
+### 1. Different type
+
+```{r}
+a <- data.frame(cod = c("4118204", "3548500"), valor = c(10, 20))
+b <- data.frame(cod = c(4118204, 3548500), pop = c(156174, 418375))
+
+class(a$cod); class(b$cod)
+```
+
+```{r}
+#| error: true
+dplyr::left_join(a, b, by = "cod")
+```
+
+```{r}
+dplyr::left_join(a, dplyr::mutate(b, cod = as.character(cod)), by = "cod")
+```
+
+### 2. Lost leading zero
+
+State, municipality and census tract codes read as numbers lose the leading zero.
+
+```{r}
+codigos <- c(1100015, 110001)
+stringr::str_pad(codigos, width = 7, pad = "0")
+```
+
+### 3. Case, accents and spaces
+
+```{r}
+chave <- function(x) {
+  x |>
+    stringr::str_squish() |>
+    stringr::str_to_lower() |>
+    stringi::stri_trans_general("Latin-ASCII")
+}
+
+x <- data.frame(municipio = c("São Gonçalo do Amarante", "Paranaguá"))
+y <- data.frame(municipio = c("SAO GONCALO DO AMARANTE", "PARANAGUA"), pop = c(104669, 156174))
+
+dplyr::left_join(
+  dplyr::mutate(x, k = chave(municipio)),
+  dplyr::mutate(y, k = chave(municipio)) |> dplyr::select(-municipio),
+  by = "k"
+)
+```
+
+### 4. Composite key
+
+A municipality name is only unique **within** its state. That is why the correct key is `municipality + state`.
+Better still: the IBGE code.
+
+```{r}
+bonitos <- data.frame(
+  municipio = c("Bonito", "Bonito", "Bonito"),
+  uf        = c("MS", "PA", "PE")
+)
+
+area <- data.frame(
+  municipio = c("Bonito", "Bonito", "Bonito"),
+  uf        = c("MS", "PA", "PE"),
+  area_km2  = c(4934, 1789, 395)
+)
+
+dplyr::left_join(bonitos, area, by = c("municipio", "uf"))
+```
+
+::: {.callout-important}
+## Always use the IBGE code when it exists
+
+The 7-digit code (`4118204` = Paranaguá/PR) is the official key and does not suffer from the problems
+above. In module 2, `geobr::read_municipality()` brings this code together with the geometry, and in
+module 3 `censobr` and `sidrar` use it as the identifier. Keep it in every intermediate table
+you create.
+:::
+
+## Application: enriching the coastal shipping dataset
+
+Let us add the **region** of origin and of destination to the flows, using an auxiliary table
+of states. Before the `left_join`, the diagnosis.
+
+```{r}
+regioes <- data.frame(
+  uf = c("AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA",
+         "PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"),
+  regiao = c("Norte","Nordeste","Norte","Norte","Nordeste","Nordeste","Centro-Oeste",
+             "Sudeste","Centro-Oeste","Nordeste","Centro-Oeste","Centro-Oeste","Sudeste",
+             "Norte","Nordeste","Sul","Nordeste","Nordeste","Sudeste","Nordeste","Sul",
+             "Norte","Norte","Sul","Sudeste","Nordeste","Norte")
+)
+
+# 1. what does not match, in both directions
+cabotagem |>
+  dplyr::anti_join(regioes, by = c("uf_origem" = "uf")) |>
+  dplyr::count(uf_origem, wt = tku_bi, name = "tku_bi")
+
+cabotagem |>
+  dplyr::anti_join(regioes, by = c("uf_destino" = "uf")) |>
+  nrow()
+```
+
+The diagnosis found what we already knew from @sec-m1-limpeza: the origin may be the
+**ZEE/Continental Shelf** or **Indeterminado** (undetermined), which are not states. And they
+account for a huge share of the TKU. An `inner_join` here would erase almost 40% of the data without
+warning. The solution is to extend the auxiliary table to hold these categories explicitly:
+
+```{r}
+regioes <- dplyr::bind_rows(
+  regioes,
+  data.frame(uf = c("ZEE/PLAT. CONTINENTAL", "INDETERMINADO"),
+         regiao = c("Offshore (ZEE)", "Indeterminado"))
+)
+```
+
+```{r}
+n_antes <- nrow(cabotagem)
+
+cabotagem_reg <- cabotagem |>
+  dplyr::left_join(regioes, by = c("uf_origem" = "uf"), relationship = "many-to-one") |>
+  dplyr::rename(regiao_origem = regiao) |>
+  dplyr::left_join(regioes, by = c("uf_destino" = "uf"), relationship = "many-to-one") |>
+  dplyr::rename(regiao_destino = regiao)
+
+# 3. the rows did not multiply
+c(antes = n_antes, depois = nrow(cabotagem_reg))
+
+# 4. no NA left in the columns brought in
+c(origem = sum(is.na(cabotagem_reg$regiao_origem)),
+  destino = sum(is.na(cabotagem_reg$regiao_destino)))
+```
+
+The join is validated. Now the matrix of flows between regions, in billions of t·km (the
+regions are North, Northeast, Centre-West, Southeast and South):
+
+```{r}
+cabotagem_reg |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(regiao_origem, regiao_destino)) |>
+  tidyr::pivot_wider(names_from = regiao_destino, values_from = tku_bi, values_fill = 0) |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) round(x, 1))) |>
+  dplyr::arrange(regiao_origem) |>
+  knitr::kable()
+```
+
+Reading this table answers a planning question in a few lines: the largest
+flows are **offshore to the Southeast** (about 70 billion t·km), followed by **North to
+Northeast** and **offshore to the Northeast**. In other words: oil from the platforms to the
+terminals in the Southeast and Northeast, and container cargo leaving Manaus.
+
+### Stacking instead of joining
+
+When the tables have the same structure (for example, one file per year), the operation is
+`bind_rows()`, not `join`:
+
+```{r}
+#| eval: false
+anos <- 2020:2025
+arquivos <- sprintf("dados/cabotagem_%d.xlsx", anos)
+
+serie <- lapply(arquivos, read_excel) |>
+  dplyr::bind_rows(.id = "i") |>
+  dplyr::mutate(ano = anos[as.integer(i)]) |>
+  dplyr::select(-i)
+```
+
+`bind_rows()` aligns the columns by name and fills with `NA` those missing in some
+file. It is desirable behaviour, but it hides a column being renamed between years.
+Check with `setdiff(names(a), names(b))` before stacking.

@@ -33,6 +33,8 @@ R/diagnostico_componentes_rede.R
 
 # o site é montado no GitHub Actions a partir dele, sem R
 !_freeze/**
+# o mesmo para a versão em inglês (projeto em en/)
+!en/_freeze/**
 
 # Quarto
 /_site/

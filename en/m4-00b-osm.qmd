@@ -1,0 +1,461 @@
+# OpenStreetMap data {#sec-m4-osm}
+
+OSM is the most complete and up-to-date road dataset freely available in Brazil, and it is the
+input of any routing. There are two access routes, for different needs.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+# default basemap for mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+| Package | How it works | When to use it |
+|:--|:--|:--|
+| `osmdata` | queries the Overpass API live | small areas, specific features, rare attributes |
+| `osmextract` | downloads ready-made regional `.pbf` extracts (Geofabrik) | a whole road network, input for `r5r` |
+
+The rule of thumb: if the answer fits in a few thousand features, `osmdata`; if you want
+"all the roads in a state", `osmextract`.
+
+::: {.callout-important}
+## Before you start: the module data
+
+Run the module's setup script once. It installs the missing packages, downloads the
+module's data package (`dados_modulo4.zip`, from the
+[Releases](https://github.com/Joaobazzo/curso-r-transportes/releases) page) to `dados/brutos/` and
+checks whether R can see Java 21, which `r5r` requires:
+
+```{r}
+#| eval: false
+source("https://raw.githubusercontent.com/Joaobazzo/curso-r-transportes/main/R/preparar_modulo4.R")
+```
+
+The package has the São Paulo–Santos network used in this chapter and in @sec-m4-roteamento, Ipea's
+results for Fortaleza (`aopdata`) and the `dados/brutos/fortaleza/` folder, with the OSM network
+and the GTFS that `r5r` uses in @sec-m4-r5r. The script ends with the message **Tudo pronto
+para o Módulo 4** ("All set for Module 4").
+
+**If the download is blocked by the server.** On restricted networks, such as the Ministry's, the
+server may refuse downloads made by R. The message usually contains `HTTP 403`, `Forbidden`,
+`cannot open URL` or "Não foi possível baixar os dados do módulo" ("could not download the module data"). In that case, do it by hand:
+
+1. In the browser, download
+   [`dados_modulo4.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo4/dados_modulo4.zip)
+   (about 70 MB).
+2. Unzip the file **inside the project folder**, the one with the
+   `curso-r-transportes.Rproj` file. The files go to `dados/brutos/`.
+3. Run the `source()` again. It finds the data, skips the download and checks the rest.
+
+If the `source()` itself fails, download the script
+[`preparar_modulo4.R`](https://github.com/Joaobazzo/curso-r-transportes/blob/main/R/preparar_modulo4.R)
+in the browser (download button in the top-right corner), save it in the project folder and run
+`source("preparar_modulo4.R")`.
+:::
+
+::: {.callout-important}
+## In Brazil, use OSM for the road network, and almost only for that
+
+The **road network** is the best-mapped OSM layer in Brazil: the coverage of streets and
+highways is broad, the geometry is good and the connectivity is what routing engines
+expect. That is what this module uses OSM for: as the input for routing with `dodgr`
+(@sec-m4-roteamento) and `r5r` (@sec-m4-gtfs).
+
+The **other features** are a different story. Ports, terminals, aerodromes, bridges, weight and height
+restrictions, land use and points of interest depend on who mapped each place: the
+coverage is uneven, the attributes are partial and the classification changes from one city to
+another. The examples with ports and bridges in this chapter show exactly that. For these
+layers, prefer the official sources:
+
+| What you need | Most suitable source |
+|:--|:--|
+| Federal highways, with code, segment and status | SNV, from DNIT |
+| Port facilities | ANTAQ |
+| Railways, waterways and terminals | geospatial datasets of the Ministry of Transport and Infra S.A. (ONTL) |
+| Aerodromes | ANAC |
+| Continuous base map (roads, hydrography, localities) | IBGE, BC250 |
+| Addresses and establishments | IBGE, CNEFE (it is what `geocodebr` uses, @sec-m3-geocodificacao) |
+| General catalogue of official geospatial data | INDE |
+
+OSM is still useful for these layers as a **quick check** or when there is no official
+source, but in that case the report must say that the data are collaborative and incomplete.
+:::
+
+## `osmdata`: Overpass queries
+
+Every query has the same structure: an area (`opq`), one or more tag filters
+(`add_osm_feature`) and the output format (`osmdata_sf`).
+
+```{r}
+arquivo <- "dados/brutos/portos_osm.gpkg"
+
+if (!file.exists(arquivo)) {
+  res <- osmdata::opq(bbox = c(-48.75, -25.65, -48.35, -25.35), timeout = 120) |>
+    osmdata::add_osm_feature(key = "seamark:type", value = "harbour") |>
+    osmdata::osmdata_sf()
+
+  res$osm_points |>
+    filter(!is.na(`seamark:type`)) |>     # discards the nodes that only draw other features
+    select(any_of(c("osm_id", "name", "seamark:harbour:category"))) |>
+    st_write(arquivo, quiet = TRUE)
+}
+
+portos_osm <- st_read(arquivo, quiet = TRUE)
+nrow(portos_osm)
+```
+
+The query asks for the points marked as a harbour on the nautical chart (`seamark:type = harbour`) in
+Paranaguá Bay. A quick check on the map:
+
+```{r}
+mapview::mapview(portos_osm, col.regions = "#1a5b8a", layer.name = "Ports and marinas (OSM)")
+```
+
+Look at what came back: terminals, yacht clubs and marinas mixed together. In OSM, a "harbour" is what the
+mapper decided to call a harbour. For the official list of port facilities, the source is
+ANTAQ.
+
+The object returned by `osmdata_sf()` has several components, because a single query can
+return different types of geometry:
+
+```{r}
+#| eval: false
+res$osm_points        # nodes
+res$osm_lines         # open ways
+res$osm_polygons      # closed ways (areas)
+res$osm_multilines    # line relations (a whole highway, for example)
+res$osm_multipolygons # area relations (municipalities, areas with holes)
+```
+
+### The tags that matter in transport
+
+```{r}
+#| eval: false
+# road hierarchy
+add_osm_feature(key = "highway", value = c("motorway", "trunk", "primary"))
+
+# a specific highway by its code
+add_osm_feature(key = "ref", value = "BR-116")
+```
+
+`osmdata::available_tags("highway")` lists every possible value of a key — useful
+because OSM's taxonomy is extensive and it is worth checking before assuming.
+
+```{r}
+osmdata::available_tags("highway") |> head(12)
+```
+
+### A complete example: bridges and restrictions in a corridor
+
+```{r}
+arquivo_pontes <- "dados/brutos/pontes_br116.gpkg"
+
+if (!file.exists(arquivo_pontes)) {
+  res <- osmdata::opq(bbox = c(-49.40, -25.75, -48.40, -25.15), timeout = 180) |>
+    osmdata::add_osm_feature(key = "bridge", value = "yes") |>
+    osmdata::osmdata_sf()
+
+  pontes <- res$osm_lines |>
+    filter(!is.na(highway)) |>
+    select(any_of(c("osm_id", "name", "highway", "maxweight", "maxheight", "layer")))
+
+  st_write(pontes, arquivo_pontes, quiet = TRUE)
+}
+
+pontes <- st_read(arquivo_pontes, quiet = TRUE)
+
+c(pontes = nrow(pontes),
+  com_restricao_peso = sum(!is.na(pontes$maxweight)))
+```
+
+This result often surprises people: most bridges **do not have** the weight restriction
+mapped. It is the concrete illustration of OSM's limit — the geometry is good, the attribute is partial.
+For official restrictions, the source is DNIT.
+
+A quick look at the map confirms both points. First, where the bridges are, coloured
+by road type:
+
+```{r}
+mapview::mapview(pontes, zcol = "highway", lwd = 3, layer.name = "Road type")
+```
+
+Then, only those with a mapped weight restriction. They are all on the Estrada da Graciosa: a sign
+that someone mapped that road carefully, not that the other bridges have no limit.
+
+```{r}
+pontes_com_peso <- pontes |> filter(!is.na(maxweight))
+
+mapview::mapview(pontes_com_peso, zcol = "maxweight", lwd = 4,
+                 layer.name = "Maximum weight (t)")
+```
+
+## `osmextract`: the whole road network
+
+```{r}
+#| eval: false
+library(osmextract)
+
+# 1. find out which extract covers the area
+oe_match("Ceará")
+oe_match("Paraná")
+
+# 2. download only the .pbf file (it is what r5r consumes, @sec-m4-gtfs)
+oe_download(
+  file_url = oe_match("Ceará")$url,
+  download_directory = "dados/brutos/osm"
+)
+
+# 3. or read it straight as sf, filtering at the source with SQL
+rede <- oe_get(
+  place = "Ceará",
+  layer = "lines",
+  query = "SELECT osm_id, highway, name, maxspeed, oneway
+           FROM lines
+           WHERE highway IN ('motorway','trunk','primary','secondary','tertiary')",
+  download_directory = "dados/brutos/osm"
+)
+```
+
+The `query` argument is what makes this feasible: the filter runs on the file, and only the main
+network reaches R. Without it, "all the lines in Ceará" are millions of features, most of them
+irrelevant for routing.
+
+::: {.callout-tip}
+## Typical sizes
+
+| Area | `.pbf` |
+|:--|--:|
+| A medium-sized city | 10–40 MB |
+| A state | 50–600 MB |
+| The whole of Brazil | > 2 GB |
+
+Download the smallest extract that covers the study area. For a city, the metropolitan region is
+enough; for interstate freight routing, the state. The `.pbf` of the whole of Brazil is rarely
+needed — and it makes `r5r` very slow to build the network.
+:::
+
+## Preparing the network for routing
+
+A raw road network download is not yet a navigable network. To follow the steps without
+downloading a whole state's extract, we will use the country's main freight corridor: the
+main roads between the city of **São Paulo and the Port of Santos**, with the two highways that
+descend the escarpment, the Anchieta and the Imigrantes. The columns are the same as in `oe_get()` above.
+
+The file comes in the module's data package (@sec-m3). The block below only downloads from OSM if it
+is not in `dados/brutos/`, and that download is slow: the São Paulo network is large, and the
+Overpass server may take several minutes or refuse the query (error 504).
+
+```{r}
+arquivo_rede <- "dados/brutos/rede_sao_paulo_santos.gpkg"
+
+if (!file.exists(arquivo_rede)) {
+  # Overpass mirror server, less congested than the main one
+  osmdata::set_overpass_url("https://overpass.kumi.systems/api/interpreter")
+
+  res <- osmdata::opq(bbox = c(-46.80, -24.02, -46.25, -23.45), timeout = 300) |>
+    osmdata::add_osm_feature(key = "highway", value = c(
+      "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
+      "secondary", "secondary_link")) |>
+    osmdata::osmdata_sf()
+
+  res$osm_lines |>
+    select(any_of(c("osm_id", "name", "ref", "highway", "maxspeed", "oneway", "lanes"))) |>
+    st_write(arquivo_rede, quiet = TRUE)
+}
+
+rede <- st_read(arquivo_rede, quiet = TRUE) |>
+  rename(geometry = geom)     # the GeoPackage calls the geometry "geom"
+```
+
+Three precautions:
+
+```{r}
+rede_limpa <- rede |>
+  filter(!is.na(highway)) |>
+  filter(!highway %in% c("footway", "path", "cycleway", "steps", "pedestrian")) |>
+  mutate(
+    velocidade = readr::parse_number(maxspeed),
+    velocidade = dplyr::coalesce(velocidade, dplyr::case_match(
+      highway,
+      "motorway"  ~ 110,
+      "trunk"     ~ 90,
+      "primary"   ~ 80,
+      "secondary" ~ 60,
+      .default    = 40
+    )),
+    comprimento_m = as.numeric(st_length(geometry)),
+    tempo_min = comprimento_m / 1000 / velocidade * 60
+  )
+```
+
+The three points: (1) remove what cannot be travelled by the mode of interest; (2) fill in the
+speed (`velocidade`) when the attribute is missing — and document the rule used; (3) compute the cost that the
+routing will minimise (time, distance, or generalised cost).
+
+Check the table: the first rows show whether the speed was filled in and whether each segment's
+time (`tempo_min`) makes sense.
+
+```{r}
+rede_limpa |>
+  st_drop_geometry() |>
+  select(name, highway, maxspeed, velocidade, comprimento_m, tempo_min) |>
+  head(10)
+```
+
+And check the map: the colour shows the speed assigned to each segment, mapped or filled in
+by the rule. There are `r format(nrow(rede_limpa), big.mark = ",")` segments, too heavy for an
+interactive map; to check it, the highways are enough, the `motorway` and `trunk` roads (on your
+computer, `leafgl` from @sec-m2-sf can handle the whole network).
+
+```{r}
+# for display only (the calculations use the full network): merging the segments of the same
+# highway with the same speed makes the map light without changing the drawing
+rede_principal <- rede_limpa |>
+  filter(highway %in% c("motorway", "trunk")) |>
+  group_by(ref, velocidade) |>
+  summarise(trechos = n(), .groups = "drop")
+
+nrow(rede_principal)
+
+mapview::mapview(rede_principal, zcol = "velocidade", layer.name = "Speed (km/h)")
+```
+
+## Geometric network × topological network
+
+The clean network is still a **geometric network**: a collection of lines, each with its own
+coordinates. It is good for drawing and measuring, but not for routing. To the computer, two
+streets that cross on screen are not connected: nothing in the table says you can leave one and
+enter the other.
+
+Routing requires a **topological network**, or graph: a set of **nodes** (intersections, road
+ends) and **edges** (the segments between two nodes), in which being connected means
+**sharing a node**. The geometry becomes an attribute of the edge; what matters is who connects to
+whom.
+
+### A toy example
+
+Three roads, drawn by hand:
+
+- **Rua A** (horizontal) and **Rua B** (vertical) cross **at grade**: both have a
+  vertex at the crossing point;
+- **Viaduto C** (an overpass) goes over Rua A: the lines cross in the drawing, but there is no shared
+  vertex, and there must be no connection.
+
+```{r}
+library(sfnetworks)
+
+ruas <- st_sf(
+  nome = c("Rua A", "Rua B", "Viaduto C"),
+  geometry = st_sfc(
+    st_linestring(rbind(c(0, 1), c(1, 1), c(2, 1))),    # vertex in the middle, at (1, 1)
+    st_linestring(rbind(c(1, 0), c(1, 1), c(1, 2))),    # same vertex (1, 1)
+    st_linestring(rbind(c(0.2, 0), c(0.6, 2)))          # crosses A at (0.4, 1), no vertex
+  )
+)
+ruas
+```
+
+The most direct conversion, `as_sfnetwork()`, creates a node at each **end** of a line and one edge
+per line:
+
+```{r}
+rede_ingenua <- as_sfnetwork(ruas, directed = FALSE)
+rede_ingenua
+```
+
+There are 6 nodes and 3 edges, and the summary already warns: a "forest with 3 trees", that is, three
+loose pieces. The crossing of roads A and B **did not become a node**, because the vertex (1, 1) is in the
+middle of both lines, not at an end. That is exactly what happens with OSM: a way usually
+crosses several intersections without being cut at them.
+
+The fix is to **subdivide** the lines at the vertices they share:
+
+```{r}
+rede_topologica <- tidygraph::convert(rede_ingenua, to_spatial_subdivision)
+rede_topologica
+```
+
+Now there are 7 nodes and 5 edges: the crossing (1, 1) became a node, and A and B were each cut into two
+segments. The overpass stays separate, as it should, because it shares no vertex with
+anyone. The three versions side by side:
+
+```{r}
+#| label: fig-rede-topologica
+#| fig-cap: "The same network as geometry (left), as a naive graph (centre) and as a subdivided graph (right). The points are the nodes."
+#| fig-height: 3.4
+#| fig-width: 9
+desenhar_rede <- function(rede, titulo) {
+  nos     <- st_as_sf(rede, "nodes")
+  arestas <- st_as_sf(rede, "edges")
+
+  ggplot() +
+    geom_sf(data = arestas, aes(colour = nome), linewidth = 1.2) +
+    geom_sf(data = nos, size = 2.5) +
+    geom_sf_text(data = nos, aes(label = seq_len(nrow(nos))),
+                 nudge_x = 0.12, nudge_y = 0.12, size = 3) +
+    labs(title = titulo,
+         subtitle = paste(nrow(nos), "nodes,", nrow(arestas), "edges"),
+         colour = NULL) +
+    theme_void(base_size = 9) +
+    theme(legend.position = "bottom")
+}
+
+geometrica <- ggplot(ruas) +
+  geom_sf(aes(colour = nome), linewidth = 1.2) +
+  labs(title = "Geometric network", subtitle = "lines only, no connections", colour = NULL) +
+  theme_void(base_size = 9) +
+  theme(legend.position = "bottom")
+
+patchwork::wrap_plots(
+  geometrica,
+  desenhar_rede(rede_ingenua, "Naive graph"),
+  desenhar_rede(rede_topologica, "Subdivided graph"),
+  nrow = 1, guides = "collect"
+) & theme(legend.position = "bottom")
+```
+
+The proof that the topology changed the result: ask for a path from the left end of Rua A to
+the top end of Rua B.
+
+```{r}
+# in the naive graph: node 1 = (0, 1), node 4 = (1, 2). There is no path.
+st_network_paths(rede_ingenua, from = 1, to = 4)$node_paths
+
+# in the subdivided graph: node 1 = (0, 1), node 5 = (1, 2). The path goes through the crossing, node 2.
+st_network_paths(rede_topologica, from = 1, to = 5)$node_paths
+```
+
+### What this means on the real network
+
+`dodgr` and `r5r` do this conversion on their own, from OSM's own node
+identifiers, which already mark where roads cross. But the logic is the same, and the same
+problems show up:
+
+- **Roads that should connect and do not**, because the mapper did not put in the shared node.
+  The graph is split into isolated **components**, and a pair of points in different
+  components "cannot reach each other". In the next chapter, the São Paulo–Santos corridor network
+  becomes a graph with a few dozen components, and only the largest of them is fit for routing.
+- **Roads that should not connect and do**, such as an overpass mapped with a node in common
+  with the street below. The router then "comes down" from the overpass where there is no access. In OSM, the
+  `layer` tag exists to prevent this.
+- **Direction of travel**: in a directed graph (`directed = TRUE`), a one-way road
+  becomes a single edge, and a two-way road becomes two, one in each direction. OSM's `oneway`
+  tag is what defines this.
+
+For a whole network with `sfnetworks`, the code is the same as in the example, applied to
+`rede_limpa`:
+
+```{r}
+#| eval: false
+net <- as_sfnetwork(rede_limpa, directed = FALSE) |>
+  tidygraph::convert(sfnetworks::to_spatial_subdivision) |>
+  tidygraph::activate("edges") |>
+  mutate(peso = comprimento_m)
+```
+
+Now we have the two inputs of any routing: the origin and destination points, with
+checked coordinates (@sec-m3-geocodificacao), and the road network, clean and ready to become a
+graph. The next chapter links one to the other: it computes car distances, times and paths
+on the São Paulo–Santos network.

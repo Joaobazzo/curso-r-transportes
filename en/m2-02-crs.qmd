@@ -1,0 +1,238 @@
+# Coordinate systems {#sec-m2-crs}
+
+This is the shortest chapter and the one that prevents the most errors. Almost every problem of "the layers don't
+overlap", "the area came out wrong" or "the *buffer* turned oval" is a projection problem.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+# default basemap for mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+## The two types of system
+
+**Geographic** (degrees): latitude and longitude coordinates on an ellipsoid. Good for
+storing and exchanging data; bad for measuring.
+
+**Projected** (metres): the curved surface flattened onto a plane. Good for measuring distances,
+areas and making *buffers*; it introduces a distortion that grows with the size of the area.
+
+```{r}
+#| echo: false
+crs_relevantes <- data.frame(
+  epsg = c(4326, 4674, 31982, 31983, 31984, 5880),
+  name = c("WGS 84", "SIRGAS 2000", "SIRGAS 2000 / UTM 22S", "SIRGAS 2000 / UTM 23S",
+           "SIRGAS 2000 / UTM 24S", "SIRGAS 2000 / Brazil Polyconic"),
+  type = c("geographic", "geographic", "projected", "projected", "projected", "projected"),
+  use = c("GPS, OSM, GTFS, international files",
+          "official Brazilian standard (IBGE, DNIT)",
+          "PR, SC, western SP",
+          "SP, RJ, MG, GO",
+          "CE, BA, PE (Fortaleza)",
+          "maps of the whole of Brazil")
+)
+knitr::kable(crs_relevantes)
+```
+
+::: {.callout-note}
+## Which one to use in the Ministry
+
+- To **store and distribute** data: SIRGAS 2000 (`EPSG:4674`). It is Brazil's official geodetic
+  system. Data from GPS, OSM or GTFS arrive in WGS 84 (`EPSG:4326`); in
+  practice the difference between the two is a few centimetres, but declare the right one.
+- To **measure** at a local or regional scale: the corresponding UTM zone.
+- For **national maps**: the Brazil Polyconic (`EPSG:5880`) or an equal-area projection
+  (Albers), defined below.
+:::
+
+::: {.callout-tip}
+## Where to look up an EPSG that is not in this table
+
+<https://epsg.io/> accepts searches by place name, code or keyword, and shows the area of
+use, the unit and the code ready to paste (`EPSG:xxxx`). `sf` also exposes the same database
+locally, without needing the internet:
+
+```{r}
+#| eval: false
+sf::st_crs("EPSG:31982")            # full details of a known code
+sf::st_crs(32722)                   # also accepts the bare number
+```
+:::
+
+## Query, set and transform
+
+These are three different operations, and confusing them is the most common error.
+
+```{r}
+portos <- data.frame(
+  nome = c("Paranaguá", "Itajaí"),
+  lon  = c(-48.5119, -48.6486),
+  lat  = c(-25.5016, -26.9077)
+) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+# 1. QUERY: what is the CRS?
+sf::st_crs(portos)$input
+sf::st_crs(portos)$epsg
+```
+
+```{r}
+# 2. SET: state the CRS of data that came without this information.
+#    It does NOT move the coordinates, it only labels them.
+sem_crs <- sf::st_set_crs(portos, NA)
+sf::st_crs(sem_crs)$input
+
+corrigido <- sf::st_set_crs(sem_crs, 4326)
+sf::st_crs(corrigido)$epsg
+```
+
+```{r}
+# 3. TRANSFORM: convert the coordinates to another system.
+#    It MOVES the coordinates, recomputing them.
+portos_utm <- sf::st_transform(portos, 31982)
+sf::st_crs(portos_utm)$epsg
+sf::st_coordinates(portos_utm)
+```
+
+Compare the coordinates: in UTM they are metres from the zone's central meridian, in the
+hundreds of thousands. In degrees they were numbers between -49 and -25.
+
+::: {.callout-important}
+## `st_set_crs()` never fixes a wrong overlay
+
+If two layers do not line up, the wrong reflex is `st_set_crs()`. It only swaps the label and
+leaves the coordinates in the wrong place. The right one is `st_transform()`. Use `st_set_crs()`
+**only** when the data arrived without a CRS and you know, from the documentation, what it is.
+:::
+
+## When reprojecting is mandatory
+
+```{r}
+# distance between two ports, in geographic coordinates
+sf::st_distance(portos[1, ], portos[2, ])
+```
+
+Modern `sf` uses the `s2` library and computes correct **geodesic** distances even in
+degrees. For distance, you no longer need to reproject.
+
+With *buffers* the story is more delicate. On projected data, `dist` is in the CRS unit
+(metres, in UTM). On geographic coordinates, `sf` also accepts metres, because it delegates to
+`s2`. The result, however, is an **approximation by spherical cells**, slower and less
+predictable at the edges:
+
+```{r}
+b_graus  <- sf::st_buffer(portos[1, ], dist = 10000)                    # via s2, in metres
+b_metros <- portos[1, ] |> sf::st_transform(31982) |> sf::st_buffer(10000)  # planar, in metres
+
+c(
+  s2_km2  = as.numeric(units::set_units(sf::st_area(b_graus),  km^2)),
+  utm_km2 = as.numeric(units::set_units(sf::st_area(b_metros), km^2))
+)
+```
+
+A 10 km *buffer* should have an area close to π × 10² ≈ 314 km². Always check with this mental
+arithmetic: it is the quickest check that the projection was right. Looking at it
+helps to see the difference between the two approaches:
+
+```{r}
+mapview::mapview(b_graus, col.regions = "#1a5b8a") +
+  mapview::mapview(b_metros, col.regions = "#b3402a")
+```
+
+The classic problem appears when `s2` is switched off, in old versions of `sf` and in
+many other programs: the radius is interpreted **in degrees**, producing a "buffer" thousands
+of kilometres wide.
+
+```{r}
+sf::sf_use_s2(FALSE)
+b_errado <- suppressWarnings(sf::st_buffer(portos[1, ], dist = 10000))
+sf::st_bbox(b_errado)          # the bounding box goes beyond the planet
+sf::sf_use_s2(TRUE)            # always switch it back on
+```
+
+That is why the recommendation for metric work stays the same: **reproject to UTM, do the
+operations, and go back to 4674 when writing the result**. That way the code works the same in
+any version and can be audited by whoever opens it in QGIS.
+
+The rule of thumb:
+
+| Operation | Need to reproject? |
+|:--|:--|
+| `st_distance()` | no (`s2` handles it in degrees) |
+| `st_buffer()` | **yes**: the radius is in the CRS unit |
+| `st_area()`, `st_length()` | no for global values, **yes** for local precision |
+| `st_intersection()`, `st_join()` | no, but the layers must be in the **same** CRS |
+| regular grids, *snapping*, routing | **yes** |
+
+## Layers in different CRSs
+
+```{r}
+#| error: true
+# two layers in different systems: the operation fails (and it is good that it does)
+sf::st_intersects(portos, sf::st_transform(portos, 31982))
+```
+
+The pattern to align everything to a working CRS:
+
+```{r}
+#| eval: false
+crs_trabalho <- 31982
+
+camadas <- list(rodovias = rodovias, setores = setores, portos = portos)
+camadas <- lapply(camadas, st_transform, crs = crs_trabalho)
+```
+
+A useful function to find the right UTM zone from the data itself:
+
+```{r}
+zona_utm <- function(x) {
+  centro <- suppressWarnings(sf::st_centroid(sf::st_as_sfc(sf::st_bbox(sf::st_transform(x, 4326)))))
+  lon <- sf::st_coordinates(centro)[1]
+  lat <- sf::st_coordinates(centro)[2]
+  zona <- floor((lon + 180) / 6) + 1
+  # SIRGAS 2000 / UTM: 31978+zone-17 in the southern hemisphere (zones 18S to 25S)
+  epsg <- if (lat < 0) 31960 + zona else 31954 + zona
+  epsg
+}
+
+zona_utm(portos)          # PR/SC -> 31982 (UTM 22S)
+```
+
+For maps and calculations covering the whole of Brazil, the equal-area projection used by IBGE and
+Ipea:
+
+```{r}
+crs_brasil <- paste("+proj=aea +lat_0=-12 +lon_0=-54 +lat_1=-2 +lat_2=-22",
+                    "+x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs")
+```
+
+```{r}
+#| label: fig-crs-comparacao
+#| fig-cap: "The same state in three projections: geographic, UTM 22S and Brazil Albers"
+#| fig-height: 3.2
+arquivo <- "dados/brutos/pr.gpkg"
+if (!file.exists(arquivo)) {
+  pr <- geobr::read_state(code_state = "PR", year = 2020, showProgress = FALSE)
+  sf::st_write(pr, arquivo, quiet = TRUE)
+}
+pr <- sf::st_read(arquivo, quiet = TRUE)
+
+mapa <- function(x, titulo) {
+  ggplot(x) + geom_sf(fill = "#d7e3ee", colour = "#1a5b8a", linewidth = 0.3) +
+    labs(title = titulo) + theme_void(base_size = 9) +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+
+patchwork::wrap_plots(
+  mapa(sf::st_transform(pr, 4674),       "SIRGAS 2000 (degrees)"),
+  mapa(sf::st_transform(pr, 31982),      "UTM 22S (metres)"),
+  mapa(sf::st_transform(pr, crs_brasil), "Brazil Albers"),
+  nrow = 1
+)
+```
+
+All three are the same geometry. The difference in shape is each projection's distortion. And that is
+why the choice matters when the result is going to be measured, not just looked at.

@@ -1,0 +1,512 @@
+# Multimodal routing and scenarios with `r5r` {#sec-m4-r5r}
+
+This chapter shows the complete workflow of a public transport scenario analysis: build
+the network, compute the time matrix, edit the GTFS to represent an intervention, recompute
+and compare. The example is Fortaleza.
+
+Each step ends by saving its result in the `dados/projeto_final/` folder. These are the
+files the final project (@sec-m5-projeto) reads to put together the Fortaleza accessibility report:
+
+| File in `dados/projeto_final/` | Step | Content |
+|:--|:--|:--|
+| `isocronas.rds` | 4 | isochrones from 15 to 60 min from the Centre |
+| `itinerario.rds` | 5 | a detailed itinerary, from Messejana to the Centre |
+| `linhas_cortadas.rds` | 6 | the routes removed in the scenario |
+| `comparacao.rds` | 7 | jobs accessible per hexagon, current and scenario |
+| `carga.rds` | 8 | road network loading |
+
+::: {.callout-important}
+## The `r5r` blocks are not run when the site is built
+
+They require **JDK 21** and a folder with the OpenStreetMap `.pbf` and the city's GTFS:
+large files, which are not kept in the repository. The code is ready to run on your
+machine, and the synchronous session material walks through these steps live. Preparing the folder
+is described in @sec-m5.
+
+The chapter's **tables, charts and maps** are run: they use the files that this same
+code produced, run on the course author's machine, and the results Ipea publishes in
+`aopdata` for Fortaleza.
+:::
+
+```{r}
+# for the reference maps: the Fortaleza grid with Ipea's results,
+# the same used in @sec-m4-acessibilidade
+library(sf)
+library(ggplot2)
+
+arquivo <- "dados/brutos/aop_fortaleza.rds"
+
+if (!file.exists(arquivo)) {
+  aop <- aopdata::read_access(
+    city = "Fortaleza",
+    mode = "public_transport",
+    year = 2019,
+    peak = TRUE,
+    geometry = TRUE,
+    showProgress = FALSE
+  )
+  saveRDS(aop, arquivo)
+}
+
+aop <- readRDS(arquivo) |>
+  dplyr::filter(P001 > 0)
+
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+```{r}
+#| eval: false
+options(java.parameters = "-Xmx2G")   # memory for the JVM, BEFORE loading the package
+                                      # (2 GB is enough for Fortaleza; for a larger region, raise it)
+library(r5r)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(accessibility)
+
+# where each step saves its result, for the final project
+dir.create("dados/projeto_final", recursive = TRUE, showWarnings = FALSE)
+```
+
+## 1. Build the network
+
+```{r}
+#| eval: false
+pasta <- "dados/brutos/fortaleza"
+list.files(pasta)     # must contain one .osm.pbf and one or more GTFS .zip files
+
+rede <- r5r::build_network(data_path = pasta)   # before version 2.3: setup_r5()
+```
+
+On the first run R5 builds a `.dat` file with the network. With the Fortaleza extract in the
+module package, it takes about 2 minutes; with the whole Northeast extract, much longer, and it needs a lot of
+memory. That is why the package has only the city's region.
+On later runs, it reuses it. If the GTFS or the `.pbf` change, delete the `.dat` to force a
+rebuild.
+
+```{r}
+#| eval: false
+# check what went into the network
+r5r::street_network_to_sf(rede)$edges |> nrow()
+r5r::transit_network_to_sf(rede)$routes |> nrow()
+```
+
+This pair of lines is the check that prevents the most common frustration: running everything and finding out
+at the end that the GTFS was not recognised: because it was unzipped, outside its
+validity period, or malformed.
+
+## 2. Origin and destination points
+
+```{r}
+#| eval: false
+# aopdata's hexagonal grid (the aop object, from the start of the chapter) works well
+# as the unit of analysis: one point at the centre of each populated hexagon
+pontos <- aop |>
+  sf::st_centroid() |>
+  dplyr::transmute(id = id_hex,
+            lon = sf::st_coordinates(geometry)[, 1],
+            lat = sf::st_coordinates(geometry)[, 2]) |>
+  sf::st_drop_geometry()
+
+nrow(pontos)
+```
+
+`r5r` requires exactly the columns `id`, `lon` and `lat`. Points that fall far from the network are
+discarded with a warning. Check the count before and after.
+
+Each populated hexagon becomes an origin and destination point. The grid, with the population of
+each hexagon:
+
+```{r}
+# mapgl wants coordinates in degrees (EPSG:4326); only the map's columns, for the tooltip
+populacao <- aop |>
+  dplyr::select(id_hex, populacao = P001) |>
+  sf::st_transform(4326)
+
+cores_pop <- c("#F7F6F2", "#E7A07A", "#7A1F0F")
+faixa_pop <- range(populacao$populacao)
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = populacao, height = "525px") |>
+  mapgl::add_fill_layer(
+    id = "populacao", source = populacao,
+    fill_color = mapgl::interpolate(column = "populacao", values = seq(faixa_pop[1], faixa_pop[2],
+                                    length.out = 3), stops = cores_pop),
+    fill_opacity = 0.75, tooltip = "populacao"
+  ) |>
+  mapgl::add_legend("Population", values = faixa_pop, colors = cores_pop)
+```
+
+## 3. Travel time matrix
+
+```{r}
+#| eval: false
+# a Saturday, within the GTFS validity period (03/04 to 03/07/2026). This GTFS only has
+# Saturday and Sunday trips: on a weekday, r5r finds no bus and returns
+# walking only, without an error (see the warning below)
+partida <- as.POSIXct("2026-05-16 07:00:00", tz = "America/Fortaleza")
+
+ttm <- r5r::travel_time_matrix(
+  rede,
+  origins      = pontos,
+  destinations = pontos,
+  mode         = c("WALK", "TRANSIT"),
+  departure_datetime = partida,
+  time_window       = 60,      # 60 departures, minute by minute
+  percentiles       = c(50),
+  max_walk_time     = 20,      # minutes of walking at each end
+  max_trip_duration = 90
+)
+
+nrow(ttm)
+head(ttm)
+```
+
+::: {.callout-warning}
+## Check that the GTFS has trips on the chosen day
+
+The Fortaleza GTFS in the module package declares a weekday service in `calendar`, but
+all the trips in `trips` are on Saturday or Sunday. On a Thursday, `r5r` finds no
+bus: the matrix comes out with about 38 thousand pairs, all on foot, and no error appears. On Saturday, it comes out with
+3.7 million. Before choosing the date, see which services have trips:
+
+```{r}
+#| eval: false
+table(gtfstools::read_gtfs(file.path(pasta, "gtfs_fortaleza.zip"))$trips$service_id)
+```
+
+If the matrix with `TRANSIT` is the same size as one with `WALK` only, that is the problem.
+:::
+
+The parameters that change the result the most, and that must appear in the methodological note:
+
+| Parameter | Effect |
+|:--|:--|
+| `departure_datetime` | peak × off-peak changes times and frequencies |
+| `time_window` + `percentiles` | captures the variability of waiting; the 50th percentile is the usual one |
+| `max_walk_time` | maximum access walk; 15–20 min is current practice |
+| `max_trip_duration` | cuts the matrix and speeds up the calculation a lot |
+
+Any indicator per hexagon comes out of the matrix. One of the easiest to read is the **time to the
+nearest health facility**. It is what Ipea computed for Fortaleza, in the morning
+peak, by public transport:
+
+```{r}
+aop_saude <- aop |>
+  dplyr::mutate(tempo_saude = dplyr::if_else(is.finite(TMIST), TMIST, NA_real_))
+
+mapview::mapview(dplyr::select(aop_saude, id_hex, tempo_saude), zcol = "tempo_saude", lwd = 0, alpha.regions = 0.8,
+                 col.regions = grDevices::hcl.colors(10, "YlOrRd", rev = TRUE),
+                 layer.name = "Minutes to health care")
+```
+
+Click on the hexagons at the edge of the city: the highest times are where the public transport
+network reaches worst, and not necessarily where there are fewer health centres.
+
+## 4. Isochrones
+
+```{r}
+#| eval: false
+# from Praça do Ferreira, in the Centre
+centro <- data.frame(id = "centro", lon = -38.5267, lat = -3.7275)
+
+iso <- r5r::isochrone(
+  rede,
+  origins = centro,
+  mode = c("WALK", "TRANSIT"),
+  departure_datetime = partida,
+  cutoffs = c(15, 30, 45, 60),
+  time_window = 60,
+  max_walk_time = 20
+)
+
+saveRDS(iso, "dados/projeto_final/isocronas.rds")
+```
+
+```{r}
+#| include: false
+# the site does not run r5r: it loads the result that the block above saved
+iso <- readRDS("dados/projeto_final/isocronas.rds")
+```
+
+```{r}
+#| fig-height: 6
+iso <- dplyr::arrange(iso, dplyr::desc(isochrone))   # the smaller bands on top
+
+ggplot(iso) +
+  geom_sf(aes(fill = factor(isochrone)), colour = NA, alpha = 0.5) +
+  scale_fill_brewer(palette = "YlOrRd", direction = -1, name = "minutes") +
+  theme_void()
+```
+
+The isochrone is the module's most effective communication product: anyone understands "how far
+you can get in 30 minutes".
+
+## 5. Detailed itineraries
+
+```{r}
+#| eval: false
+# from Messejana to Praça do Ferreira (the centre from the previous step)
+messejana <- data.frame(id = "messejana", lon = -38.4920, lat = -3.8300)
+
+det <- r5r::detailed_itineraries(
+  rede,
+  origins      = messejana,
+  destinations = centro,
+  mode = c("WALK", "TRANSIT"),
+  departure_datetime = partida,
+  max_walk_time = 20,
+  shortest_path = FALSE
+)
+
+saveRDS(det, "dados/projeto_final/itinerario.rds")
+```
+
+```{r}
+#| include: false
+det <- readRDS("dados/projeto_final/itinerario.rds")
+```
+
+Each row of `det` is a **leg** of a trip option: the walk to the stop, each
+bus, the final walk. With `shortest_path = FALSE`, several options come back:
+
+```{r}
+det |>
+  sf::st_drop_geometry() |>
+  dplyr::select(option, segment, mode, route, segment_duration, wait, distance)
+```
+
+On the map, the first option, with one colour per mode. Hover over a leg to see the
+bus route:
+
+```{r}
+opcao <- dplyr::filter(det, option == 1)
+modos <- unique(opcao$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#2F6B9A", RAIL = "#C2542D", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = opcao, height = "525px") |>
+  mapgl::add_line_layer(
+    id = "itinerario", source = opcao,
+    line_color = mapgl::match_expr("mode", values = modos, stops = unname(cores_modo)),
+    line_width = 5, tooltip = "route"
+  ) |>
+  mapgl::add_legend("Mode", values = modos, colors = unname(cores_modo), type = "categorical")
+```
+
+When a result looks odd, this is where you find out why: an 18-minute walk
+to the stop, a 25-minute wait, two transfers.
+
+## 6. Editing the GTFS: the scenario
+
+`gtfstools` lets you modify the public transport network to represent an intervention:
+remove feeder routes, change frequencies, create a corridor.
+
+```{r}
+#| eval: false
+library(gtfstools)
+
+gtfs <- gtfstools::read_gtfs(file.path(pasta, "gtfs_fortaleza.zip"))
+
+names(gtfs)                 # tables: agency, routes, trips, stop_times, shapes...
+nrow(gtfs$routes)
+```
+
+```{r}
+#| eval: false
+# scenario: cut the routes with the least service, the quarter with the fewest trips in the GTFS
+viagens <- gtfs$trips |>
+  dplyr::count(route_id, name = "viagens")
+
+cortadas <- viagens |>
+  dplyr::filter(viagens <= stats::quantile(viagens, 0.25)) |>
+  dplyr::pull(route_id)
+
+length(cortadas)
+saveRDS(cortadas, "dados/projeto_final/linhas_cortadas.rds")
+
+gtfs_cenario <- gtfstools::filter_by_route_id(gtfs, route_id = cortadas, keep = FALSE)
+
+c(rotas_antes = nrow(gtfs$routes), rotas_depois = nrow(gtfs_cenario$routes))
+
+dir.create("dados/brutos/fortaleza_cenario", showWarnings = FALSE)
+file.copy(list.files(pasta, pattern = "\\.pbf$", full.names = TRUE),
+          "dados/brutos/fortaleza_cenario")
+gtfstools::write_gtfs(gtfs_cenario, "dados/brutos/fortaleza_cenario/gtfs_cenario.zip")
+# the scenario's old network, if any, would ignore the new GTFS: delete it to rebuild
+unlink("dados/brutos/fortaleza_cenario/network.dat")
+```
+
+Other useful edits:
+
+```{r}
+#| eval: false
+gtfstools::filter_by_route_type(gtfs, route_type = 3)           # buses only
+gtfstools::filter_by_time_of_day(gtfs, from = "06:00:00", to = "09:00:00")
+area_estudo <- sf::st_point(c(-38.527, -3.727)) |>              # 3 km around the Centre
+  sf::st_sfc(crs = 4326) |>
+  sf::st_buffer(3000)
+gtfstools::filter_by_spatial_extent(gtfs, geom = area_estudo)   # spatial crop
+gtfstools::get_trip_speed(gtfs)                                  # commercial speed per trip
+gtfstools::get_trip_geometry(gtfs, file = "shapes")              # route alignments as sf
+```
+
+## 7. Recompute and compare
+
+The comparison starts from the accessibility of the current scenario. For Fortaleza, Ipea publishes the
+number of jobs accessible within 60 minutes by public transport, which is exactly the
+`atual` (current) indicator computed below. It is a **cumulative** measure; the accessibility chapter, in module 4
+(@sec-m4-acessibilidade), explains it and the other measures.
+
+```{r}
+empregos_60 <- aop |>
+  dplyr::select(id_hex, empregos_60 = CMATT60) |>
+  sf::st_transform(4326)
+
+cores_acesso <- c("#F6DCCB", "#2F6B9A", "#173A57")
+faixa_acesso <- range(empregos_60$empregos_60)
+
+mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = empregos_60, height = "525px") |>
+  mapgl::add_fill_layer(
+    id = "empregos_60", source = empregos_60,
+    fill_color = mapgl::interpolate(column = "empregos_60", values = seq(faixa_acesso[1],
+                                    faixa_acesso[2], length.out = 3), stops = cores_acesso),
+    fill_opacity = 0.8, tooltip = "empregos_60"
+  ) |>
+  mapgl::add_legend("Jobs within 60 min", values = round(faixa_acesso), colors = cores_acesso)
+```
+
+The scenario is computed with the edited network, and what matters is the **difference** between the two
+maps.
+
+```{r}
+#| eval: false
+rede_cenario <- r5r::build_network("dados/brutos/fortaleza_cenario")
+
+ttm_cenario <- r5r::travel_time_matrix(
+  rede_cenario, origins = pontos, destinations = pontos,
+  mode = c("WALK", "TRANSIT"), departure_datetime = partida,
+  time_window = 60, percentiles = 50,
+  max_walk_time = 20, max_trip_duration = 90
+)
+
+# population, jobs and income quintile of each hexagon
+uso_solo <- aop |>
+  sf::st_drop_geometry() |>
+  dplyr::transmute(id = id_hex, populacao = P001, empregos = T001, renda = R002)
+
+acesso <- function(m) {
+  accessibility::cumulative_cutoff(
+    travel_matrix = m, land_use_data = uso_solo,
+    opportunity = "empregos", travel_cost = "travel_time_p50", cutoff = 60
+  )
+}
+
+acesso_cenario <- acesso(ttm_cenario) |>
+  dplyr::rename(cenario = empregos)
+
+comparacao <- acesso(ttm) |>
+  dplyr::rename(atual = empregos) |>
+  dplyr::left_join(acesso_cenario, by = "id") |>
+  dplyr::left_join(uso_solo, by = "id") |>
+  dplyr::mutate(
+    perda_abs = cenario - atual,
+    # with no access today, there is nothing to lose: the percentage change is left empty
+    perda_pct = dplyr::if_else(atual > 0, 100 * (cenario / atual - 1), NA_real_)
+  )
+
+saveRDS(comparacao, "dados/projeto_final/comparacao.rds")
+```
+
+```{r}
+#| include: false
+comparacao <- readRDS("dados/projeto_final/comparacao.rds")
+```
+
+How much each income bracket loses, on average, weighting by population (quintile 1 is the lowest
+income):
+
+```{r}
+comparacao |>
+  dplyr::summarise(
+    pessoas = sum(populacao, na.rm = TRUE),
+    perda_media_pct = weighted.mean(perda_pct, populacao, na.rm = TRUE),
+    .by = renda
+  ) |>
+  dplyr::arrange(renda)
+```
+
+The expected result of this kind of scenario is a loss of accessibility concentrated on the
+outskirts and in the lowest income strata. That is precisely the argument the analysis
+serves to quantify, rather than assert.
+
+```{r}
+#| fig-height: 6
+mapa_comparacao <- aop |>
+  dplyr::left_join(comparacao, by = c("id_hex" = "id"))
+
+ggplot(mapa_comparacao) +
+  geom_sf(aes(fill = perda_pct), colour = NA) +
+  scale_fill_gradient2(low = "#b3402a", mid = "grey95", high = "#1a5b8a",
+                       midpoint = 0, name = "Change (%)") +
+  labs(title = "Impact of cutting the routes with the least service",
+       subtitle = "Change in jobs accessible within 60 min by public transport") +
+  theme_void()
+```
+
+## 8. Network assignment: `flownet` and `stplanr`
+
+Module 3's desire lines show volume between pairs. To show the volume **on the
+infrastructure**, each pair must be routed and the flows added up per segment:
+
+```{r}
+#| eval: false
+# route 1: route the pairs with r5r and sum by segment with stplanr
+# example pairs: from the 30 most populous hexagons to the 10 with the most jobs;
+# the flow splits the origin's population among the destinations, by jobs
+origens  <- aop |> sf::st_drop_geometry() |> dplyr::slice_max(P001, n = 30) |> dplyr::select(id_hex, P001)
+destinos <- aop |> sf::st_drop_geometry() |> dplyr::slice_max(T001, n = 10) |> dplyr::select(id_hex, T001)
+
+pares_od <- expand.grid(origem = origens$id_hex, destino = destinos$id_hex,
+                        stringsAsFactors = FALSE) |>
+  dplyr::filter(origem != destino) |>
+  dplyr::left_join(origens, by = c("origem" = "id_hex")) |>
+  dplyr::left_join(destinos, by = c("destino" = "id_hex")) |>
+  dplyr::mutate(fluxo = P001 * T001 / sum(destinos$T001))
+
+rotas <- r5r::detailed_itineraries(
+  rede,
+  origins      = pontos[match(pares_od$origem, pontos$id), ],
+  destinations = pontos[match(pares_od$destino, pontos$id), ],
+  mode = "CAR",
+  departure_datetime = partida,
+  shortest_path = TRUE
+) |>
+  dplyr::left_join(dplyr::select(pares_od, origem, destino, fluxo),
+                   by = c("from_id" = "origem", "to_id" = "destino"))
+
+carga <- stplanr::overline(rotas, attrib = "fluxo")
+
+saveRDS(carga, "dados/projeto_final/carga.rds")
+
+# route 2: flownet, estimation and assignment of flows on a network
+# remotes::install_github("SebKrantz/flownet")
+```
+
+```{r}
+#| include: false
+carga <- readRDS("dados/projeto_final/carga.rds")
+```
+
+```{r}
+#| fig-height: 6
+carga <- dplyr::arrange(carga, fluxo)      # the most loaded segments on top
+
+ggplot(carga) +
+  geom_sf(aes(linewidth = fluxo), colour = "#1a5b8a", alpha = 0.7) +
+  scale_linewidth_continuous(range = c(0.2, 3), name = "Flow") +
+  theme_void()
+```
+
+The result is the **network loading**: the map in which the width sits on the road, not
+in the air. It is the product that speaks directly to capacity planning. It is the natural starting
+point for a bottleneck study.

@@ -1,0 +1,117 @@
+# Module overview {#sec-m5}
+
+::: {.modulo-meta}
+**Workload:** 6 hours (3h synchronous + 3h asynchronous)\
+**Dates:** 26/10 and 27/10 (synchronous); 23/10 (asynchronous)\
+**Packages:** Quarto, `rmarkdown`, `knitr`, `gt`, `r5r`, `gtfstools`, `accessibility`, `aopdata`, `stplanr`, `flownet`, `mapgl`\
+**Final project:** an HTML accessibility report for one of five cities (Belo Horizonte, Fortaleza, Porto Alegre, Rio de Janeiro or São Paulo), with interactive maps in `mapgl`
+:::
+
+## What you will be able to do by the end of the module
+
+- Write a document that **updates itself** when the data change: text, tables,
+  charts and maps produced by the same code.
+- Export to HTML, PDF and Word, without redoing the work.
+- Compute multimodal travel time matrices and isochrones with `r5r`, and compare
+  public transport network scenarios by editing the GTFS.
+- Show each step of an accessibility analysis in interactive maps with `mapgl`.
+- Deliver an analysis that someone else can run again. That is the goal of the whole
+  course.
+
+## Outline
+
+### Synchronous class (3h)
+
+| Block | Content | Chapter |
+|:--|:--|:--|
+| 1 | Public transport routing with `r5r` and GTFS | @sec-m4-gtfs |
+| 2 | Multimodal routing, scenarios and isochrones with `r5r` | @sec-m4-r5r |
+| 3 | Flow networks and assignment (`flownet`, `stplanr`) | @sec-m4-r5r |
+| 4 | Quarto: structure, figures, tables, cross-references, formats | @sec-m5-quarto |
+
+The maps that go into the reports follow what was seen in @sec-m2-mapas.
+
+### Asynchronous content (3h)
+
+| Block | Content | Chapter |
+|:--|:--|:--|
+| 5 | Final project: accessibility report for one of five cities | @sec-m5-projeto |
+| 6 | Good practice and next steps | @sec-m5-proximos-passos |
+
+## Module packages
+
+```{r}
+#| eval: false
+pacotes <- c("quarto", "rmarkdown", "knitr", "gt", "kableExtra",
+             "ggspatial", "patchwork", "scales", "classInt", "mapgl",
+             "r5r", "gtfstools", "accessibility", "aopdata", "stplanr")
+
+faltando <- setdiff(pacotes, rownames(installed.packages()))
+if (length(faltando) > 0) install.packages(faltando)
+
+# flownet is not yet on CRAN
+# remotes::install_github("SebKrantz/flownet")
+```
+
+To export to PDF, you need a LaTeX distribution. The simplest is the one R itself
+installs:
+
+```{r}
+#| eval: false
+tinytex::install_tinytex()
+```
+
+::: {.callout-important}
+## `r5r` needs Java 21
+
+`r5r` is an interface to R5, Conveyal's routing engine, written in Java. Without
+**JDK 21** installed, the package loads but fails when building the network. Check before the
+session:
+
+```{r}
+#| eval: false
+# in the system terminal
+# java -version    -> should answer "21"
+
+# inside R
+rJava::.jinit()
+rJava::.jcall("java/lang/System", "S", "getProperty", "java.version")
+```
+
+If installation depends on the Ministry's IT team, ask for **JDK 21 (Temurin or Oracle)** in the same
+ticket as R and Rtools.
+
+On the first network it builds, `r5r` downloads the R5 engine (a `.jar`) from GitHub, and the Ministry's
+network may block that *download*. The step-by-step guide to download it by hand is in
+@sec-r5r-jar.
+:::
+
+## About the blocks this site does not run
+
+The chapters of this module are run when the site is built, with one declared
+exception: the blocks that depend on **`r5r`** require JDK 21 and a folder with the OpenStreetMap `.pbf`
+and the city's GTFS: files that do not fit in the repository. These blocks are
+marked as not run and give, in the text, the expected result.
+
+To run them on your machine, the `dados/brutos/fortaleza/` folder already comes ready in module 4's data
+package, downloaded by the setup script (@sec-m4-osm). To build it by hand, or for
+another city:
+
+```{r}
+#| eval: false
+dir.create("dados/brutos/fortaleza", recursive = TRUE, showWarnings = FALSE)
+
+# 1. road network (OSM): there is no Ceará-only extract; the Northeast one comes, about 450 MB.
+#    For r5r it is too heavy: the module package has only the Fortaleza region,
+#    already cropped (fortaleza.osm.pbf, 54 MB)
+osmextract::oe_download(
+  file_url = osmextract::oe_match("Ceará")$url,
+  download_directory = "dados/brutos/fortaleza"
+)
+
+# 2. GTFS: download from https://dados.fortaleza.ce.gov.br (tag "gtfs")
+#    and save the .zip in the same folder, without unzipping
+```
+
+The `r5r` chapter with Porto Alegre (@sec-m4-gtfs) does not need this folder: it uses the data
+that come inside `r5r` itself.

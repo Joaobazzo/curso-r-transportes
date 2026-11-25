@@ -1,0 +1,100 @@
+# Getting ready {#sec-m0-preparacao}
+
+This is a preparatory session, to be done before the first meeting of Module 1. The
+goal is simple: install what is missing and create the accounts you need **before** class, so
+that class time is spent on R, not on installation.
+
+::: {.callout-tip}
+## Quick checklist
+
+1. R and RStudio installed (@sec-m1-ambiente).
+2. Module 1 data downloaded: the `dados_modulo1.zip` file from the
+   [Releases](https://github.com/Joaobazzo/curso-r-transportes/releases) page, unzipped inside
+   the course project folder.
+3. GitHub account created, Git installed.
+4. Decided which editor you will use (RStudio is the course default; see the alternatives
+   below if you are curious).
+5. Aware of the golden rule about AI: **do not paste data you would not publish**.
+:::
+
+## How to ask for help {#como-pedir-ajuda}
+
+Keep this guide at hand even before you start Module 1: it applies to any question in the
+course, technical or not.
+
+1. **Repository issues**:
+   <https://github.com/Joaobazzo/curso-r-transportes/issues>. Preferred: the answer stays
+   on record and helps the other participants. When you open one, include the code you ran, the
+   full error message and the output of `sessionInfo()`.
+2. **E-mail**: for questions specific to your work that involve non-public data.
+3. **In the sessions**: the first 15 minutes of each class are set aside for questions about the
+   previous material.
+
+## R and RStudio
+
+Installing R, RStudio, Rtools (Windows) and the Module 1 packages is described in detail in
+@sec-m1-ambiente. Do it now, and check in the console:
+
+```{r}
+R.version.string
+```
+
+## Editors other than RStudio
+
+RStudio is the editor this course uses in screenshots and examples, and it is the best
+choice for people starting out in R. But it is not the only option, and it is worth knowing the others
+exist, especially if you also program in another language.
+
+| Editor | What it is | When to consider it |
+|:--|:--|:--|
+| **RStudio** | The development environment dedicated to R, by Posit. | Course default. The best choice for those who program only in R. |
+| **VS Code** | Microsoft's general-purpose editor, popular across many languages. Needs the R extension and the `languageserver` package to work well with R. | People who already use VS Code for Python, SQL or another language and do not want to switch editors. |
+| **Positron** | A new editor from Posit, built on the same engine as VS Code, with native support for R **and** Python in one place. | People who work with R and Python in the same project. Still maturing. |
+
+::: {.callout-note}
+## None of these choices is final
+
+Switching editors is just switching windows: the R code is the same, the packages are the same, the
+project on disk is the same. Start with RStudio, which is what this material assumes, and move
+later if you feel the need.
+:::
+
+## Version control: create the account now
+
+Git and GitHub are taught in detail in Module 4, but the two most time-consuming steps
+(installing Git and creating the account) do not depend on anything in the course and are worth doing in advance:
+
+1. Install Git: <https://git-scm.com/downloads>.
+2. Create a free GitHub account: <https://github.com/>.
+
+The rest (setting up RStudio to use Git, making the first *commit*, publishing a
+repository) is left for Module 4, when there is a real project to put under version control.
+
+## AI in development
+
+AI assistants (GitHub Copilot, Claude, ChatGPT, and packages such as `ellmer` and `gander` inside
+R) speed up R work considerably, and we come back to this topic in more detail in
+@sec-m1-ambiente. The rule worth keeping from the start, because it applies to any tool:
+
+::: {.callout-important}
+## The golden rule
+
+**If you would not publish the content on the Ministry's website, do not paste it into an AI
+assistant hosted outside the organisation.** This includes personal data, exports of a contracted model,
+spreadsheets from an ongoing study and any password or *token*.
+:::
+
+## R compared with other tools
+
+A common question from people coming from spreadsheets or point-and-click GIS: why swap a
+tool that already works for one that requires writing code?
+
+| Tool | Where R helps |
+|:--|:--|
+| Excel / spreadsheets | A spreadsheet does not audit itself: a wrong click in a formula leaves no trace. Code does, and it runs again on its own when the data are updated. |
+| QGIS / ArcGIS (menus and clicks) | The same libraries underneath (GDAL, GEOS, PROJ) — @sec-m2-sf. The difference is that the sequence of clicks is not recorded; the script is. |
+| Python | Comparable in capability for this kind of analysis. The choice here is the ecosystem: `sf`, `geobr`, `r5r`, `aopdata` and the other packages in this course are specific to R and to the Brazilian context. |
+| Stata / SPSS | Strong in classical statistics. R covers the same ground and, on top of that, has the spatial and Brazilian public-data ecosystem this course uses. |
+
+None of these tools goes away: the course's aim is to reduce manual rework where it
+weighs most, not to replace everything with code.

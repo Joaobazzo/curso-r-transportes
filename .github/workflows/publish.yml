@@ -29,6 +29,11 @@ jobs:
         # gerado localmente com `quarto render`. Nenhum R é necessário aqui.
         run: quarto render --to html
 
+      - name: Renderizar a versão em inglês
+        # projeto separado em en/, publicado em _site/en/. Precisa vir DEPOIS do
+        # português, porque o render do português limpa a pasta _site/
+        run: quarto render en --to html
+
       - name: Configurar Pages
         uses: actions/configure-pages@v5
 

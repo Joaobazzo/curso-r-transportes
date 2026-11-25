@@ -53,15 +53,30 @@ Rscript -e 'source("R/instalar_pacotes.R")'
 # renderizar o site inteiro em _site/
 quarto render
 
+# depois, a versão em inglês, em _site/en/ (sempre nesta ordem: o render do
+# português limpa a pasta _site/)
+quarto render en
+
 # visualizar com recarga automática
 quarto preview
 ```
+
+### Versão em inglês
+
+O site tem uma versão em inglês em `<site>/en/`, com a mesma página no mesmo nome de
+arquivo: `m1-01-ambiente.html` ↔ `en/m1-01-ambiente.html`. Ela é um projeto Quarto à
+parte, na pasta `en/`, com os capítulos traduzidos e o próprio `en/_quarto.yml`. O código roda
+a partir da raiz do curso, então os caminhos `dados/...` são os mesmos. O botão de idioma, com
+a bandeira, vem de `idioma.html`, incluído nos dois projetos.
+
+Ao mudar um capítulo, mude também o arquivo de mesmo nome em `en/`. O cache da versão em
+inglês fica em `en/_freeze/` e também deve ser versionado.
 
 O projeto usa `execute: freeze: auto`. Isso significa que:
 
 1. Os blocos de código são executados **na sua máquina**, e o resultado é gravado em
    `_freeze/`.
-2. O `_freeze/` **deve ser versionado** (`git add _freeze`).
+2. O `_freeze/` **deve ser versionado** (`git add _freeze en/_freeze`).
 3. O GitHub Actions apenas remonta o site a partir desse cache, sem precisar instalar R nem
    os pacotes espaciais — o que torna a publicação rápida e estável.
 
@@ -69,6 +84,7 @@ Fluxo de trabalho para publicar uma atualização:
 
 ```bash
 quarto render
+quarto render en
 git add -A
 git commit -m "atualiza módulo X"
 git push

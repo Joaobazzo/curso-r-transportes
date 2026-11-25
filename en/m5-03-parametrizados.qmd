@@ -1,0 +1,208 @@
+# Parameterised reports {#sec-m5-parametrizados}
+
+A parameterised report is a template with "holes": the municipality, the segment, the year, the scenario.
+You render the same file several times, changing the parameter, and get one report per
+case, all with the same structure and the same methodology.
+
+It is the answer to the recurring request: *"do this same study for the other 27 corridors"*.
+
+This chapter turns the Paranaguá report from the previous chapter
+(@sec-relatorio-paranagua) into a template, and renders it for the five municipalities with the most
+coastal shipping in the country.
+
+## From report to template
+
+The Paranaguá report was written with this in mind: the municipality appears in a single block, at the
+start, and everything else uses the variables `municipio`, `uf` and `codigo`:
+
+```{r}
+#| eval: false
+municipio <- "Paranaguá"
+uf        <- "PR"
+```
+
+Parameterising is replacing these fixed values with **parameters**, declared in the document's
+header. The rest of the report does not change a single line.
+
+## Declaring the parameters
+
+In the template document's YAML:
+
+```yaml
+---
+title: "Municipal profile: `r knitr::inline_expr("params$municipio")` (`r knitr::inline_expr("params$uf")`)"
+params:
+  municipio: "Paranaguá"
+  uf: "PR"
+---
+```
+
+The YAML values are the defaults, used when nobody provides others. Inside the document,
+they are in the `params` list, and the report's first block becomes:
+
+```{r}
+#| eval: false
+municipio <- params$municipio
+uf        <- params$uf
+```
+
+During development, it is handy to simulate the parameters so that you can run the code line by
+line in the console, where `params` does not exist:
+
+```{r}
+# during development; when rendered, `params` comes from the YAML
+if (!exists("params")) params <- list(municipio = "Paranaguá", uf = "PR")
+
+params$municipio
+```
+
+## The complete template
+
+The finished template, which is the Paranaguá chapter with the first block replaced by the parameters,
+is in [`modelo_perfil.qmd`](../modelos/modelo_perfil.qmd) (in Portuguese). Save it in the **root of the course project**
+(the folder that contains `dados/`), because it reads `dados/cabotagem_tku_2025.xlsx` through a relative
+path.
+
+For one municipality, render it passing the parameters in `execute_params`:
+
+```{r}
+#| eval: false
+quarto::quarto_render(
+  input          = "modelo_perfil.qmd",
+  output_file    = "perfil_manaus_AM.html",
+  execute_params = list(municipio = "Manaus", uf = "AM")
+)
+```
+
+Without `execute_params`, the YAML defaults apply, and you get the Paranaguá report.
+
+## Rendering for five municipalities
+
+The cases come from the data themselves: the five municipalities with the most coastal shipping TKU, adding up
+outbound and inbound.
+
+```{r}
+library(dplyr)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), stringr::str_squish)) |>
+  dplyr::filter(tku > 0)
+
+casos <- dplyr::bind_rows(
+  cabotagem |> dplyr::select(cidade = cidade_origem,  uf = uf_origem,  tku),
+  cabotagem |> dplyr::select(cidade = cidade_destino, uf = uf_destino, tku)
+) |>
+  dplyr::filter(!is.na(cidade)) |>                    # EEZ/platforms are not municipalities
+  dplyr::summarise(tku_bi = sum(tku) / 1e9, .by = c(cidade, uf)) |>
+  dplyr::slice_max(tku_bi, n = 5)
+
+casos |> knitr::kable(digits = 1,
+                      col.names = c("Municipality", "State", "TKU (billion t·km)"))
+```
+
+And the loop that produces one report per row of `casos`:
+
+```{r}
+#| eval: false
+dir.create("resultados/relatorios", recursive = TRUE, showWarnings = FALSE)
+
+for (i in seq_len(nrow(casos))) {
+  municipio <- casos$cidade[i]
+  uf        <- casos$uf[i]
+
+  # perfil_sao_luis_MA.html: no accents or spaces in the file name
+  arquivo_saida <- paste0(
+    "perfil_",
+    municipio |> stringr::str_to_lower() |> stringi::stri_trans_general("Latin-ASCII") |>
+      stringr::str_replace_all("[^a-z]+", "_"),
+    "_", uf, ".html"
+  )
+
+  message("Rendering ", municipio, " (", i, "/", nrow(casos), ")")
+
+  quarto::quarto_render(
+    input          = "modelo_perfil.qmd",
+    output_file    = arquivo_saida,
+    execute_params = list(municipio = municipio, uf = uf)
+  )
+
+  file.rename(arquivo_saida, file.path("resultados/relatorios", arquivo_saida))
+}
+```
+
+Each report takes about two minutes, most of it filtering the Census tables for the whole
+country. The Census files and the boundaries are downloaded only on the first render; on the
+following ones, they come from the computer.
+
+Some details that avoid frustration:
+
+- `output_file` must be just the file **name**, not a path. Hence the `file.rename()`
+  afterwards.
+- The municipality name must be written as in IBGE, with accents: it is how the template
+  finds the IBGE code. In the coastal shipping dataset, the names already follow that spelling.
+- Renders in a series reuse little; if the data preparation is heavy, do it **before**
+  the loop and save an `.rds` that the template only reads.
+- Wrap the call in `tryCatch()` when the cases come from a long list: one municipality
+  without data should not stop the other 27.
+
+```{r}
+#| eval: false
+resultados <- lapply(seq_len(nrow(casos)), function(i) {
+  tryCatch({
+    quarto::quarto_render("modelo_perfil.qmd",
+                          execute_params = list(municipio = casos$cidade[i], uf = casos$uf[i]))
+    data.frame(caso = casos$cidade[i], status = "ok")
+  }, error = function(e) {
+    data.frame(caso = casos$cidade[i], status = paste("error:", e$message))
+  })
+})
+
+dplyr::bind_rows(resultados)
+```
+
+This status table is the "report of the report": in a run of 27 documents, it tells you
+which came out and which failed, without you having to check the folder file by file.
+
+## An index of the reports produced
+
+```{r}
+#| eval: false
+arquivos <- list.files("resultados/relatorios", pattern = "\\.html$")
+
+indice <- data.frame(
+  arquivo = arquivos,
+  link = paste0("[", stringr::str_remove(arquivos, "\\.html$"), "](", arquivos, ")")
+)
+
+writeLines(c("# Reports by municipality", "", indice$link),
+           "resultados/relatorios/index.md")
+```
+
+With this, the delivery stops being a folder with 27 loose files and becomes a browsable
+set that, published on GitHub Pages, becomes a permanent reference portal.
+
+## When to parameterise
+
+| Situation | Worth it? |
+|:--|:--|
+| Same study for many units (municipalities, segments, corridors) | yes, clearly |
+| Recurring report (monthly, quarterly) with a fixed structure | yes, the parameter is the period |
+| Scenarios of the same analysis | yes, the parameter is the scenario |
+| A one-off document, made once | no; parameterising costs more than it pays |
+
+::: {.callout-tip}
+## Automating the recurrence
+
+A monthly report can be scheduled: on Windows, with Task Scheduler, calling
+`Rscript -e 'quarto::quarto_render("relatorio.qmd")'`; on a Linux server, with `cron`; or on
+GitHub itself, with a scheduled *workflow*, the same mechanism that publishes this site. The data
+are updated at the source, and the report arrives ready.
+:::

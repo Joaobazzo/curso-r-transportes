@@ -1,0 +1,303 @@
+# Example data {.unnumbered}
+
+Almost all the data used in the course are **public**. They come in packages, one per module,
+published as *Releases* of the course repository: each package has the files already downloaded and
+processed, and with them in place the chapters' code reads everything from disk, without depending on the internet
+during class. The only exception to the public-data rule is the four-step model extract,
+shared for teaching purposes.
+
+File names, folder names and the `LEIA-ME.txt` (README) files inside the packages are in Portuguese,
+as in the original course.
+
+## The data packages
+
+| Module | Package | Size | Where it goes | How to install |
+|:--|:--|--:|:--|:--|
+| 1 | [`dados_modulo1.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo1/dados_modulo1.zip) | 30 MB | `dados/` | by hand |
+| 2 | [`dados_modulo2.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo2/dados_modulo2.zip) | 57 MB | `dados/brutos/` | by hand or `R/preparar_modulo2.R` |
+| 3 | [`dados_modulo3.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo3/dados_modulo3.zip) | 41 MB | `dados/brutos/` | by hand or `R/preparar_modulo3.R` |
+| 4 | [`dados_modulo4.zip`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo4/dados_modulo4.zip) | 67 MB | `dados/brutos/` | by hand or `R/preparar_modulo4.R` |
+| 5 | [five `.7z` files, one per city](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5) | 40 to 175 MB | `dados/brutos/projeto_final/` | by hand (@sec-m5-projeto) |
+
+To install a module 1 to 4 package **by hand**:
+
+1. download the `.zip` from the link in the table (or from the *Assets* list on the Release page);
+2. unzip it **inside the course project folder**, the one with the
+   `curso-r-transportes.Rproj` file. The packages already contain the `dados/` folder, and the files land in
+   the right place;
+3. check the path of one file: for example, `curso-r-transportes/dados/brutos/grade_pr.gpkg`.
+   If an extra folder appears in the middle (`dados_modulo2/dados/...`), move the `dados/` folder one
+   level up. If Windows asks whether to replace files, answer **Yes**: some
+   files are repeated across packages, and they are the same.
+
+The setup scripts for modules 2 to 4 do this on their own and also install the missing R
+packages. With the course project open, run in the console, for example:
+
+```r
+source("https://raw.githubusercontent.com/Joaobazzo/curso-r-transportes/main/R/preparar_modulo4.R")
+```
+
+The packages complement each other: installing module 3's does not delete module 2's files. Each one has
+a `LEIA-ME.txt` with the sources.
+
+### Module 1: R fundamentals
+
+| File | Description | Source |
+|:--|:--|:--|
+| `dados/cabotagem_tku_2025.xlsx` and `.csv` | Coastal shipping TKU, 2025, by pair of port facilities and commodity group (732 records, 12 columns) | ANTAQ, Estatístico Aquaviário, table TB6.1 |
+| `dados/processados/modelo4etapas/` | extract of the Curitiba region's four-step model, morning peak (details below) | PTV VISUM export, shared for teaching purposes |
+| `dados/brutos/EXP_2025_MUN.csv` | exports by municipality in 2025, for the case study challenge | Comex Stat (MDIC) |
+| `dados/brutos/UF_MUN.csv` | Comex Stat municipality table (Latin-1 encoding) | Comex Stat (MDIC) |
+
+The coastal shipping dataset is also in the repository itself, with direct links:
+[cabotagem_tku_2025.xlsx](https://github.com/Joaobazzo/curso-r-transportes/raw/main/dados/cabotagem_tku_2025.xlsx) and
+[cabotagem_tku_2025.csv](https://github.com/Joaobazzo/curso-r-transportes/raw/main/dados/cabotagem_tku_2025.csv).
+
+### Module 2: spatial objects
+
+| File | Description | Source |
+|:--|:--|:--|
+| `dados/portos_antaq.csv` | example ports, with coordinates | own elaboration |
+| `muni_br.gpkg` | municipalities of Brazil, 2022 (simplified boundaries) | IBGE, via `geobr` |
+| `muni_pr_sc.gpkg` | municipalities of PR and SC, 2022 | IBGE, via `geobr` |
+| `pr.gpkg` | boundary of Paraná, 2020 | IBGE, via `geobr` |
+| `sedes_2022.gpkg` | municipal seats, 2022 | IBGE, via `geobr` |
+| `grade_pr.gpkg` | PR statistical grid: population per cell, 2022 Census (@sec-m2-estudo-de-caso) | IBGE, via `geobr` |
+| `br116_serra.gpkg` | BR-116 axis in the Serra do Mar | OpenStreetMap |
+| `dem_morretes.tif` | elevation of Morretes (PR) (@sec-m2-raster); change the municipality in the code to produce another | AWS Terrain Tiles, via `elevatr` |
+| `dem_br116_perfil.tif` | elevation of the strip around the longest BR-116 segment, for the elevation profile (@sec-m2-exercicios) | AWS Terrain Tiles, via `elevatr` |
+
+Except for `portos_antaq.csv`, they all go in `dados/brutos/`.
+
+### Module 3: advanced geospatial data
+
+| File | Description | Source |
+|:--|:--|:--|
+| `rede_sao_paulo_santos.gpkg` | main roads between São Paulo and Santos, for routing and the network diagnosis | OpenStreetMap |
+| `portos_osm.gpkg`, `pontes_br116.gpkg` | OSM data extraction | OpenStreetMap |
+| `br116_serra.gpkg`, `rodovias_serra_pr.gpkg` | slope case study (@sec-m3-declividade) | OpenStreetMap |
+| `dem_serra.tif` | elevation of the Serra do Mar in Paraná | AWS Terrain Tiles, via `elevatr` |
+| `muni_br.gpkg`, `uf_br.gpkg` | municipal and state boundaries | IBGE, via `geobr` |
+| `comexstat/EXP_2024_MUN.csv`, `comexstat/tab_UF_MUN.csv` | 2024 municipal exports and municipality table (@sec-m3-comexstat) | Comex Stat (MDIC) |
+
+### Module 4: accessibility
+
+| File | Description | Source |
+|:--|:--|:--|
+| `fortaleza/fortaleza.osm.pbf` | Fortaleza road network, for `r5r` | OpenStreetMap |
+| `fortaleza/gtfs_fortaleza.zip` | Fortaleza GTFS, valid from 03/04 to 03/07/2026 (do not unzip) | Etufor, Fortaleza City open data |
+| `aop_fortaleza.rds` | accessibility, population, jobs and income in Fortaleza, 2019 (@sec-m4-acessibilidade) | Ipea, `aopdata` |
+| `rede_sao_paulo_santos.gpkg`, `portos_osm.gpkg`, `pontes_br116.gpkg` | the same as in module 3, for those starting here | OpenStreetMap |
+
+Routing with `r5r` (@sec-m4-r5r) also requires **Java 21** (`java -version` answers 21).
+
+### Module 5: final project
+
+One `.7z` package per city, for the final project's accessibility report (@sec-m5-projeto):
+Belo Horizonte, Fortaleza, Porto Alegre, Rio de Janeiro and São Paulo. Download only the one for the city you
+choose and extract it into `dados/brutos/projeto_final/`, with [7-Zip](https://www.7-zip.org/)
+(*Extract here*). Each package has a `{cidade}/` folder with:
+
+| File | Description | Source |
+|:--|:--|:--|
+| `{cidade}.osm.pbf` | road network cut around the urban area (the populated hexagons, with a 10 km margin) | OpenStreetMap, Geofabrik extracts |
+| `gtfs_{cidade}.zip` | public transport GTFS, in a single file and already checked in `r5r` | Mobility Database (SPTrans, SMTR-Rio, EPTC, SUMOB-BH) and Etufor |
+| `aop_{cidade}.rds` | H3 hexagonal grid with population, jobs and income, 2019 | Ipea, `aopdata` |
+| `LEIA-ME.txt` | GTFS validity, recommended departure date and processing done | — |
+
+The table of cities, with sizes, GTFS validity and the caveats for each, is in
+@sec-m5-projeto. The São Paulo final project page (@sec-m5-projeto-sp) uses the
+São Paulo package and downloads the terrain with `elevatr`.
+
+## Produced by the code itself
+
+Some data do not come in any package: the chapter itself produces or downloads them on the first run
+and stores them on disk. On later runs, it reads from the cache.
+
+| File | Origin | Chapter |
+|:--|:--|:--|
+| `dados/brutos/od_sintetica.csv` and `.parquet` | generated locally (2 million rows) | @sec-m3-duckdb |
+| CNEFE | downloaded by `geocodebr` on the first geocoding | @sec-m3-geocodificacao |
+| `dados/projeto_final/*.rds` | results of the multimodal routing | @sec-m4-r5r |
+| `dados/brutos/sao_paulo_relevo/relevo_sao_paulo.tif` | São Paulo elevation via `elevatr` | @sec-m5-projeto-sp |
+| `dados/projeto_final_sp/*.rds` | results of the São Paulo final project | @sec-m5-projeto-sp |
+
+The scripts that built the packages are in the repository's `R/` folder (`preparar_modulo2.R` to
+`preparar_modulo4.R`, `gerar_release_modulo4.R` and `preparar_projeto_final.R`): with them, you can
+download each file again from the original sources.
+
+## The coastal shipping dataset
+
+### Coastal shipping data dictionary
+
+After the column renaming adopted in the course (@sec-m1-manipulacao):
+
+| Column | Type | Description |
+|:--|:--|:--|
+| `ano` | integer | Reference year (2025) |
+| `perfil` | text | Cargo profile: container, dry bulk, liquid and gaseous bulk, general cargo |
+| `sh2` | text | Commodity group, Harmonized System chapter (code and description) |
+| `pais_origem`, `pais_destino` | text | Country (always "Brasil" in records with flow) |
+| `uf_origem`, `uf_destino` | text | State; the origin may be `ZEE/Plat. Continental` (offshore platforms) or `Indeterminado` (undetermined) |
+| `cidade_origem`, `cidade_destino` | text | Municipality of the facility |
+| `instalacao_origem`, `instalacao_destino` | text | Port facility |
+| `tku` | numeric | Tonne-kilometres (t × km) |
+
+**Important notes** (detailed in @sec-m1-limpeza):
+
+- 132 of the 732 records have `tku = 0`; 120 of them have no identification (fields with `-`) and
+  correspond to combinations with no flow in the period.
+- The unique key is `perfil` + `sh2` + `instalacao_origem` + `instalacao_destino`.
+- Links originating in the EEZ/Continental Shelf account for about 38% of the total
+  TKU and must not be discarded as an "invalid state".
+
+## Curitiba region four-step model (PTV VISUM export)
+
+A teaching extract of the assignment output of a four-step model for the Curitiba Metropolitan
+Region, morning peak hour (2018 network, 2017 counts, 18 municipalities, 967 traffic
+zones). It appears in @sec-m1-modelo4etapas and comes back in @sec-m3-funcoes.
+
+| File | Content |
+|:--|:--|
+| `dados/processados/modelo4etapas/links_rmc_2018_completo.parquet` | 208,336 directional links, without geometry. It is the file for the **network totals**. |
+| `dados/processados/modelo4etapas/links_rmc_2018_estrutural.parquet` | 33,198 links of the structural network (motorways, arterials and collectors) plus all links with counts. |
+| `dados/processados/modelo4etapas/rede_rmc_2018.gpkg` | Layers `links` (structural network), `nos` (19,610 nodes, with stops and BRT) and `zonas_centroide` (967). |
+| `dados/processados/modelo4etapas/dicionario_campos_visum.csv` | Lookup between the shapefile's truncated name and VISUM's original name, extracted from the `.CTF` file. |
+| `dados/processados/modelo4etapas/README.md` | Units, reference totals and documented pitfalls. |
+
+### Corrections already applied in the extract
+
+VISUM exports fields whose name **does not match the unit stored**:
+
+| Original field | Actual unit | Corrected column |
+|:--|:--|:--|
+| `VEHKMTRAVPRT` | metres | `veic_km` |
+| `VEHHOURTRAVT0` | seconds | `veic_h_livre` |
+| `VEHHOURTRAVTCUR` | seconds | `veic_h_carreg` |
+| `VOLCAPRATIOPRT` | percentage | `vc` |
+| `T0_PRTSYS = 360000000` | "no access" sentinel | `NA`, flagged in `sem_acesso` |
+
+The original columns were kept in the Parquet, on purpose, for the checking exercise
+in @sec-m1-modelo4etapas.
+
+### Reference totals
+
+Check any aggregation against these numbers (full network, morning peak hour):
+
+| Indicator | Value |
+|:--|:--|
+| Vehicle-kilometres | 3,676,335 |
+| Vehicle-hours in free flow | 67,755 |
+| Vehicle-hours loaded | 176,158 |
+| Delay | 108,403 vehicle-hours |
+| Average speed | 20.9 km/h (54.3 km/h in free flow) |
+| Links with V/C ≥ 1 | 3,436 |
+| Links with counts | 63, at 25 *screenline* stations |
+
+### Pitfalls kept on purpose
+
+1. **Two rows per link**, one per direction (`isforward`, `sentido`). The original export
+   has the same network in the opposite convention, with both directions on the same row and columns
+   prefixed with `R_`.
+2. **Corrupted municipality names** in the zones: the source DBF does not declare a code page.
+   The `code_muni` column is empty **on purpose**. Filling it in via `geobr` is module 2's lookup
+   exercise.
+3. **Geographic CRS** (WGS 84, in degrees) with length stored in metres. Computing the
+   length from the geometry requires reprojecting to SIRGAS 2000 / UTM 22S (EPSG:31982).
+4. **The legend is missing** for the `tsysset` and `typeno` codes. It did not come in the export.
+
+### What is not in the extract
+
+OD matrices (demand and time), zone polygons and the inputs of the model's first three
+steps. The extract covers only the assignment result.
+
+::: {.callout-warning}
+## Origin and redistribution
+
+This dataset **is not public**. It was shared for teaching purposes and the extract published here is
+derived. For use in an official document, work on the current export from the responsible
+body. The script that produces the extract from the original files is in
+`scripts/00-gera-recorte-modelo4etapas.R`.
+:::
+
+## Comex Stat (MDIC)
+
+It comes in module 3's data package (`R/preparar_modulo3.R`), in `dados/brutos/comexstat/`: the
+2024 municipal exports (`EXP_2024_MUN.csv`) and the municipality table
+(`tab_UF_MUN.csv`), copied from MDIC's server unchanged. Used in
+@sec-m3-comexstat. For other years, imports, the NCM dataset and the other lookup
+tables, use `scripts/01-baixa-comexstat.R`.
+
+**The files are in two different places**, which is the first trap:
+
+| Content | Address |
+|:--|:--|
+| Annual datasets | `https://balanca.economia.gov.br/balanca/bd/comexstat-bd/ncm/EXP_2024.csv` and `.../mun/EXP_2024_MUN.csv` |
+| Lookup tables | `https://balanca.economia.gov.br/balanca/bd/tabelas/` (**not** under `comexstat-bd/`): `NCM.csv`, `UF.csv`, `UF_MUN.csv`, `PAIS.csv`, `VIA.csv`, `URF.csv` |
+
+When the path is wrong, the server returns a PHP error page instead of a 404,
+and `download.file()` does not complain. The script checks the file's first byte.
+
+### The two datasets do not have the same granularity
+
+| | `ncm/EXP_ANO.csv` | `mun/EXP_ANO_MUN.csv` |
+|:--|:--|:--|
+| Product | NCM (8 digits) | HS4 (4 digits) |
+| Territory | state | municipality |
+| Transport mode | `CO_VIA` | not available |
+| Customs unit of shipment | `CO_URF` | not available |
+| Statistical quantity | `QT_ESTAT` | not available |
+
+In other words, **municipality and transport mode do not coexist**. Cargo-origin analysis by
+mode is only possible by state, stating the assumption.
+
+### Three traps
+
+**1. Every `CO_`, `SG_` or `SH` field is a code, not a number.** `CO_MES = "02"`,
+`CO_VIA = "04"`, `CO_URF = "0817600"`, `SH4 = "0901"` (coffee). Letting R guess erases the zero
+and silently breaks the `join` for the whole of chapters 01 to 09 of the Harmonized System, which is where
+agribusiness is.
+
+**2. `CO_MUN_GEO` is not the IBGE code.** The last five digits match; the state
+prefix differs in four states:
+
+| State | Comex | IBGE |
+|:--|:--|:--|
+| São Paulo | 34 | 35 |
+| Mato Grosso do Sul | 52 | 50 |
+| Goiás | 53 | 52 |
+| Distrito Federal | 54 | 53 |
+
+Plus `93` (EX, not assigned to a municipality) and `99` (ND, not declared), which are not territory.
+Since the other 23 states match, the direct `join` matches most of the rows and makes the
+country's largest exporting state vanish. The `co_mun_comex_para_ibge()` function is in the script.
+
+**3. The municipality is the exporting company's tax domicile**, not the place of production. A
+trading company headquartered in São Paulo that exports soybeans from Mato Grosso appears as São Paulo. That
+rules out the municipal data as a proxy for cargo origin.
+
+## Other sources cited in the material
+
+| Dataset | Package/routine | Use |
+|:--|:--|:--|
+| Comex Stat (municipal exports and imports) | `download.file()` + `duckplyr` | @sec-m1-estudo-de-caso |
+| Territorial boundaries, federal highways, municipalities | `geobr` | modules 2 and 3 |
+| Demographic Census | `censobr` | modules 2 and 3 |
+| IBGE aggregates (SIDRA) | `sidrar` | modules 2 and 5 |
+| OpenStreetMap | `osmdata`, `osmextract` | modules 3 and 4 |
+| Public transport GTFS | `gtfstools` | modules 4 and 5 |
+| Access to Opportunities | `aopdata` | modules 4 and 5 |
+
+## Official sources
+
+- **ANTAQ, Estatístico Aquaviário**: <https://web3.antaq.gov.br/ea/sense/index.html>
+- **Comex Stat / MDIC**: <https://comexstat.mdic.gov.br/>
+- **IBGE, SIDRA**: <https://sidra.ibge.gov.br/>
+- **IBGE, territorial boundaries**: <https://www.ibge.gov.br/geociencias/downloads-geociencias.html>
+- **DNIT, georeferenced datasets**: <https://www.gov.br/dnit/pt-br>
+- **OpenStreetMap**: <https://www.openstreetmap.org/>
+
+::: {.callout-note}
+ANTAQ's data are redistributed here for teaching purposes only, in the form in which they were
+published. For use in official documents, download the current version from the source.
+:::

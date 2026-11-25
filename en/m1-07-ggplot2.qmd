@@ -1,0 +1,417 @@
+# Visualisation with `ggplot2` {#sec-m1-ggplot2}
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(stringr)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+stopifnot(ncol(cabotagem) == length(colunas))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(uf_origem  = stringr::str_to_upper(uf_origem),
+         uf_destino = stringr::str_to_upper(uf_destino),
+         tku_bi     = tku / 1e9)
+```
+
+## The grammar
+
+Every `ggplot2` chart has three mandatory parts:
+
+1. **data**: a `data.frame`;
+2. **aesthetic mapping** (`aes`): which column goes to the x axis, y axis, colour, size;
+3. **geometry** (`geom_*`): how the data are drawn.
+
+```{r}
+#| label: fig-primeiro
+#| fig-cap: "Minimal structure of a chart"
+por_uf <- cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = uf_destino) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+
+ggplot(por_uf, aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
+  geom_col()
+```
+
+Layers are added with `+`. From there everything is refinement: scales, labels, theme.
+
+## The geometries you will use
+
+### Bars
+
+```{r}
+#| label: fig-barras
+#| fig-cap: "Coastal shipping TKU by destination state (2025)"
+ggplot(por_uf, aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
+  geom_col(fill = "#1a5b8a") +
+  geom_text(aes(label = scales::number(tku_bi, accuracy = 0.1)),
+            hjust = -0.15, size = 3) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(
+    title = "Coastal shipping: TKU by destination state",
+    subtitle = "Billions of tonne-kilometres, 2025",
+    x = "TKU (billion t·km)", y = NULL,
+    caption = "Source: ANTAQ, Estatístico Aquaviário."
+  ) +
+  theme_minimal(base_size = 11)
+```
+
+Note two technical choices: **horizontal** bars (long names stay readable) and
+`reorder()` (orders by value, not alphabetically). Use `geom_col()` when the height is in a
+column of the data, and `geom_bar()` when you want `ggplot2` to count the rows.
+
+### Grouped and stacked bars
+
+```{r}
+#| label: fig-barras-perfil
+#| fig-cap: "Composition of TKU by cargo profile"
+por_perfil <- cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(uf_destino, perfil)) |>
+  dplyr::filter(uf_destino %in% por_uf$uf_destino[1:8])
+
+ggplot(por_perfil, aes(x = tku_bi, y = reorder(uf_destino, tku_bi), fill = perfil)) +
+  geom_col() +                                 # stacked (default)
+  scale_fill_brewer(palette = "Blues", direction = -1) +
+  labs(x = "TKU (billion t·km)", y = NULL, fill = "Cargo profile") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom")
+```
+
+Switching to proportions, with `position = "fill"`, the chart now reads as composition:
+
+```{r}
+#| label: fig-barras-fill
+#| fig-cap: "Share of each cargo profile in destination TKU"
+ggplot(por_perfil, aes(x = tku_bi, y = reorder(uf_destino, tku_bi), fill = perfil)) +
+  geom_col(position = "fill") +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_brewer(palette = "Blues", direction = -1) +
+  labs(x = NULL, y = NULL, fill = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom")
+```
+
+`position = "dodge"` puts the bars side by side.
+
+### Scatter plot
+
+```{r}
+#| label: fig-scatter
+#| fig-cap: "Number of links versus total TKU by destination state"
+resumo_uf <- cabotagem |>
+  dplyr::summarise(ligacoes = dplyr::n(), tku_bi = sum(tku_bi), .by = uf_destino)
+
+ggplot(resumo_uf, aes(x = ligacoes, y = tku_bi)) +
+  geom_point(size = 3, alpha = 0.7, colour = "#1a5b8a") +
+  ggrepel::geom_text_repel(aes(label = uf_destino), size = 3) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.5,
+              colour = "grey40", linetype = "dashed") +
+  labs(x = "Number of OD links", y = "TKU (billion t·km)") +
+  theme_minimal(base_size = 11)
+```
+
+### Histogram, density and cumulative distribution
+
+For very skewed variables, such as TKU, the logarithmic axis is the difference between an
+unreadable chart and an informative one.
+
+```{r}
+#| label: fig-hist
+#| fig-cap: "Distribution of TKU per OD link (log scale)"
+ggplot(cabotagem, aes(x = tku)) +
+  geom_histogram(bins = 30, fill = "#1a5b8a", colour = "white") +
+  scale_x_log10(labels = scales::label_log()) +
+  labs(x = "TKU per link (t·km, log scale)", y = "Number of links") +
+  theme_minimal(base_size = 11)
+```
+
+```{r}
+#| label: fig-dens-cdf
+#| fig-cap: "Density (left) and cumulative distribution (right)"
+g1 <- ggplot(cabotagem, aes(x = tku)) +
+  geom_density(fill = "#1a5b8a", alpha = 0.3) +
+  scale_x_log10() +
+  labs(x = "TKU (log)", y = "Density") +
+  theme_minimal(base_size = 10)
+
+g2 <- ggplot(cabotagem, aes(x = tku)) +
+  stat_ecdf(geom = "step", linewidth = 0.8, colour = "#1a5b8a") +
+  scale_x_log10() +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = "TKU (log)", y = "Cumulative links") +
+  theme_minimal(base_size = 10)
+
+patchwork::wrap_plots(g1, g2)
+```
+
+The cumulative curve directly answers a planning question: *how many pairs
+concentrate what fraction of the TKU?*
+
+### Boxplot
+
+```{r}
+#| label: fig-box
+#| fig-cap: "TKU per link, by cargo profile"
+ggplot(cabotagem, aes(x = tku, y = reorder(perfil, tku, FUN = median))) +
+  geom_boxplot(outlier.alpha = 0.4, fill = "grey95") +
+  scale_x_log10(labels = scales::label_log()) +
+  labs(x = "TKU per link (log)", y = NULL) +
+  theme_minimal(base_size = 11)
+```
+
+### Lines: time series
+
+```{r}
+#| label: fig-linha
+#| fig-cap: "Example time series with made-up data"
+serie <- data.frame(
+  ano = 2015:2025,
+  tku_bi = c(24.1, 23.4, 25.8, 27.2, 28.9, 27.1, 30.4, 32.2, 33.8, 35.1, 36.4)
+)
+
+ggplot(serie, aes(x = ano, y = tku_bi)) +
+  geom_line(linewidth = 0.9, colour = "#1a5b8a") +
+  geom_point(size = 2, colour = "#1a5b8a") +
+  scale_x_continuous(breaks = seq(2015, 2025, 2)) +
+  labs(x = NULL, y = "TKU (billion t·km)") +
+  theme_minimal(base_size = 11)
+```
+
+## Scales, labels and formats
+
+The `scales` package handles number formatting. Its defaults follow the English convention
+(decimal point, comma for thousands); for reports in Portuguese, the Brazilian convention is the
+opposite, and the arguments `big.mark` and `decimal.mark` switch it:
+
+```{r}
+scales::number(1234567.891, big.mark = ",", accuracy = 0.01)                       # English
+scales::number(1234567.891, big.mark = ".", decimal.mark = ",", accuracy = 0.01)   # Brazilian
+scales::percent(0.1234, accuracy = 0.1)
+scales::label_number(scale = 1e-9, suffix = " bn")(8332538649)
+scales::comma(1234567)
+```
+
+Applying it to the axis:
+
+```{r}
+#| label: fig-escalas
+#| fig-cap: "Axis with formatted numbers"
+ggplot(por_uf |> dplyr::slice_head(n = 8), aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
+  geom_col(fill = "#1a5b8a") +
+  scale_x_continuous(
+    labels = scales::label_number(big.mark = ",", accuracy = 0.1)
+  ) +
+  labs(x = "TKU (billion t·km)", y = NULL) +
+  theme_minimal(base_size = 11)
+```
+
+Other useful scales:
+
+```{r}
+#| eval: false
+scale_y_continuous(limits = c(0, 40))                    # limits
+scale_y_continuous(transform = "log10")                      # transformation
+scale_x_date(date_labels = "%b/%Y", date_breaks = "3 months")  # dates
+scale_fill_viridis_c()                                   # continuous, perceptually uniform
+scale_fill_viridis_d()                                   # discrete
+scale_colour_manual(values = c("Rodoviário" = "#1a5b8a", "Cabotagem" = "#e07b39"))
+coord_flip()                                             # swaps the axes
+coord_cartesian(xlim = c(0, 10))                         # crops without dropping data
+```
+
+::: {.callout-warning}
+`scale_x_continuous(limits = ...)` **removes** the observations outside the limit (and affects means and
+smoothers); `coord_cartesian(xlim = ...)` only zooms. To crop the view, use
+`coord_cartesian()`.
+:::
+
+## Factors: controlling the order
+
+```{r}
+#| label: fig-forcats
+#| fig-cap: "Explicit order of the categories"
+cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = perfil) |>
+  dplyr::mutate(perfil = forcats::fct_reorder(perfil, tku_bi)) |>
+  ggplot(aes(x = tku_bi, y = perfil)) +
+  geom_col(fill = "#1a5b8a") +
+  labs(x = "TKU (billion t·km)", y = NULL) +
+  theme_minimal(base_size = 11)
+```
+
+`forcats` functions worth memorising: `fct_reorder()` (orders by another variable),
+`fct_infreq()` (by frequency), `fct_rev()` (reverses), `fct_lump_n()` (groups the small
+categories into "Other") and `fct_relevel()` (manual order).
+
+```{r}
+cabotagem |>
+  dplyr::mutate(sh2_top = forcats::fct_lump_n(sh2, n = 5, w = tku)) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = sh2_top) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+```
+
+## Panels (`facet`)
+
+```{r}
+#| label: fig-facet
+#| fig-cap: "One panel per cargo profile"
+cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  dplyr::slice_max(tku_bi, n = 5, by = perfil) |>
+  ggplot(aes(x = tku_bi, y = reorder(uf_destino, tku_bi))) +
+  geom_col(fill = "#1a5b8a") +
+  facet_wrap(~perfil, scales = "free") +
+  labs(x = "TKU (billion t·km)", y = NULL) +
+  theme_minimal(base_size = 10)
+```
+
+`scales = "free"` gives each panel its own scale: good for comparing **shape**,
+bad for comparing **magnitude**. Choose deliberately.
+
+## Annotations
+
+```{r}
+#| label: fig-anotacao
+#| fig-cap: "Highlighting a specific point"
+maior <- cabotagem |> dplyr::slice_max(tku, n = 1)
+
+ggplot(resumo_uf, aes(x = ligacoes, y = tku_bi)) +
+  geom_point(colour = "grey60", size = 2.5) +
+  geom_point(data = resumo_uf |> dplyr::filter(uf_destino == maior$uf_destino),
+             colour = "#e07b39", size = 4) +
+  annotate("text", x = 30, y = max(resumo_uf$tku_bi) * 0.95,
+           label = stringr::str_glue("Largest link: {maior$cidade_origem} > {maior$cidade_destino}"),
+           hjust = 0, size = 3.2) +
+  geom_hline(yintercept = mean(resumo_uf$tku_bi), linetype = "dashed", colour = "grey50") +
+  labs(x = "OD links", y = "TKU (billion t·km)") +
+  theme_minimal(base_size = 11)
+```
+
+## Themes and visual identity
+
+```{r}
+#| eval: false
+theme_minimal(); theme_bw(); theme_classic(); theme_void()
+```
+
+To standardise every chart in a report, define the theme once:
+
+```{r}
+tema_mt <- function(base_size = 11) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      plot.title    = element_text(face = "bold", size = rel(1.15)),
+      plot.subtitle = element_text(colour = "grey35"),
+      plot.caption  = element_text(colour = "grey45", size = rel(0.8)),
+      panel.grid.minor = element_blank(),
+      legend.position  = "bottom"
+    )
+}
+
+theme_set(tema_mt())
+```
+
+From here on, every chart in the document inherits this theme.
+
+## 2D frequency maps
+
+When many points overlap (typical of GPS coordinates or OD pairs),
+two-dimensional histograms show density instead of stacked points.
+
+```{r}
+#| label: fig-bin2d
+#| fig-cap: "Density of links by TKU band and number of links of the state"
+cabotagem |>
+  dplyr::left_join(resumo_uf |> dplyr::select(uf_destino, ligacoes), by = "uf_destino") |>
+  ggplot(aes(x = ligacoes, y = tku)) +
+  geom_bin2d(bins = 20) +
+  scale_y_log10() +
+  scale_fill_viridis_c(option = "magma", direction = -1) +
+  labs(x = "Links of the destination state", y = "TKU of the link (log)", fill = "Number of\nlinks") +
+  tema_mt()
+```
+
+`geom_hex()` does the same with hexagonal cells (requires the `hexbin` package). In module 2 this
+same logic appears over geographic space, with hexagon grids.
+
+## Class breaks: Jenks and alternatives
+
+When classifying values into bands (the mandatory step of any thematic map), the
+break method completely changes how the result reads.
+
+```{r}
+library(classInt)
+
+valores <- resumo_uf$tku_bi
+
+quebras_jenks  <- classInt::classIntervals(valores, n = 5, style = "jenks")
+quebras_quant  <- classInt::classIntervals(valores, n = 5, style = "quantile")
+quebras_iguais <- classInt::classIntervals(valores, n = 5, style = "equal")
+
+round(quebras_jenks$brks, 2)
+round(quebras_quant$brks, 2)
+round(quebras_iguais$brks, 2)
+```
+
+```{r}
+#| label: fig-jenks
+#| fig-cap: "The same states classified by three break methods"
+classificar <- function(x, estilo) {
+  q <- classInt::classIntervals(x, n = 5, style = estilo)
+  cut(x, breaks = q$brks, include.lowest = TRUE, dig.lab = 2)
+}
+
+resumo_uf |>
+  dplyr::mutate(
+    Jenks      = classificar(tku_bi, "jenks"),
+    Quantile   = classificar(tku_bi, "quantile"),
+    `Equal intervals` = classificar(tku_bi, "equal")
+  ) |>
+  tidyr::pivot_longer(c(Jenks, Quantile, `Equal intervals`),
+                      names_to = "metodo", values_to = "classe") |>
+  ggplot(aes(x = 1, y = reorder(uf_destino, tku_bi), fill = as.integer(classe))) +
+  geom_tile() +
+  facet_wrap(~metodo) +
+  scale_fill_viridis_c(option = "viridis", breaks = 1:5) +
+  labs(x = NULL, y = NULL, fill = "Class") +
+  theme_minimal(base_size = 9) +
+  theme(axis.text.x = element_blank(), panel.grid = element_blank())
+```
+
+| Method | When to use |
+|:--|:--|
+| `jenks` (natural breaks) | skewed data; maximises the difference between classes |
+| `quantile` | guarantees the same number of units per class; good for rankings |
+| `equal` | bands of equal width; good when the scale has its own meaning |
+| `pretty` | round breaks, readable in a legend |
+| `fisher` | equivalent to Jenks, faster on large datasets |
+
+::: {.callout-note}
+Keep this block: in module 5 it comes back applied to choropleth maps with `sf`, and the
+choice of method will be justified in the final report.
+:::
+
+## Saving charts
+
+```{r}
+#| eval: false
+g <- ggplot(por_uf, aes(tku_bi, reorder(uf_destino, tku_bi))) + geom_col()
+
+ggsave("resultados/tku_uf.png", g, width = 18, height = 12, units = "cm", dpi = 300)
+ggsave("resultados/tku_uf.pdf", g, width = 18, height = 12, units = "cm")  # vector
+ggsave("resultados/tku_uf.svg", g, width = 18, height = 12, units = "cm")  # editable
+```
+
+For institutional reports, prefer **PDF or SVG**: the chart does not lose quality when
+enlarged or printed. Set the dimensions in centimetres, thinking of the usable width of the
+page (about 16 cm on A4 with standard margins).

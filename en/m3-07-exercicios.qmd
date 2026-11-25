@@ -1,0 +1,156 @@
+# Exercises {#sec-m3-exercicios}
+
+```{r}
+library(sf)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(Matrix)
+library(readxl)
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+names(cabotagem) <- colunas
+cabotagem <- cabotagem |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(uf_origem = stringr::str_to_upper(uf_origem),
+         uf_destino = stringr::str_to_upper(uf_destino))
+```
+
+## 1. SQL instead of `dplyr`
+
+Answer with **one SQL query in DuckDB**, on the coastal shipping CSV: what is the total TKU by
+cargo profile, only for destinations in the Northeast?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+library(DBI); library(duckdb)
+
+con <- duckdb::dbConnect(duckdb::duckdb())
+
+DBI::dbGetQuery(con, "
+  SELECT \"Perfil da Carga\" AS perfil,
+         COUNT(*) AS ligacoes,
+         SUM(\"TKU (t x km)\") / 1e9 AS tku_bi
+  FROM read_csv_auto('dados/cabotagem_tku_2025.csv')
+  WHERE \"UF de Destino\" IN ('AL','BA','CE','MA','PB','PE','PI','RN','SE')
+  GROUP BY perfil
+  ORDER BY tku_bi DESC
+")
+
+duckdb::dbDisconnect(con, shutdown = TRUE)
+```
+
+Column names with spaces need double quotes in SQL. It is one more argument for
+standardising names on input, as we did in module 1.
+:::
+
+## 2. Sparse matrix
+
+Build the interstate coastal shipping OD matrix as a `sparseMatrix`, with states in the rows and
+columns. What is the density of the matrix (fraction of pairs with flow)?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+od_uf <- cabotagem |>
+  dplyr::filter(uf_origem %in% state.abb | TRUE) |>     # keeps all of them, including the EEZ
+  dplyr::summarise(tku = sum(tku), .by = c(uf_origem, uf_destino))
+
+zonas <- sort(unique(c(od_uf$uf_origem, od_uf$uf_destino)))
+
+m <- Matrix::sparseMatrix(
+  i = match(od_uf$uf_origem, zonas),
+  j = match(od_uf$uf_destino, zonas),
+  x = od_uf$tku / 1e9,
+  dims = c(length(zonas), length(zonas)),
+  dimnames = list(zonas, zonas)
+)
+
+c(zonas = length(zonas),
+  pares_com_fluxo = length(m@x),
+  densidade = round(length(m@x) / length(zonas)^2, 3))
+
+round(m[1:6, 1:6], 2)
+```
+:::
+
+## 3. Production, attraction and balance
+
+From the matrix in exercise 2, build the table of TKU produced, attracted and the balance by state, and
+make a diverging bar chart of the balance.
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+#| label: fig-ex-saldo
+#| fig-cap: "TKU balance (attracted − produced) by state"
+margens <- data.frame(
+  uf      = rownames(m),
+  emitido = Matrix::rowSums(m),
+  atraido = Matrix::colSums(m)
+) |>
+  dplyr::mutate(saldo = atraido - emitido) |>
+  dplyr::arrange(saldo)
+
+ggplot(margens, aes(x = saldo, y = reorder(uf, saldo), fill = saldo > 0)) +
+  geom_col() +
+  geom_vline(xintercept = 0, colour = "grey30") +
+  scale_fill_manual(values = c(`TRUE` = "#1a5b8a", `FALSE` = "#b3402a"), guide = "none") +
+  labs(x = "Balance (billion t·km)", y = NULL) +
+  theme_minimal(base_size = 10)
+```
+:::
+
+## 4. Concentration of the corridors
+
+How many state pairs concentrate 80% of the TKU? Compare with the result of module 1, which was
+computed by pair of municipalities. Why do the numbers differ?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+od_uf |>
+  dplyr::arrange(dplyr::desc(tku)) |>
+  dplyr::mutate(part_acum = cumsum(tku) / sum(tku)) |>
+  dplyr::summarise(
+    pares_totais = dplyr::n(),
+    pares_ate_80 = sum(part_acum < 0.80) + 1
+  ) |>
+  dplyr::mutate(proporcao = round(pares_ate_80 / pares_totais, 3))
+```
+
+Aggregating by state concentrates more than aggregating by municipality: several different municipal links
+add up in the same pair of states. Every concentration measure depends on the unit
+of aggregation. That is why it must be stated together with the number.
+:::
+
+## 5. Maximum grade
+
+In the slope case study (@sec-m3-declividade), how many kilometres of each
+alternative exceed an 8% grade? And what is the 95th-percentile grade?
+
+::: {.callout-note collapse="true"}
+## Solution
+
+```{r}
+#| eval: false
+segmentos |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(
+    km_acima_8 = sum(comp_m[abs(rampa_pct) > 8], na.rm = TRUE) / 1000,
+    p95_rampa  = quantile(abs(rampa_pct), 0.95, na.rm = TRUE),
+    .by = alternativa
+  )
+```
+:::

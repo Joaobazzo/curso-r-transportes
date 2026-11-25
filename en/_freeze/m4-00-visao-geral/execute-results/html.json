@@ -1,0 +1,19 @@
+{
+  "hash": "2bb4276fe2527fda2b3ad7f3a514ad65",
+  "result": {
+    "engine": "knitr",
+    "markdown": "# Module overview {#sec-m4}\n\n![Map of minimum travel time zones by train or tram, Melbourne, 1922 (Metropolitan Town Planning Commission). A hundred years before this module, accessibility was already being measured and drawn. Source: David Levinson's collection.](../img/access_levinson.png){width=60%}\n\n\n::: {.modulo-meta}\n**Workload:** 6 hours (3h synchronous + 3h asynchronous)\\\n**Dates:** 19/10 and 21/10 (synchronous); 22/10 (asynchronous)\\\n**Packages:** `osmdata`, `osmextract`, `sfnetworks`, `dodgr`, `accessibility`, `aopdata`, `usethis`, `quarto`, `geobr`, `censobr`, `sidrar`\\\n**Case study:** accessibility in Fortaleza\n:::\n\n## What you will be able to do by the end of the module\n\n- Extract a study area's road network from OpenStreetMap and turn it into a\n  topological network, ready for routing.\n- Compute routes, distances and travel times for cars and freight on the road network.\n- Compute and interpret accessibility-to-opportunities indicators, and understand what each\n  measure (minimum time, cumulative, gravity, with competition) captures.\n- Record the history of an analysis with Git and know what **cannot** go into a\n  public repository.\n- Put together a municipal diagnosis with the Census (`geobr`, `censobr`), SIDRA (`sidrar`) and\n  coastal shipping, and produce the same report for several municipalities, in a loop.\n\n## Outline\n\n### Synchronous class (3h)\n\n| Block | Content | Chapter |\n|:--|:--|:--|\n| 1 | OpenStreetMap data: road network and topological network | @sec-m4-osm |\n| 2 | Car and freight routing with `dodgr` | @sec-m4-roteamento |\n| 3 | Accessibility to opportunities: concept, measures and interpretation | @sec-m4-acessibilidade |\n| 4 | Version control with Git and GitHub | @sec-m5-git |\n| 5 | A municipal report: Paranaguá (Census, SIDRA and coastal shipping) | @sec-relatorio-paranagua |\n| 6 | Parameterised reports: the same report for five municipalities | @sec-m5-parametrizados |\n\n### Asynchronous content (3h)\n\n| Block | Content | Chapter |\n|:--|:--|:--|\n| 6 | Exercises | @sec-m4-exercicios |\n\n## Module packages\n\n\n::: {.cell}\n\n```{.r .cell-code}\npacotes <- c(\"osmdata\", \"osmextract\", \"sfnetworks\", \"tidygraph\", \"dodgr\",\n             \"accessibility\", \"aopdata\", \"h3jsr\", \"usethis\", \"gitcreds\", \"quarto\",\n             \"geobr\", \"censobr\", \"sidrar\")\n\nfaltando <- setdiff(pacotes, rownames(installed.packages()))\nif (length(faltando) > 0) install.packages(faltando)\n```\n:::\n\n\nGit is installed outside R: see @sec-m5-git. The OSM and `dodgr` chapters use the\nSão Paulo–Santos network, which comes in this module's data package (and also in module 3's). The\naccessibility analysis with `aopdata` runs without Java and without a manual *download*. The same data package\nhas the Fortaleza folder used by `r5r` in module 5 (@sec-m5).\n",
+    "supporting": [],
+    "filters": [
+      "rmarkdown/pagebreak.lua"
+    ],
+    "includes": {
+      "include-in-header": [
+        "<link href=\"site_libs/pagedtable-1.1/css/pagedtable.css\" rel=\"stylesheet\" />\n<script src=\"site_libs/pagedtable-1.1/js/pagedtable.js\"></script>\n"
+      ]
+    },
+    "engineDependencies": {},
+    "preserve": {},
+    "postProcess": true
+  }
+}

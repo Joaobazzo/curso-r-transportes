@@ -1,0 +1,425 @@
+# Case study: coastal shipping TKU {#sec-m1-estudo-de-caso}
+
+This chapter brings together everything seen in the module into a single workflow, from the raw file to the
+exported result. The question is a typical request from a technical team:
+
+> *Which links and which states concentrate coastal shipping in TKU, how is this
+> transport split by cargo profile, and what is the origin–destination matrix between
+> states?*
+
+The data come from **ANTAQ's Estatístico Aquaviário** (table TB6.1, TKU for 2025), in
+`dados/cabotagem_tku_2025.xlsx`. See [Example data](a-dados.qmd).
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(scales)
+library(readxl)
+
+ggplot2::theme_set(ggplot2::theme_minimal(base_size = 11) +
+            ggplot2::theme(panel.grid.minor = ggplot2::element_blank(),
+                  plot.title = ggplot2::element_text(face = "bold"),
+                  legend.position = "bottom"))
+```
+
+## Step 1: Read and get to know the data
+
+```{r}
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+stopifnot(ncol(bruto) == length(colunas))
+names(bruto) <- colunas
+
+dim(bruto)
+```
+
+```{r}
+bruto |> dplyr::slice_head(n = 3) |> knitr::kable()
+```
+
+Three questions before any calculation.
+
+**1. What is the unit of observation?** The hypothesis is "one pair of facilities per commodity";
+the test shows that one dimension is missing: the cargo profile.
+
+```{r}
+c(
+  linhas        = nrow(bruto),
+  inst_inst_sh2 = nrow(dplyr::distinct(bruto, instalacao_origem, instalacao_destino, sh2)),
+  mais_perfil   = nrow(dplyr::distinct(bruto, perfil, sh2,
+                                instalacao_origem, instalacao_destino))
+)
+```
+
+The key is *profile × commodity × origin facility × destination facility*, and it is what
+allows TKU to be summed in broader aggregations.
+
+**2. Do the data cover what is expected?**
+
+```{r}
+bruto |>
+  dplyr::summarise(
+    ano_min = min(ano), ano_max = max(ano),
+    paises  = dplyr::n_distinct(c(pais_origem, pais_destino), na.rm = TRUE),
+    ufs_destino = dplyr::n_distinct(uf_destino, na.rm = TRUE),
+    sh2     = dplyr::n_distinct(sh2)
+  )
+```
+
+**3. Are there missing or impossible values?**
+
+```{r}
+c(
+  na_tku      = sum(is.na(bruto$tku)),
+  tku_zero    = sum(bruto$tku == 0),
+  tku_negativo = sum(bruto$tku < 0),
+  na_uf_origem = sum(is.na(bruto$uf_origem))
+)
+```
+
+The 132 records with zero TKU and the 120 rows without identification are the subject of
+@sec-m1-limpeza: they are combinations of profile and commodity **with no flow** in the period.
+
+## Step 2: Clean and standardise
+
+```{r}
+cabotagem <- bruto |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), str_squish)) |>
+  dplyr::filter(tku > 0) |>
+  dplyr::mutate(
+    uf_origem  = stringr::str_to_upper(uf_origem),
+    uf_destino = stringr::str_to_upper(uf_destino),
+    tku_bi     = tku / 1e9,
+    tipo_ligacao = dplyr::case_when(
+      uf_origem == "ZEE/PLAT. CONTINENTAL" ~ "offshore",
+      uf_origem == "INDETERMINADO"         ~ "indeterminada",
+      uf_origem == uf_destino              ~ "intraestadual",
+      .default = "interestadual"
+    ),
+    origem = dplyr::if_else(tipo_ligacao == "offshore",
+                     "ZEE/Plataforma Continental",
+                     stringr::str_c(cidade_origem, " (", uf_origem, ")")),
+    destino = stringr::str_c(cidade_destino, " (", uf_destino, ")")
+  )
+
+stopifnot(nrow(cabotagem) == 600, all(cabotagem$tku > 0))
+dplyr::glimpse(cabotagem)
+```
+
+## Step 3: The big picture
+
+```{r}
+panorama <- cabotagem |>
+  dplyr::summarise(
+    ligacoes       = dplyr::n(),
+    instalacoes    = dplyr::n_distinct(c(instalacao_origem, instalacao_destino), na.rm = TRUE),
+    municipios     = dplyr::n_distinct(c(cidade_origem, cidade_destino), na.rm = TRUE),
+    mercadorias    = dplyr::n_distinct(sh2),
+    tku_total_bi   = round(sum(tku_bi), 1),
+    tku_mediano_mi = round(median(tku) / 1e6, 1)
+  )
+
+panorama |> t() |> knitr::kable(col.names = "value")
+```
+
+```{r}
+por_tipo <- cabotagem |>
+  dplyr::summarise(ligacoes = dplyr::n(), tku_bi = sum(tku_bi), .by = tipo_ligacao) |>
+  dplyr::mutate(part = tku_bi / sum(tku_bi)) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+
+por_tipo |>
+  dplyr::transmute(
+    `Link type` = tipo_ligacao,
+    Links = ligacoes,
+    `TKU (bn)` = round(tku_bi, 1),
+    `Share (%)` = scales::percent(part, accuracy = 0.1)
+  ) |>
+  knitr::kable(align = "lrrr")
+```
+
+The first relevant result already appears here: almost **40% of coastal shipping TKU does not originate
+at a port on land**, but on the platforms of the Exclusive Economic Zone. It is oil leaving
+the platforms for terminals on the mainland. And, in any analysis of the port network,
+these links need to be treated separately.
+
+## Step 4: Which links concentrate the flow
+
+```{r}
+top_ligacoes <- cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(origem, destino)) |>
+  dplyr::arrange(dplyr::desc(tku_bi)) |>
+  dplyr::mutate(
+    par = stringr::str_c(origem, " → ", destino),
+    part = tku_bi / sum(tku_bi),
+    part_acum = cumsum(part)
+  )
+
+top_ligacoes |>
+  dplyr::slice_head(n = 10) |>
+  dplyr::transmute(
+    Pair = par,
+    `TKU (bn)` = round(tku_bi, 2),
+    `Share (%)` = scales::percent(part, accuracy = 0.1),
+    `Cum. (%)` = scales::percent(part_acum, accuracy = 0.1)
+  ) |>
+  knitr::kable(align = "lrrr")
+```
+
+```{r}
+#| label: fig-caso-top
+#| fig-cap: "Ten largest coastal shipping links in TKU (2025)"
+#| fig-height: 5.5
+top_ligacoes |>
+  dplyr::slice_head(n = 10) |>
+  ggplot(aes(x = tku_bi, y = reorder(par, tku_bi))) +
+  geom_col(fill = "#1a5b8a") +
+  geom_text(aes(label = scales::number(tku_bi, accuracy = 0.1)),
+            hjust = -0.15, size = 3) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.18))) +
+  labs(x = "TKU (billion t·km)", y = NULL,
+       title = "Coastal shipping: main links",
+       caption = "Source: ANTAQ, Estatístico Aquaviário (TB6.1), 2025.")
+```
+
+How many links account for 80% of the TKU?
+
+```{r}
+n80 <- sum(top_ligacoes$part_acum < 0.80) + 1
+
+c(ligacoes_ate_80pct = n80,
+  total_de_ligacoes  = nrow(top_ligacoes),
+  proporcao = round(n80 / nrow(top_ligacoes), 3))
+```
+
+```{r}
+#| label: fig-caso-concentracao
+#| fig-cap: "Concentration of TKU: cumulative share by ordered link"
+top_ligacoes |>
+  dplyr::mutate(i = dplyr::row_number() / dplyr::n()) |>
+  ggplot(aes(x = i, y = part_acum)) +
+  geom_line(linewidth = 0.9, colour = "#1a5b8a") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_hline(yintercept = 0.8, linetype = "dotted", colour = "#e07b39") +
+  scale_x_continuous(labels = scales::percent_format()) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = "OD links (ordered by TKU)", y = "Cumulative TKU")
+```
+
+This curve is the strongest technical argument to be drawn from the dataset: **about 13% of the municipal
+pairs concentrate 80% of the TKU**. The dashed line is the line of equality. If every
+pair had the same TKU, the curve would coincide with it.
+
+## Step 5: Cargo profile
+
+```{r}
+por_perfil <- cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), ligacoes = dplyr::n(), .by = perfil) |>
+  dplyr::mutate(part = tku_bi / sum(tku_bi)) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+
+por_perfil |>
+  dplyr::transmute(
+    Profile = perfil,
+    `TKU (bn)` = round(tku_bi, 1),
+    `Share (%)` = scales::percent(part, accuracy = 0.1),
+    Links = ligacoes
+  ) |>
+  knitr::kable(align = "lrrr")
+```
+
+```{r}
+#| label: fig-caso-perfil
+#| fig-cap: "TKU by cargo profile, with the five main destination states"
+cabotagem |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  dplyr::mutate(uf_destino = forcats::fct_lump_n(uf_destino, n = 5, w = tku_bi,
+                                          other_level = "Other")) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(perfil, uf_destino)) |>
+  ggplot(aes(x = tku_bi, y = reorder(perfil, tku_bi), fill = uf_destino)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Blues", direction = -1) +
+  labs(x = "TKU (billion t·km)", y = NULL, fill = "Destination state")
+```
+
+The composition confirms what step 3 showed: liquid and gaseous bulk accounts for most
+of the TKU, with destinations concentrated in the Southeast, while container cargo has a
+much more spread-out set of destinations.
+
+## Step 6: The origin–destination matrix between states
+
+```{r}
+od <- cabotagem |>
+  dplyr::filter(tipo_ligacao %in% c("interestadual", "offshore")) |>
+  dplyr::mutate(uf_origem = dplyr::if_else(tipo_ligacao == "offshore", "ZEE", uf_origem)) |>
+  dplyr::summarise(tku_bi = sum(tku_bi), .by = c(uf_origem, uf_destino))
+
+matriz <- od |>
+  tidyr::pivot_wider(names_from = uf_destino, values_from = tku_bi, values_fill = 0) |>
+  dplyr::arrange(uf_origem)
+
+matriz |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) round(x, 1))) |>
+  knitr::kable()
+```
+
+Totals produced (`emitido`) and attracted (`atraido`) by state, and the balance (`saldo`):
+the margins of the matrix.
+
+```{r}
+margens <- dplyr::full_join(
+  od |> dplyr::summarise(emitido = sum(tku_bi), .by = uf_origem) |> dplyr::rename(uf = uf_origem),
+  od |> dplyr::summarise(atraido = sum(tku_bi), .by = uf_destino) |> dplyr::rename(uf = uf_destino),
+  by = "uf"
+) |>
+  dplyr::mutate(dplyr::across(c(emitido, atraido), \(x) tidyr::replace_na(x, 0)),
+         saldo = atraido - emitido) |>
+  dplyr::arrange(dplyr::desc(saldo))
+
+margens |> dplyr::mutate(dplyr::across(dplyr::where(is.numeric), \(x) round(x, 1))) |> knitr::kable()
+```
+
+```{r}
+#| label: fig-caso-matriz
+#| fig-cap: "Interstate and offshore coastal shipping OD matrix in TKU (log scale)"
+od |>
+  ggplot(aes(x = uf_destino, y = reorder(uf_origem, tku_bi), fill = tku_bi)) +
+  geom_tile(colour = "white") +
+  scale_fill_viridis_c(option = "mako", direction = -1, transform = "log10",
+                       labels = scales::label_number(accuracy = 0.01)) +
+  labs(x = "Destination state", y = "Origin", fill = "TKU (bn)") +
+  theme(panel.grid = element_blank())
+```
+
+```{r}
+#| label: fig-caso-saldo
+#| fig-cap: "Balance between attracted and produced TKU, by state"
+margens |>
+  ggplot(aes(x = saldo, y = reorder(uf, saldo), fill = saldo > 0)) +
+  geom_col() +
+  scale_fill_manual(values = c(`TRUE` = "#1a5b8a", `FALSE` = "#e07b39"), guide = "none") +
+  geom_vline(xintercept = 0, colour = "grey30") +
+  labs(x = "Balance (billion t·km)", y = NULL,
+       subtitle = "Positive: the state attracts more TKU than it produces")
+```
+
+In module 3 this same matrix is turned into **spatial flows**, drawn over the map
+of Brazil as desire lines between ports; in module 5, the totals by state become a
+publication-quality thematic map.
+
+## Step 7: Export the results
+
+```{r}
+#| eval: false
+dir.create("resultados", showWarnings = FALSE)
+
+writexl::write_xlsx(
+  list(
+    "Panorama"     = panorama,
+    "Por tipo"     = por_tipo,
+    "Top ligações" = top_ligacoes |> dplyr::select(par, tku_bi, part, part_acum),
+    "Por perfil"   = por_perfil,
+    "Matriz OD"    = matriz,
+    "Margens"      = margens
+  ),
+  "resultados/cabotagem_tku_2025.xlsx"
+)
+
+readr::write_csv2(od, "resultados/matriz_od_longo.csv")
+saveRDS(cabotagem, "dados/cabotagem_limpa.rds")
+```
+
+The whole script of this chapter has fewer than 80 useful lines and can be run again on
+next year's file unchanged. That is exactly the gain that justifies swapping the
+spreadsheet for code.
+
+## What this case study showed
+
+1. The dataset has 732 records, of which **600 have flow**; the other 132 are structural zeros.
+2. The table's key includes the **cargo profile**. Finding it avoided double counting.
+3. **38% of the TKU is offshore**, and this category only appeared because the invalid-state check
+   was investigated instead of discarded.
+4. The system is **highly concentrated**: ~13% of the pairs account for 80% of the TKU.
+5. Every result came from a script that can be run again, with checks that fail loudly if the
+   next version of the dataset changes structure.
+
+## Challenge: Comex Stat exports
+
+To practise on your own, the same workflow applied to a **large** dataset. Comex Stat (Brazil's
+foreign trade statistics) publishes municipal export and import data as open CSV:
+
+<https://www.gov.br/mdic/pt-br/assuntos/comercio-exterior/estatisticas/base-de-dados-bruta>
+
+```{r}
+#| eval: false
+# 1. download (a file of hundreds of MB; do it once and keep it)
+dir.create("dados/brutos", showWarnings = FALSE, recursive = TRUE)
+
+url_exp <- "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/EXP_2025_MUN.csv"
+destino <- "dados/brutos/EXP_2025_MUN.csv"
+if (!file.exists(destino)) download.file(url_exp, destino, mode = "wb")
+
+# lookup tables (municipalities and NCM)
+download.file("https://balanca.economia.gov.br/balanca/bd/tabelas/UF_MUN.csv",
+              "dados/brutos/UF_MUN.csv", mode = "wb")
+```
+
+```{r}
+#| eval: false
+# 2. lazy reading with duckplyr: only the aggregate comes into memory
+library(duckplyr)
+
+exp_mun <- duckplyr::read_csv_duckdb(
+  "dados/brutos/EXP_2025_MUN.csv",
+  options = list(delim = ";", header = TRUE)
+)
+
+por_municipio <- exp_mun |>
+  dplyr::summarise(
+    valor_fob = sum(VL_FOB, na.rm = TRUE),
+    peso_kg   = sum(KG_LIQUIDO, na.rm = TRUE),
+    .by = c(SH4, CO_MUN)
+  ) |>
+  dplyr::collect()
+```
+
+```{r}
+#| eval: false
+# 3. performance comparison: duckplyr x data.table x readr
+system.time({
+  a <- duckplyr::read_csv_duckdb("dados/brutos/EXP_2025_MUN.csv",
+                       options = list(delim = ";")) |>
+    dplyr::summarise(v = sum(VL_FOB), .by = CO_MUN) |>
+    dplyr::collect()
+})
+
+system.time({
+  b <- data.table::fread("dados/brutos/EXP_2025_MUN.csv")[, .(v = sum(VL_FOB)), by = CO_MUN]
+})
+
+system.time({
+  d <- readr::read_csv2("dados/brutos/EXP_2025_MUN.csv", show_col_types = FALSE) |>
+    dplyr::summarise(v = sum(VL_FOB), .by = CO_MUN)
+})
+```
+
+What you should produce:
+
+1. The 20 commodities (HS4) with the highest FOB value exported in 2025.
+2. The 20 municipalities with the highest exported value, with name and state (`join` with `UF_MUN.csv`).
+3. A bar chart of the top 10 municipalities, with the axis formatted in billions of US$.
+4. A cross table of FOB value by state and by HS chapter.
+5. The processing time of the three approaches in item 3 above, with a sentence explaining the
+   difference.
+
+::: {.callout-tip}
+Comex Stat's `CO_MUN` has **6 digits** (the municipality code without the check digit),
+while IBGE and `geobr` use **7**. That is the kind of detail that breaks a join and
+that we discuss in module 2, when these municipalities need to become geometries on the map.
+:::

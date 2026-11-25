@@ -1,0 +1,346 @@
+# Case study: the output of a four-step model {#sec-m1-modelo4etapas}
+
+::: {.modulo-meta}
+**Data:** `dados/processados/modelo4etapas/links_rmc_2018_completo.parquet`
+**Source:** PTV VISUM export, morning peak hour, Curitiba Metropolitan Region (RMC; 2018
+network, 2017 counts)
+**Common thread:** this same dataset comes back in modules 2 to 5
+:::
+
+The previous chapters worked with a public dataset that was already tabulated. This one works with the
+other kind of file that lands on a transport planner's desk: the **export of a
+simulation model**. R here is not the modelling tool, it is the
+post-processing tool, which is how most technical teams actually use the language.
+
+The question is that of any technical note:
+
+> *How much does the network carry, how much does it lose to congestion, and where are the bottlenecks?*
+
+It looks like a sum. We will see that it is not.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+ggplot2::theme_set(
+  ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(panel.grid.minor = ggplot2::element_blank(),
+                   plot.title = ggplot2::element_text(face = "bold"),
+                   legend.position = "bottom")
+)
+```
+
+## Step 1: Read the file
+
+The extract is in Parquet, a columnar format that takes a fraction of the original shapefile's space and is
+read in a fraction of the time (SQL with DuckDB, @sec-m3-duckdb). Reading it directly through DuckDB, without loading anything
+that is not needed:
+
+```{r}
+con <- duckdb::dbConnect(duckdb::duckdb())
+
+links <- DBI::dbGetQuery(con, "
+  SELECT *
+  FROM 'dados/processados/modelo4etapas/links_rmc_2018_completo.parquet'
+")
+
+duckdb::dbDisconnect(con, shutdown = TRUE)
+
+dim(links)
+```
+
+```{r}
+links |>
+  dplyr::select(no, name, sentido, typeno, numlanes, capprt, v0prt, volvehprt, vc) |>
+  dplyr::slice_head(n = 5) |>
+  knitr::kable()
+```
+
+Before getting into the numbers, it is worth seeing what we are talking about: the same table also exists
+as a spatial layer (`dados/processados/modelo4etapas/rede_rmc_2018.gpkg`), with one row
+per road segment. A static map, coloured by the volume/capacity ratio (`vc`), already
+shows the shape of the network and where it is most loaded:
+
+```{r}
+#| label: fig-rede-preview
+#| fig-cap: "Model road network, coloured by the volume/capacity ratio (vc)"
+#| fig-height: 5
+rede <- sf::st_read("dados/processados/modelo4etapas/rede_rmc_2018.gpkg", quiet = TRUE)
+
+ggplot2::ggplot(rede) +
+  ggplot2::geom_sf(ggplot2::aes(colour = vc), linewidth = 0.25) +
+  ggplot2::scale_colour_viridis_c(option = "rocket", direction = -1, name = "vc") +
+  ggplot2::theme_void(base_size = 10)
+```
+
+We come back to this spatial layer more calmly in @sec-m2 (reprojection, length, static
+maps); here it only serves to let you see the network before diving into the table.
+
+## Step 2: Three questions before any calculation
+
+**1. What is the unit of observation?** The temptation is to say "one link". That is wrong:
+
+```{r}
+c(
+  linhas        = nrow(links),
+  links_unicos  = dplyr::n_distinct(links$no),
+  link_sentido  = nrow(dplyr::distinct(links, no, sentido))
+)
+```
+
+Each physical link appears **twice**, once per direction (`sentido`). The key is `no` + `sentido`.
+Grouping by `no` without noticing this mixes the two directions of each road.
+
+::: {.callout-warning}
+## The same network, two conventions
+
+The original export brings the same network in **two different formats**: one file with one
+row per direction (the one we are using) and another with both directions on the **same row**, in
+columns prefixed with `R_`. It is the classic case of long versus wide format
+(@sec-m1-manipulacao). Adding the two exports together counts everything twice.
+:::
+
+**2. Do the data cover what is expected?**
+
+```{r}
+links |>
+  dplyr::summarise(
+    tipos_de_via   = dplyr::n_distinct(typeno),
+    extensao_km    = round(sum(comprimento_km, na.rm = TRUE)),
+    com_volume     = sum(volvehprt > 0, na.rm = TRUE),
+    com_contagem   = sum(tem_contagem, na.rm = TRUE),
+    postos         = dplyr::n_distinct(id_posto[tem_contagem])
+  ) |>
+  knitr::kable()
+```
+
+Twenty-five counting stations for a 28,000-kilometre network. It is not much, and it is what
+exists. Knowing this before promising a validation is part of the job.
+
+**3. Are there impossible values or sentinels?**
+
+```{r}
+c(
+  sem_acesso      = sum(links$sem_acesso, na.rm = TRUE),
+  tsys_vazio      = sum(is.na(links$tsysset) | links$tsysset == ""),
+  capacidade_zero = sum(links$capprt == 0, na.rm = TRUE)
+)
+```
+
+The 23,290 links flagged as `sem_acesso` (no access) had, in the original file, a travel time
+of **360,000,000**. It is not a time: it is the sentinel VISUM uses to say "this
+transport system cannot use this link". Whoever computes an average time without handling this
+value gets a meaningless number, and R does not complain.
+
+## Step 3: The units trap
+
+This is the part that justifies the chapter. VISUM exports fields whose **name does not match
+the unit stored**. Look at the first link of the Contorno Leste (the eastern ring road):
+
+```{r}
+links |>
+  dplyr::filter(no == 2, sentido == "direto") |>
+  dplyr::transmute(
+    name,
+    volume          = volvehprt,
+    comprimento_km,
+    campo_VEHKMTRAVPRT = vehkmtravprt,
+    conferencia     = volvehprt * comprimento_km
+  ) |>
+  knitr::kable(digits = 3)
+```
+
+The field is called `VEHKMTRAVPRT`, "vehicle-kilometres travelled". It should be
+2,179 × 0.135 = **294**. It is **294,290**. It is in **metres**, not kilometres.
+
+The same goes for time: `VEHHOURTRAVTCUR`, "vehicle-hours", is in **seconds**. And
+`VOLCAPRATIOPRT` is a **percentage**, not a ratio.
+
+The extract already has the corrected columns (`veic_km`, `veic_h_livre`, `veic_h_carreg`, `vc`:
+vehicle-km, vehicle-hours in free flow and loaded, and the v/c ratio),
+but the habit that matters is checking: **recompute the indicator by an independent
+route and see whether it matches.**
+
+```{r}
+links |>
+  dplyr::summarise(
+    soma_do_campo = sum(veic_km, na.rm = TRUE),
+    recalculado   = sum(volvehprt * comprimento_km, na.rm = TRUE),
+    diferenca_pct = round(100 * (recalculado / soma_do_campo - 1), 3)
+  ) |>
+  knitr::kable(digits = 3, format.args = list(big.mark = ","))
+```
+
+::: {.callout-important}
+## The error that throws no error
+
+If you add up `VEHKMTRAVPRT` trusting its name, you get 3.7 **billion** vehicle-kilometres
+in a metropolitan region of 3 million inhabitants. The code runs, the chart looks nice, and
+the number is a thousand times wrong. No warning message appears. The only defence is
+checking by an independent route.
+:::
+
+## Step 4: The network totals
+
+```{r}
+totais <- links |>
+  dplyr::summarise(
+    veic_km         = sum(veic_km, na.rm = TRUE),
+    veic_h_livre    = sum(veic_h_livre, na.rm = TRUE),
+    veic_h_carreg   = sum(veic_h_carreg, na.rm = TRUE),
+    atraso_veic_h   = sum(atraso_veic_h, na.rm = TRUE),
+    vel_media_kmh   = sum(veic_km, na.rm = TRUE) / sum(veic_h_carreg, na.rm = TRUE),
+    vel_livre_kmh   = sum(veic_km, na.rm = TRUE) / sum(veic_h_livre, na.rm = TRUE),
+    links_saturados = sum(vc >= 1, na.rm = TRUE)
+  )
+
+totais |>
+  dplyr::mutate(dplyr::across(dplyr::everything(), ~ round(.x, 1))) |>
+  knitr::kable(format.args = list(big.mark = ","))
+```
+
+Keep these numbers: **3,676,335 vehicle-kilometres** and **108,403 vehicle-hours of delay**
+(`atraso`) in the peak hour. After any filter or `join`, check against them. It is the same principle
+as in @sec-m1-joins: the known total is your anchor.
+
+## Step 5: Where the delay is (and why the total is misleading)
+
+Now the question the technical note really asks. Let us classify the roads by the tens digit of the
+model's type code (motorway and expressway, arterial, collector, local, local access and
+connector, no loading):
+
+```{r}
+classes <- links |>
+  dplyr::mutate(
+    classe = dplyr::case_when(
+      typeno %/% 10 == 1            ~ "1. Rodovia e via expressa",
+      typeno %/% 10 %in% c(2, 3)    ~ "2. Arterial",
+      typeno %/% 10 == 4            ~ "3. Coletora",
+      typeno %/% 10 %in% c(5, 6)    ~ "4. Local",
+      typeno %/% 10 == 7            ~ "5. Acesso local e conector",
+      .default                      = "6. Sem carregamento"
+    )
+  ) |>
+  dplyr::summarise(
+    links       = dplyr::n(),
+    extensao_km = sum(comprimento_km, na.rm = TRUE),
+    veic_km     = sum(veic_km, na.rm = TRUE),
+    atraso_h    = sum(atraso_veic_h, na.rm = TRUE),
+    .by = classe
+  ) |>
+  dplyr::mutate(
+    pct_veic_km = 100 * veic_km / sum(veic_km),
+    pct_atraso  = 100 * atraso_h / sum(atraso_h)
+  ) |>
+  dplyr::arrange(classe)
+
+classes |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+```
+
+The result is uncomfortable and it is the point of the chapter: the **"local access and
+connector"** category accounts for about 11% of vehicle-kilometres and for **76% of all the network's
+delay**. These are access links with volume/capacity ratios of 7, 8, 11.
+
+This is not real congestion. It is a **modelling artefact**: the connector is the seam through
+which a zone's demand enters the network, and it does not represent a road with physical capacity.
+
+```{r}
+links |>
+  dplyr::filter(!is.na(atraso_veic_h)) |>
+  dplyr::slice_max(atraso_veic_h, n = 8) |>
+  dplyr::transmute(no, name, typeno, volvehprt, vc = round(vc, 1),
+                   atraso_h = round(atraso_veic_h)) |>
+  knitr::kable()
+```
+
+Notice that the worst cases have no road name. They are exactly the connectors.
+
+::: {.callout-important}
+## The indicator you publish changes with what you include
+
+Reporting "108 thousand hours of delay in the peak hour" without qualification is reporting, three quarters of it,
+a model artefact. Restricting to the real network (motorways, arterials and collectors), the delay
+drops to about **15.6 thousand vehicle-hours**.
+
+Both calculations are "right" in the sense that the code ran. Only one of them can be
+defended in a meeting.
+:::
+
+```{r}
+#| fig-height: 4
+#| fig-cap: "Share of each road class in vehicle-kilometres and in total delay."
+classes |>
+  tidyr::pivot_longer(c(pct_veic_km, pct_atraso),
+                      names_to = "indicador", values_to = "pct") |>
+  dplyr::mutate(indicador = dplyr::recode(indicador,
+                                          pct_veic_km = "Vehicle-km",
+                                          pct_atraso  = "Delay")) |>
+  ggplot2::ggplot(ggplot2::aes(x = pct, y = forcats::fct_rev(classe), fill = indicador)) +
+  ggplot2::geom_col(position = "dodge") +
+  ggplot2::scale_x_continuous(labels = scales::label_percent(scale = 1)) +
+  ggplot2::scale_fill_manual(values = c("Vehicle-km" = "#1a5b8a", "Delay" = "#c2542d")) +
+  ggplot2::labs(x = NULL, y = NULL, fill = NULL,
+                title = "Where the network carries traffic and where it loses time",
+                subtitle = "Curitiba region, morning peak hour, 2018 model")
+```
+
+## Step 6: The defensible subset
+
+```{r}
+rede_real <- links |> dplyr::filter(typeno < 50)
+
+rede_real |>
+  dplyr::summarise(
+    links         = dplyr::n(),
+    extensao_km   = round(sum(comprimento_km, na.rm = TRUE)),
+    veic_km       = round(sum(veic_km, na.rm = TRUE)),
+    atraso_veic_h = round(sum(atraso_veic_h, na.rm = TRUE)),
+    vel_media_kmh = round(sum(veic_km, na.rm = TRUE) / sum(veic_h_carreg, na.rm = TRUE), 1),
+    saturados     = sum(vc >= 1, na.rm = TRUE)
+  ) |>
+  knitr::kable(format.args = list(big.mark = ","))
+```
+
+Average speed of 45.8 km/h on the structural network, against 20.9 km/h for the total. The whole
+difference comes from deciding, deliberately, what goes into the calculation. **That decision is the analysis.**
+
+## Checking checklist
+
+This is the habit the course wants to build, and it comes back in every module:
+
+::: {.callout-tip}
+## Before publishing any number that comes out of a model
+
+1. **Unit of observation.** How many rows per physical object? Count `distinct` on the key
+   you believe is unique.
+2. **Units of measurement.** Recompute at least one indicator by an independent route and
+   compare. Never trust the field name.
+3. **Sentinels.** Look for absurd values (`360000000`, `-1`, `9999`) before computing
+   averages.
+4. **Anchor totals.** Record the totals of the full dataset and check against them after
+   each filter and each `join`.
+5. **What goes into the calculation.** Separate the real network from modelling artefacts, and state that
+   choice in the report.
+:::
+
+## What comes next
+
+This same dataset runs through the rest of the course:
+
+| Module | What we will do with it |
+|:--|:--|
+| @sec-m2 | Read the spatial layer, reproject, check the computed length against the stored one, map loading and saturation |
+| @sec-m3 | Compare the model with the 25 field counts, treat the network as a graph |
+| Module 4 | Combine the stops and BRT corridors with accessibility |
+| Module 5 | Produce a parameterised report, one per municipality in the region |
+
+::: {.callout-note}
+## About the source of the data
+
+The extract used here was processed from a PTV VISUM export shared for teaching
+purposes. The script that produces the extract from the original files is in
+`scripts/00-gera-recorte-modelo4etapas.R`, and the field dictionary in
+`dados/processados/modelo4etapas/`. See [Example data](a-dados.qmd).
+:::

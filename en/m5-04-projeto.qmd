@@ -1,0 +1,615 @@
+# Final project {#sec-m5-projeto}
+
+The final project is an **HTML accessibility report**, made in Quarto, for one of five
+cities: **Belo Horizonte, Fortaleza, Porto Alegre, Rio de Janeiro or São Paulo**. It brings together what
+was seen in the course: public data, spatial operations, routing with `r5r`,
+accessibility measures and interactive maps with `mapgl`.
+
+You choose the city, run the multimodal routing chapter (@sec-m4-r5r) with its data and
+build the report with the blocks on this page. The page's example is Fortaleza, the same city as in the
+chapter; for the other four, only what is indicated at each step changes.
+
+There is no submission or grading: the project is yours. The idea is that you finish the course with a
+document that could, with small adjustments, become a product of the Undersecretariat, and with a workflow
+that works for any city with open GTFS.
+
+## The question
+
+**How much does cutting the bus routes with the least service reduce access to jobs in the city, and
+who loses most?**
+
+The scenario is the same in all five cities: remove from the network the quarter of the routes with the fewest trips in the
+GTFS. With the same question and the same method, reports from different cities can be
+compared with one another.
+
+## The steps
+
+```{mermaid}
+flowchart LR
+  A["<b>1. Data</b><br/>city package:<br/>GTFS, OpenStreetMap<br/>and land use (aopdata)"]
+  B["<b>2. Routing</b><br/>r5r chapter:<br/>isochrones, itinerary,<br/>matrices and scenario"]
+  C["<b>3. Report</b><br/>blocks on this page:<br/>relatorio.qmd → HTML"]
+  A -- "dados/brutos/projeto_final/{cidade}/" --> B
+  B -- "dados/projeto_final/" --> C
+```
+
+| Step | What to do | Where | Result |
+|:--|:--|:--|:--|
+| 1. Data | download and extract the city package | below | `dados/brutos/projeto_final/{cidade}/` |
+| 2. Routing | run `scripts/m4-05-r5r.R` with the city's lines | @sec-m4-r5r | `dados/projeto_final/*.rds` |
+| 3. Report | stack the blocks in a `relatorio.qmd` and render | this page | `relatorio.html` |
+
+## Step 1: the city's data
+
+Each city has a `.7z` package, in the [`dados-modulo5` Release](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5) of the course repository, with everything routing needs, already checked in `r5r`. Download only the one for the city you choose (the links are in the table below):
+
+- **`{cidade}.osm.pbf`**: the OpenStreetMap road network, cut from Geofabrik's regional extract
+  around the urban area (the populated hexagons, with a 10 km margin);
+- **`gtfs_{cidade}.zip`**: the public transport GTFS, in a single file;
+- **`aop_{cidade}.rds`**: `aopdata`'s hexagonal grid (Ipea), with population, jobs and income
+  of each hexagon;
+- **`LEIA-ME.txt`** (README, in Portuguese): the sources, the GTFS validity, the recommended departure date and
+  notes on the data.
+
+| City | Package | Populated hexagons | GTFS | Watch out |
+|:--|:--|--:|:--|:--|
+| Belo Horizonte | [`belo_horizonte.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/belo_horizonte.7z) (44 MB) | 2,548 | SUMOB, conventional and supplementary, until 31/12/2026 | no metro |
+| Fortaleza | [`fortaleza.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/fortaleza.7z) (62 MB) | 2,185 | Etufor, from 03/04 to 03/07/2026 | only has trips on **Saturdays and Sundays** |
+| Porto Alegre | [`porto_alegre.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/porto_alegre.7z) (40 MB) | 3,216 | EPTC, from 12/09 to 12/12/2025 | **expired** GTFS: use the October 2025 date; no Trensurb |
+| Rio de Janeiro | [`rio_de_janeiro.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/rio_de_janeiro.7z) (59 MB) | 6,392 | SMTR, bus and BRT, until 2027 | no metro, trains, light rail or ferries; trips only from 5:00 to 11:00 |
+| São Paulo | [`sao_paulo.7z`](https://github.com/Joaobazzo/curso-r-transportes/releases/download/dados-modulo5/sao_paulo.7z) (175 MB) | 9,704 | SPTrans, with metro and CPTM, until 2027 | the heaviest network; trips only from 5:00 to 11:00 |
+
+To prepare the data:
+
+1. **Download the package** for your city, clicking on the file name in the table above or in the
+   *Assets* list on the
+   [Release](https://github.com/Joaobazzo/curso-r-transportes/releases/tag/dados-modulo5) page.
+2. **Create the `projeto_final/` folder inside `dados/brutos/`**, in the course project folder
+   (the one with the `curso-r-transportes.Rproj` file). The path becomes `dados/brutos/projeto_final/`.
+3. **Move the `.7z` into that folder and extract it there.** On Windows, use
+   [7-Zip](https://www.7-zip.org/): right-click on the file, *7-Zip* → *Extract
+   here*. The package already contains the city folder, and the result looks like this (with Porto Alegre):
+
+```
+dados/brutos/projeto_final/porto_alegre/
+├── aop_porto_alegre.rds
+├── gtfs_porto_alegre.zip
+├── LEIA-ME.txt
+└── porto_alegre.osm.pbf
+```
+
+Do not unzip `gtfs_{cidade}.zip`: `r5r` reads the GTFS compressed.
+
+The packages were built by `R/preparar_projeto_final.R`, which downloads the same data from the original
+sources (Geofabrik, Mobility Database and `aopdata`) and processes the GTFS: the frequency-based timetables of
+São Paulo and Rio were turned into fixed times, Belo Horizonte's two GTFS feeds were merged, and the
+zero-duration trips, which `r5r` would treat as teleportation, were removed. The `LEIA-ME.txt`
+says what was done for each city.
+
+## Step 2: routing
+
+The multimodal routing chapter (@sec-m4-r5r) does the whole calculation and saves each result in
+`dados/projeto_final/`. It is written for Fortaleza; for another city, open
+`scripts/m4-05-r5r.R` and replace the lines below, which are also in the package's `LEIA-ME.txt`.
+
+::: {.panel-tabset}
+
+## Fortaleza
+
+```r
+arquivo   <- "dados/brutos/projeto_final/fortaleza/aop_fortaleza.rds"
+pasta     <- "dados/brutos/projeto_final/fortaleza"
+partida   <- as.POSIXct("2026-05-16 07:00:00", tz = "America/Fortaleza")   # a Saturday
+centro    <- data.frame(id = "centro", lon = -38.5267, lat = -3.7275)     # Praça do Ferreira
+messejana <- data.frame(id = "bairro", lon = -38.4920, lat = -3.8300)     # Messejana
+```
+
+## Belo Horizonte
+
+```r
+arquivo   <- "dados/brutos/projeto_final/belo_horizonte/aop_belo_horizonte.rds"
+pasta     <- "dados/brutos/projeto_final/belo_horizonte"
+partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
+centro    <- data.frame(id = "centro", lon = -43.9378, lat = -19.9191)    # Praça Sete
+messejana <- data.frame(id = "bairro", lon = -43.9580, lat = -19.8160)    # Venda Nova
+```
+
+## Porto Alegre
+
+```r
+arquivo   <- "dados/brutos/projeto_final/porto_alegre/aop_porto_alegre.rds"
+pasta     <- "dados/brutos/projeto_final/porto_alegre"
+partida   <- as.POSIXct("2025-10-22 07:00:00", tz = "America/Sao_Paulo")   # within the GTFS
+centro    <- data.frame(id = "centro", lon = -51.2276, lat = -30.0277)    # Mercado Público
+messejana <- data.frame(id = "bairro", lon = -51.1530, lat = -30.1480)    # Restinga
+```
+
+## Rio de Janeiro
+
+```r
+arquivo   <- "dados/brutos/projeto_final/rio_de_janeiro/aop_rio_de_janeiro.rds"
+pasta     <- "dados/brutos/projeto_final/rio_de_janeiro"
+partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
+centro    <- data.frame(id = "centro", lon = -43.1910, lat = -22.9035)    # Central do Brasil
+messejana <- data.frame(id = "bairro", lon = -43.3384, lat = -22.8735)    # Madureira
+```
+
+## São Paulo
+
+```r
+arquivo   <- "dados/brutos/projeto_final/sao_paulo/aop_sao_paulo.rds"
+pasta     <- "dados/brutos/projeto_final/sao_paulo"
+partida   <- as.POSIXct("2026-05-13 07:00:00", tz = "America/Sao_Paulo")
+centro    <- data.frame(id = "centro", lon = -46.6340, lat = -23.5504)    # Praça da Sé
+messejana <- data.frame(id = "bairro", lon = -46.4020, lat = -23.5830)    # Cidade Tiradentes
+```
+
+:::
+
+Besides these lines:
+
+- wherever `"gtfs_fortaleza.zip"` appears, use your city's GTFS (`"gtfs_porto_alegre.zip"`, for
+  example);
+- wherever `dados/brutos/fortaleza_cenario` appears, use `dados/brutos/{cidade}_cenario`;
+- JVM memory: `-Xmx2G` is enough for Fortaleza; for the other cities, set aside more. The
+  tests of all five ran with 8 GB (`options(java.parameters = "-Xmx8G")`, before loading
+  `r5r`), and São Paulo, the largest network, needs it.
+
+The object is called `messejana` in the chapter; in the other cities it holds another neighbourhood, but the name
+can stay, so you do not have to change the rest of the code. The full calculation, with both matrices,
+takes from 3 minutes (Fortaleza) to about 20 minutes (São Paulo).
+
+At the end, the `dados/projeto_final/` folder should have these files:
+
+```{r}
+list.files("dados/projeto_final")
+```
+
+::: {.callout-warning}
+## One city at a time
+
+The `dados/projeto_final/` folder holds the results of **one** city: running the chapter for
+another overwrites the files. To do two cities, copy the folder before running the second.
+:::
+
+## Step 3: the report
+
+1. **Create the `relatorio.qmd` file in the root of the course project**, the same folder that contains
+   the `dados/` folder. The report's paths are relative to it.
+
+2. **Copy the blocks below, in order**, pasting each one at the end of `relatorio.qmd`. The text
+   blocks (those starting with `##`) are a starting point: rewrite them in your own words,
+   with your city's name and with the numbers your result shows.
+
+3. **Change the city in the setup block**: `cidade <- "fortaleza"` becomes the name of your city's
+   folder (`"belo_horizonte"`, `"porto_alegre"`, `"rio_de_janeiro"` or `"sao_paulo"`). The
+   other code blocks do not change.
+
+4. **Render** with RStudio's *Render* button or, in the terminal, `quarto render relatorio.qmd`.
+   Render every two or three blocks: an error is much easier to find right after
+   pasting the block that caused it.
+
+## The report, block by block
+
+### Header
+
+The header goes at the top of the file; replace Fortaleza with your city in the title and in the paragraph.
+`embed-resources: true` puts the maps, styles and data
+inside the HTML itself, and the report works when opened on any computer, including when sent
+by e-mail.
+
+```markdown
+---
+title: "Access to jobs in Fortaleza"
+subtitle: "The effect of cutting the bus routes with the least service"
+author: "Your name"
+date: today
+lang: en
+format:
+  html:
+    embed-resources: true
+    toc: true
+execute:
+  warning: false
+  message: false
+---
+
+This report estimates how many jobs each resident of Fortaleza can reach within 60 minutes
+by public transport, today and in a scenario without the quarter of bus routes with the fewest trips,
+and shows who loses most from the cut.
+```
+
+### Setup
+
+The first code block chooses the city, loads the data and defines the two functions every
+map uses. It is the only code block in which you change anything. It produces nothing
+visible.
+
+```{r}
+#| echo: fenced
+#| label: setup
+library(sf)
+library(ggplot2)
+
+# the city package folder: "belo_horizonte", "fortaleza", "porto_alegre",
+# "rio_de_janeiro" or "sao_paulo"
+cidade <- "fortaleza"
+brutos <- file.path("dados/brutos/projeto_final", cidade)
+
+pasta <- "dados/projeto_final"
+
+# results of the multimodal routing chapter
+comparacao <- readRDS(file.path(pasta, "comparacao.rds"))
+cortadas   <- readRDS(file.path(pasta, "linhas_cortadas.rds"))
+
+# aopdata's hexagonal grid, with the accessibility results for each hexagon
+acesso <- readRDS(file.path(brutos, paste0("aop_", cidade, ".rds"))) |>
+  dplyr::filter(P001 > 0) |>
+  dplyr::select(id_hex) |>
+  sf::st_transform(4326) |>
+  dplyr::left_join(comparacao, by = c("id_hex" = "id"))
+
+# empty map, framed on the data
+mapa_base <- function(dados) {
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados, height = "525px")
+}
+
+# adds to the map a layer of hexagons coloured by a column, with a legend.
+# Pass the same range to two layers that must be compared on the same scale
+camada_hex <- function(mapa, dados, coluna, titulo, cores = c("#F7F6F2", "#E7A07A", "#7A1F0F"),
+                       faixa = range(dados[[coluna]], na.rm = TRUE), visivel = TRUE) {
+  valores <- seq(faixa[1], faixa[2], length.out = length(cores))
+
+  mapa |>
+    mapgl::add_fill_layer(
+      id = titulo, source = dados,
+      fill_color = mapgl::interpolate(column = coluna, values = valores, stops = cores),
+      fill_opacity = 0.75, tooltip = coluna,
+      visibility = if (visivel) "visible" else "none"
+    ) |>
+    mapgl::add_legend(titulo, values = round(faixa), colors = cores,
+                      layer_id = titulo, add = TRUE)
+}
+```
+
+### Data and method
+
+```markdown
+## Data and method
+
+- **Road network:** OpenStreetMap, Fortaleza extract from Geofabrik.
+- **Public transport:** Etufor GTFS, valid from April to July 2026.
+- **Population, jobs and income:** `aopdata` (Ipea), H3 hexagonal grid, 2019 data.
+- **Routing:** `r5r`, departure on a Saturday at 7:00, 60-minute window, median of the times,
+  up to 20 minutes of walking at each end.
+- **Indicator:** jobs accessible within 60 minutes (cumulative measure).
+```
+
+The sources, the GTFS validity and the departure date for your city are in the package's `LEIA-ME.txt`;
+the day of the week also changes: Fortaleza is the only one with a Saturday.
+
+### The public transport network
+
+```markdown
+## The public transport network
+
+Each point is a stop; its size is the number of trips that pass through it in the GTFS.
+```
+
+```{r}
+#| echo: fenced
+gtfs <- gtfstools::read_gtfs(file.path(brutos, paste0("gtfs_", cidade, ".zip")))
+
+paradas <- gtfstools::convert_stops_to_sf(gtfs) |>
+  dplyr::left_join(dplyr::count(gtfs$stop_times, stop_id, name = "viagens"), by = "stop_id")
+
+mapa_base(paradas) |>
+  mapgl::add_circle_layer(
+    id = "paradas", source = paradas,
+    circle_radius = mapgl::interpolate(column = "viagens", values = c(0, 1000), stops = c(1.5, 10)),
+    circle_color = "#2F6B9A", circle_opacity = 0.7, tooltip = "viagens"
+  )
+```
+
+### Where people live and where the jobs are
+
+```markdown
+## Where people live and where the jobs are
+
+Switch the layer in the selector in the top-right corner.
+```
+
+```{r}
+#| echo: fenced
+mapa_base(acesso) |>
+  camada_hex(acesso, "populacao", "Population") |>
+  camada_hex(acesso, "empregos", "Jobs", cores = c("#F7F6F2", "#7FA7C9", "#173A57"),
+             visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+```
+
+### How far you get from the Centre
+
+```markdown
+## How far you get from the Centre
+
+Areas reachable from Praça do Ferreira in 15, 30, 45 and 60 minutes.
+```
+
+```{r}
+#| echo: fenced
+isocronas <- readRDS(file.path(pasta, "isocronas.rds")) |>
+  dplyr::arrange(dplyr::desc(isochrone))          # the smaller bands on top
+
+cores_iso <- c("#173A57", "#2F6B9A", "#A9C4DA", "#F6DCCB")
+
+mapa_base(isocronas) |>
+  mapgl::add_fill_layer(
+    id = "isocronas", source = isocronas,
+    fill_color = mapgl::match_expr("isochrone", values = c(15, 30, 45, 60), stops = cores_iso),
+    fill_opacity = 0.6, tooltip = "isochrone"
+  ) |>
+  mapgl::add_legend("Minutes from the Centre", values = c(15, 30, 45, 60),
+                    colors = cores_iso, type = "categorical")
+```
+
+### An example trip
+
+```markdown
+## An example trip
+
+The fastest option from Messejana to the Centre, leg by leg.
+```
+
+```{r}
+#| echo: fenced
+itinerario <- readRDS(file.path(pasta, "itinerario.rds")) |>
+  dplyr::filter(option == 1)
+
+modos <- unique(itinerario$mode)
+cores_modo <- c(WALK = "#7A7A7A", BUS = "#2F6B9A", RAIL = "#C2542D", SUBWAY = "#7A1F0F",
+                TRAM = "#E7A07A")[modos]
+
+mapa_base(itinerario) |>
+  mapgl::add_line_layer(
+    id = "itinerario", source = itinerario,
+    line_color = mapgl::match_expr("mode", values = modos, stops = unname(cores_modo)),
+    line_width = 5, tooltip = "route"
+  ) |>
+  mapgl::add_legend("Mode", values = modos, colors = unname(cores_modo), type = "categorical")
+```
+
+### Access to jobs today
+
+```markdown
+## Access to jobs today
+
+How many jobs can be reached within 60 minutes by public transport, from each hexagon.
+```
+
+```{r}
+#| echo: fenced
+cores_acesso <- c("#F6DCCB", "#2F6B9A", "#173A57")
+faixa_acesso <- range(c(acesso$atual, acesso$cenario), na.rm = TRUE)
+
+mapa_base(acesso) |>
+  camada_hex(acesso, "atual", "Jobs within 60 min", cores = cores_acesso,
+             faixa = faixa_acesso)
+```
+
+### The scenario
+
+```markdown
+## The scenario: without the routes with the least service
+
+The scenario removes `r length(cortadas)` routes, the quarter of them with the fewest trips in the GTFS. The two
+layers use the same colour scale; switch between them in the selector.
+```
+
+```{r}
+#| echo: fenced
+mapa_base(acesso) |>
+  camada_hex(acesso, "atual", "Current", cores = cores_acesso, faixa = faixa_acesso) |>
+  camada_hex(acesso, "cenario", "Scenario", cores = cores_acesso, faixa = faixa_acesso,
+             visivel = FALSE) |>
+  mapgl::add_layers_control(position = "top-right", collapsible = FALSE, mode = "single")
+```
+
+### Who loses access
+
+```markdown
+## Who loses access
+
+Change in accessible jobs with the cut: red where access is lost, blue where it is gained.
+```
+
+```{r}
+#| echo: fenced
+limite <- max(abs(acesso$perda_abs), na.rm = TRUE)
+cores_dif <- c("#C2542D", "#F7F6F2", "#2F6B9A")
+
+mapa_base(acesso) |>
+  mapgl::add_fill_layer(
+    id = "variacao", source = acesso,
+    fill_color = mapgl::interpolate(column = "perda_abs", values = c(-limite, 0, limite),
+                                    stops = cores_dif),
+    fill_opacity = 0.8, tooltip = "perda_abs"
+  ) |>
+  mapgl::add_legend("Change in accessible jobs", values = round(c(-limite, 0, limite)),
+                    colors = cores_dif)
+```
+
+### Who loses most
+
+```markdown
+## Who loses most
+
+The average change for each income quintile, weighted by population (1 = the poorest 20%).
+```
+
+```{r}
+#| echo: fenced
+por_renda <- comparacao |>
+  dplyr::filter(!is.na(renda)) |>
+  dplyr::summarise(
+    pessoas = sum(populacao),
+    variacao_pct = weighted.mean(perda_pct, populacao, na.rm = TRUE),
+    .by = renda
+  ) |>
+  dplyr::arrange(renda)
+
+knitr::kable(por_renda, digits = 1, format.args = list(big.mark = ","),
+             col.names = c("Income quintile", "People", "Average change (%)"))
+
+ggplot(por_renda, aes(factor(renda), variacao_pct)) +
+  geom_col(fill = "#C2542D") +
+  labs(x = "Income quintile (1 = poorest)",
+       y = "Average change in accessible jobs (%)") +
+  theme_minimal()
+```
+
+### Road network loading
+
+```markdown
+## Road network loading
+
+The segments most used by car trips between the most populous areas and those with the most
+jobs; the width is the flow.
+```
+
+```{r}
+#| echo: fenced
+carga <- readRDS(file.path(pasta, "carga.rds")) |>
+  sf::st_transform(4326) |>
+  dplyr::arrange(fluxo)                          # the most loaded segments on top
+
+mapa_base(carga) |>
+  mapgl::add_line_layer(
+    id = "carga", source = carga, line_color = "#1a5b8a", line_opacity = 0.8,
+    line_width = mapgl::interpolate(column = "fluxo", values = range(carga$fluxo),
+                                    stops = c(0.5, 8)),
+    tooltip = "fluxo"
+  )
+```
+
+### Conclusions, limitations and annex
+
+The end of the report is your own text: what the result shows, and what it cannot show. The
+limitations below are Fortaleza's. For your city, replace the first with the notes in the
+`LEIA-ME.txt` (what is missing from the network, the GTFS period) and add any you find.
+
+```markdown
+## Conclusions
+
+(Who is affected, by how much, and what this implies for the decision.)
+
+## Limitations
+
+- The GTFS only has weekend trips: the result holds for a Saturday morning, not for the
+  peak of a weekday.
+- Population, jobs and income are from 2019; the transport network is from 2026.
+- The loading considers only cars and a small set of origin–destination pairs, with
+  hypothetical flows.
+
+## Annex: execution environment
+```
+
+```{r}
+#| echo: fenced
+sessionInfo()
+```
+
+## How to tell whether it came out well
+
+| Criterion | What is expected |
+|:--|:--|
+| Reproducibility | someone else runs `scripts/m4-05-r5r.R` and the report from scratch and gets the same result |
+| Technical correctness | a departure date with trips in the GTFS, routing parameters stated |
+| Clarity of communication | maps with legends, a diverging palette for the difference, short text in each section |
+| Interpretation | the text says what the result means, not what the code does |
+| Limitations | the weaknesses are made explicit, not hidden |
+
+With the package data and the step 2 parameters, `r5r` always gives the same result. The
+numbers below came from the report run from scratch in all five cities (`r5r` 2.4.0); if yours
+are very different, check the departure date and the GTFS:
+
+| City | Routes cut | Change in quintile 1 (poorest) | Change in quintile 5 (richest) | Trip from the neighbourhood to the centre |
+|:--|--:|--:|--:|:--|
+| Belo Horizonte | 83 of 328 | −4.9% | −1.0% | Venda Nova → Praça Sete, 57 min |
+| Fortaleza | 70 of 325 | −7.1% | −3.0% | Messejana → Praça do Ferreira, 53 min |
+| Porto Alegre | 75 of 300 | −3.3% | −0.2% | Restinga → Mercado Público, 93 min |
+| Rio de Janeiro | 112 of 422 | −4.5% | −4.4% | Madureira → Central do Brasil, 72 min |
+| São Paulo | 297 of 1,184 | −6.2% | −3.7% | Cidade Tiradentes → Praça da Sé, 115 min |
+
+## Going further
+
+- **Another time cut-off:** 30 minutes instead of 60, in the `cutoff` of the multimodal routing chapter.
+- **Another opportunity:** schools or health services, which `aopdata` also has.
+- **Another scenario:** instead of cutting routes, increase the frequency of the trunk routes with
+  `gtfstools`, and measure the gain.
+- **Compare cities:** run two cities (copying `dados/projeto_final/` between one and the other) and
+  put the income tables side by side. Where does the cut weigh most on the poorest?
+- **A sixth city:** `R/preparar_projeto_final.R` builds the package for any city in
+  `aopdata` with a GTFS in the Mobility Database. First, check that the GTFS timetables are complete:
+  Curitiba was left out because its trips have no times along the route.
+
+`mapgl` also has `compare()`, which puts two maps side by side with a swipe curtain. But it
+loads a component from the internet that prevents the HTML from coming out as a single file, which is why the
+report uses switchable layers.
+
+::: {.callout-tip}
+## Questions
+
+Open an *issue* in the course repository, with the code and the full error message. Questions
+on record help the whole class.
+:::
+
+## Results
+
+::: {.callout-note}
+## Published one week after the final project
+
+The files in this section were released one week after the final project was due, so that
+you can check your work, see what another city's report would look like or run all five.
+:::
+
+For each city there are two files (in Portuguese, like the original course):
+
+- **the routing** (`roteamento_{cidade}.R`): the whole calculation of the multimodal routing
+  chapter, with the city's parameters already filled in. It reads the city package and writes the
+  intermediate results (isochrones, itinerary, compared matrices, loading) to
+  `dados/projeto_final/{cidade}/`;
+- **the report** (`relatorio_{cidade}.qmd`): the final report, with all the blocks on this page
+  and the city's text, including the limitations and a first conclusion, written from the
+  numbers.
+
+| City | Routing | Report | Run time |
+|:--|:--|:--|:--|
+| Belo Horizonte | [`roteamento_belo_horizonte.R`](../recursos/projeto_final/roteamento_belo_horizonte.R){download="roteamento_belo_horizonte.R"} | [`relatorio_belo_horizonte.qmd`](../recursos/projeto_final/relatorio_belo_horizonte.qmd){download="relatorio_belo_horizonte.qmd"} | about 6 min |
+| Fortaleza | [`roteamento_fortaleza.R`](../recursos/projeto_final/roteamento_fortaleza.R){download="roteamento_fortaleza.R"} | [`relatorio_fortaleza.qmd`](../recursos/projeto_final/relatorio_fortaleza.qmd){download="relatorio_fortaleza.qmd"} | about 3 min |
+| Porto Alegre | [`roteamento_porto_alegre.R`](../recursos/projeto_final/roteamento_porto_alegre.R){download="roteamento_porto_alegre.R"} | [`relatorio_porto_alegre.qmd`](../recursos/projeto_final/relatorio_porto_alegre.qmd){download="relatorio_porto_alegre.qmd"} | about 5 min |
+| Rio de Janeiro | [`roteamento_rio_de_janeiro.R`](../recursos/projeto_final/roteamento_rio_de_janeiro.R){download="roteamento_rio_de_janeiro.R"} | [`relatorio_rio_de_janeiro.qmd`](../recursos/projeto_final/relatorio_rio_de_janeiro.qmd){download="relatorio_rio_de_janeiro.qmd"} | about 10 min |
+| São Paulo | [`roteamento_sao_paulo.R`](../recursos/projeto_final/roteamento_sao_paulo.R){download="roteamento_sao_paulo.R"} | [`relatorio_sao_paulo.qmd`](../recursos/projeto_final/relatorio_sao_paulo.qmd){download="relatorio_sao_paulo.qmd"} | about 20 min |
+
+Or download all ten at once:
+[`projeto_final_resultados.zip`](../recursos/projeto_final/projeto_final_resultados.zip).
+
+To run a city:
+
+1. **The data:** extract the city's `.7z` package into `dados/brutos/projeto_final/`, as in
+   step 1.
+2. **The files:** save `roteamento_{cidade}.R` and `relatorio_{cidade}.qmd` in the **root of the
+   course project**, the folder that contains `dados/`.
+3. **The routing:** open `roteamento_{cidade}.R` in RStudio and click *Source*. At the end, it
+   reports how many files it wrote to `dados/projeto_final/{cidade}/`. Each city has its own
+   subfolder: running one does not delete the results of another, nor those of step 2.
+4. **The report:** open `relatorio_{cidade}.qmd` and click *Render*. The HTML comes out next to it,
+   in a single file, with the maps embedded.
+
+The numbers should match those in the table in the "How to tell whether it came out well" section, above: with the same
+data and parameters, `r5r` always gives the same result. The report needs the same as
+yours: Java 21 for the routing and the module 5 packages.
+
+The ten files come from two templates, one for the routing and another for the report. They are
+filled in with each city's parameters by `R/gerar_resultados_projeto_final.R`, in the
+course repository.

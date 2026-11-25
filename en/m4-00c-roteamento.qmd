@@ -1,0 +1,305 @@
+# Car routing with `dodgr` {#sec-m4-roteamento}
+
+Routing is computing the path and the cost (distance, time) between pairs of points over a
+network. It is what replaces module 2's straight-line distance with something that matches
+actual travel.
+
+There are two quite different routing problems, and each has its own tool:
+
+| | Car and freight | Public transport |
+|:--|:--|:--|
+| What is travelled | the road network | the road network **and** the routes, with timetables |
+| Does the time depend on the departure time? | no, as a first approximation | yes, a lot: it depends on when the bus comes |
+| Input | `sf` lines (e.g. OSM, @sec-m4-osm) | OSM `.pbf` + GTFS |
+| Package in this course | `dodgr`: C++ inside R, straightforward installation | `r5r`: the R5 engine, in Java (JDK 21) |
+| Typical use | road distances, freight, matrices between municipalities | urban accessibility, isochrones, route scenarios |
+
+This chapter deals with cars and freight; public transport is left for module 5
+(@sec-m4-gtfs), and it is the basis of the accessibility calculation.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(dodgr)
+
+# default basemap for mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+## From network to graph
+
+The starting point is the São Paulo–Santos corridor network, the same as in @sec-m4-osm, which comes in the
+module's data package. For a whole state, replace the query with
+`osmextract::oe_get()`, as there.
+
+```{r}
+arquivo_rede <- "dados/brutos/rede_sao_paulo_santos.gpkg"
+
+if (!file.exists(arquivo_rede)) {
+  # slow download (several minutes): the file usually already comes in the data package
+  osmdata::set_overpass_url("https://overpass.kumi.systems/api/interpreter")
+
+  res <- osmdata::opq(bbox = c(-46.80, -24.02, -46.25, -23.45), timeout = 300) |>
+    osmdata::add_osm_feature(key = "highway", value = c(
+      "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
+      "secondary", "secondary_link")) |>
+    osmdata::osmdata_sf()
+
+  res$osm_lines |>
+    dplyr::select(dplyr::any_of(c("osm_id", "name", "ref", "highway", "maxspeed",
+                                  "oneway", "lanes"))) |>
+    sf::st_write(arquivo_rede, quiet = TRUE)
+}
+
+rede <- sf::st_read(arquivo_rede, quiet = TRUE) |>
+  dplyr::rename(geometry = geom)
+
+nrow(rede)    # road segments, as sf lines
+```
+
+`weight_streetnet()` does the conversion from geometric to topological network that @sec-m4-osm
+showed with the toy example, and gives each edge a weight according to a **profile**:
+
+```{r}
+grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
+
+c(trechos_sf = nrow(rede),
+  arestas    = nrow(grafo),
+  vertices   = nrow(dodgr::dodgr_vertices(grafo)))
+```
+
+The graph has many more edges than the network had lines, for two reasons: each road is cut
+at every node it passes through, and each two-way segment becomes **two** edges, one in each
+direction. It is worth looking at the first rows:
+
+```{r}
+grafo |>
+  as.data.frame() |>
+  dplyr::select(from_id, to_id, highway, d, d_weighted, time, time_weighted, component) |>
+  head(6)
+```
+
+Each row is a directed edge, from `from_id` to `to_id`:
+
+- `d`: length, in metres;
+- `d_weighted`: the length "penalised" by the profile's preference (below). It is what
+  `dodgr` minimises by default when looking for the path;
+- `time` and `time_weighted`: the travel time, in seconds, at the profile's speed;
+- `component`: which connected piece of the network the edge belongs to.
+
+## The weighting profile
+
+The profile says, for each road type, **how much the router likes it** (`value`, from 0 to 1) and
+**how fast you travel on it** (`max_speed`, in km/h):
+
+```{r}
+dodgr::weighting_profiles$weighting_profiles |>
+  dplyr::filter(name == "motorcar",
+                way %in% c("motorway", "trunk", "primary", "secondary", "tertiary",
+                           "residential")) |>
+  dplyr::select(way, value, max_speed)
+```
+
+Two practical consequences:
+
+1. **The speeds are the package's, not Brazil's.** A trunk road at 85 km/h and a primary
+   road at 65 km/h are generic defaults. For a study, adjust the profile with the speed rule
+   you documented in @sec-m4-osm: export the profile to a file, edit it and
+   use it in `weight_streetnet()`.
+2. **The "shortest" path is the one with the lowest `d_weighted`, not the lowest `d`.** A road with
+   `value = 0.5` "weighs" twice its length, so the router avoids it whenever there is a
+   reasonable alternative. That is what makes the car prefer the highway to a neighbourhood street.
+
+```{r}
+#| eval: false
+# export the default profile, edit the speeds and use the edited file
+dodgr::write_dodgr_wt_profile("dados/perfil_dodgr.json")
+# ... edit the JSON ...
+grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway",
+                                 wt_profile_file = "dados/perfil_dodgr.json")
+```
+
+## Connected components
+
+@sec-m4-osm warned that a real network rarely forms a single connected graph. This one forms
+`r length(unique(grafo$component))` pieces:
+
+```{r}
+table(grafo$component) |> sort(decreasing = TRUE) |> head(6)
+```
+
+Component 1 holds practically all the edges. The others are loose stretches: slip roads
+mapped without a connection, roads cut at the edge of the downloaded area. To see where they are:
+
+```{r}
+# each edge has the coordinates of its two ends: just link them
+soltos <- grafo[grafo$component != 1, ]
+
+soltos_sf <- sf::st_sf(
+  componente = factor(soltos$component),
+  geometry = sf::st_sfc(lapply(seq_len(nrow(soltos)), \(i) sf::st_linestring(rbind(
+    c(soltos$from_lon[i], soltos$from_lat[i]),
+    c(soltos$to_lon[i],   soltos$to_lat[i])
+  ))), crs = 4326)
+)
+
+mapview::mapview(soltos_sf, zcol = "componente", lwd = 4, layer.name = "Component")
+```
+
+A point that connects to one of these stretches cannot reach the rest of the network, and the result is `NA` or
+`Inf`. That is why the next step is to keep only the main component:
+
+```{r}
+grafo <- grafo[grafo$component == 1, ]
+```
+
+## Distances and times between points
+
+The origin and destination points can come from anywhere: typed in, from `geocodebr`
+(@sec-m3-geocodificacao), from zone centroids. Here, the centre of São Paulo (Praça da Sé) and
+the centre of Santos, next to the port. The `id` column gives each point a name; `dodgr` uses those
+names in the rows and columns of the matrices.
+
+```{r}
+pontos <- data.frame(id = c("São Paulo", "Santos"),
+                     x  = c(-46.6339, -46.3336),     # longitude
+                     y  = c(-23.5503, -23.9345))     # latitude
+```
+
+Before routing, `dodgr` links each point to the nearest vertex of the network (*snapping*). This
+is automatic and silent, so it is worth checking how far away that link ended up:
+
+```{r}
+verts <- dodgr::dodgr_vertices(grafo)
+idx   <- dodgr::match_points_to_verts(verts, pontos[, c("x", "y")])   # nearest vertex
+
+# the points and the chosen vertices, as sf
+pontos_sf   <- sf::st_as_sf(pontos, coords = c("x", "y"), crs = 4326)
+vertices_sf <- sf::st_as_sf(verts[idx, ], coords = c("x", "y"), crs = 4326)
+
+# distance from each point to its vertex (by_element: 1st with 1st, 2nd with 2nd)
+dist_ligacao <- sf::st_distance(pontos_sf, vertices_sf, by_element = TRUE)
+
+ligacao <- data.frame(
+  ponto   = pontos$id,
+  vertice = verts$id[idx],
+  dist_m  = round(as.numeric(dist_ligacao))
+)
+ligacao
+```
+
+A few dozen or hundred metres is normal. If it comes to kilometres, the point is far from the
+network, and the result will include a "ghost stretch" that does not exist.
+
+Now the matrices. `dodgr_dists()` returns metres; `dodgr_times()`, seconds. The rows and
+columns already come with each point's `id`:
+
+```{r}
+dist_m <- dodgr::dodgr_dists(grafo, from = pontos, to = pontos)
+tempo_s <- dodgr::dodgr_times(grafo, from = pontos, to = pontos)
+
+round(dist_m / 1000, 1)     # km
+round(tempo_s / 60)         # minutes
+```
+
+These are `n × n` matrices: one row per origin, one column per destination. For ten points that is 100
+pairs; for the 645 municipalities of São Paulo state, more than 416 thousand. Keep that sum in mind: it comes back in
+@sec-m3-duckdb.
+
+## The path
+
+The matrix says how much it costs; `dodgr_paths()` says **which way** to go. It returns the sequence of
+vertices of the path, which we turn into a line:
+
+```{r}
+caminho <- dodgr::dodgr_paths(grafo, from = pontos[1, ], to = pontos[2, ])
+
+length(caminho[[1]][[1]])     # how many vertices the path goes through
+
+rota <- verts[match(caminho[[1]][[1]], verts$id), c("x", "y")] |>
+  as.matrix() |>
+  sf::st_linestring() |>
+  sf::st_sfc(crs = 4326)
+```
+
+The visual check, as always: the route should descend the escarpment on one of the two highways, the Anchieta (SP-150) or the Imigrantes (SP-160).
+
+```{r}
+mapview::mapview(rota, color = "#b3402a", lwd = 5, layer.name = "Route") +
+  mapview::mapview(pontos_sf, col.regions = "#1a5b8a", layer.name = "Origin and destination")
+```
+
+## Contracted graph: the same result, faster
+
+Most of the graph's vertices are not intersections: they are intermediate points that only
+draw the road's curve. `dodgr_contract_graph()` removes those vertices and merges the edges.
+The network stays the same, with far fewer edges:
+
+```{r}
+grafo_contraido <- dodgr::dodgr_contract_graph(grafo)
+
+c(arestas_original = nrow(grafo), arestas_contraido = nrow(grafo_contraido))
+
+dist_contraido <- dodgr::dodgr_dists(grafo_contraido, from = pontos, to = pontos)
+
+# full graph x contracted graph, in km
+cbind(completo  = round(dist_m["São Paulo", "Santos"] / 1000, 1),
+      contraido = round(dist_contraido["São Paulo", "Santos"] / 1000, 1))
+```
+
+The distance changed slightly, and the network did not. What changed was the **linking of the points**: in the
+contracted graph only intersection vertices remain, so each point links to an intersection,
+sometimes farther away than the intermediate vertex from before. It is *snapping* again, now
+with an effect on the result.
+
+The rule of thumb: use the contracted graph for large matrices, where it is several times
+faster and a difference of a few hundred metres gets diluted; and the full graph when the
+exact location of each point matters, or when you will draw the path.
+
+## Points to watch
+
+- **Profile:** `wt_profile` defines how each road type is penalised: `"motorcar"`, `"foot"`,
+  `"bicycle"`. The default speeds are not Brazilian; document the ones you used.
+- **Lorries:** there is no ready-made profile. The way is to adjust the profile by hand, penalising
+  local roads and excluding those with weight or height restrictions (which, as @sec-m4-osm
+  showed, OSM rarely has).
+- **Snapping:** always check how far the points are linked to the network.
+- **Components:** filter by the main component (`component == 1`) to avoid `Inf` for
+  pairs that "cannot reach each other" only because the network has loose stretches.
+- **Congestion:** `dodgr` uses fixed speeds. The time is free-flow time, not
+  peak-hour time.
+
+## Freight: the generalised cost
+
+In freight transport, the shortest path is rarely the one chosen. What is minimised is the
+**generalised cost**, which combines distance, time, tolls, fuel consumption and restrictions.
+
+```{r}
+custo_generalizado <- function(dist_km, tempo_h, pedagio_rs = 0,
+                               custo_km = 3.20, custo_hora = 45.00) {
+  dist_km * custo_km + tempo_h * custo_hora + pedagio_rs
+}
+
+exemplo <- data.frame(
+  alternativa = c("Route A (short, mountain)", "Route B (long, plateau)"),
+  dist_km  = c(120, 165),
+  tempo_h  = c(2.6, 2.1),
+  pedagio  = c(18.50, 32.00)
+)
+
+exemplo |>
+  dplyr::mutate(custo_rs = round(custo_generalizado(dist_km, tempo_h, pedagio), 2)) |>
+  dplyr::arrange(custo_rs) |>
+  knitr::kable()
+```
+
+The shortest route is not the cheapest when time is expensive. That is exactly the kind of
+comparison that justifies a road duplication or a bypass. The parameters (`custo_km`,
+`custo_hora`, the costs per km and per hour, in reais) must come from a citable source: the **Reference Cost System for Works** and the
+Ministry's own operating cost studies.
+
+Routing ended in a **matrix**: one row per origin–destination pair. With two points,
+it fits on the screen. With every municipality of a state, it goes past hundreds of thousands of
+rows, and each scenario, mode or time of day multiplies that. It is the point where an in-memory `data.frame`
+stops being comfortable. For that, go back to module 3's DuckDB (@sec-m3-duckdb).

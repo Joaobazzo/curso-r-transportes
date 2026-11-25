@@ -1,0 +1,222 @@
+# Geovisualisation {#sec-m2-mapas}
+
+Two kinds of map, with different purposes: the **static** map, which goes into the report, and the
+**interactive** map, which is for checking the data and for publishing online. This chapter covers the
+essentials of both; publication finishing is the subject of module 5.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+if (!file.exists(arquivo)) {
+  muni <- dplyr::bind_rows(
+    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
+    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  )
+  sf::st_write(muni, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE)
+
+portos <- data.frame(
+  nome = c("Paranaguá", "Antonina", "São Francisco do Sul", "Itajaí", "Imbituba"),
+  tku_bi = c(21.4, 1.2, 8.7, 6.3, 3.1),
+  lon = c(-48.5119, -48.7119, -48.6383, -48.6486, -48.6706),
+  lat = c(-25.5016, -25.4283, -26.2400, -26.9077, -28.2300)
+) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326)
+```
+
+## `geom_sf`: the map in `ggplot2`
+
+`geom_sf()` draws any `sf` object and works out on its own whether it is a point, line or polygon.
+All of module 1's grammar still applies.
+
+```{r}
+#| label: fig-mapa-base
+#| fig-cap: "Minimal map"
+#| fig-height: 4
+ggplot(muni) + geom_sf()
+```
+
+```{r}
+#| label: fig-mapa-coropletico
+#| fig-cap: "Choropleth: area of the municipalities"
+#| fig-height: 4.6
+muni |>
+  dplyr::mutate(area_km2 = as.numeric(units::set_units(sf::st_area(geom), km^2))) |>
+  ggplot() +
+  geom_sf(aes(fill = area_km2), colour = "white", linewidth = 0.1) +
+  scale_fill_viridis_c(option = "mako", direction = -1, transform = "log10",
+                       name = "Area (km²)",
+                       labels = scales::label_number(big.mark = ",")) +
+  theme_void(base_size = 10)
+```
+
+The choropleth rule: **colour in a polygon represents a rate or density, not a total**. Mapping
+absolute population by municipality colours the map by the size of the municipality, not by the phenomenon.
+For totals, use proportional symbols.
+
+## Layers, proportional symbols and labels
+
+```{r}
+#| label: fig-mapa-camadas
+#| fig-cap: "Municipalities, ports with symbols proportional to TKU, and labels"
+#| fig-height: 5.4
+ggplot() +
+  geom_sf(data = muni, fill = "grey96", colour = "grey80", linewidth = 0.2) +
+  geom_sf(data = portos, aes(size = tku_bi), colour = "#1a5b8a", alpha = 0.75) +
+  ggrepel::geom_text_repel(
+    data = portos,
+    aes(label = nome, geometry = geometry),
+    stat = "sf_coordinates", size = 2.8, min.segment.length = 0
+  ) +
+  scale_size_continuous(range = c(2, 10), name = "TKU (billion t·km)") +
+  coord_sf(xlim = c(-49.5, -47.8), ylim = c(-28.8, -25.0)) +
+  labs(caption = "Illustrative values.") +
+  theme_void(base_size = 10) +
+  theme(legend.position = "right")
+```
+
+Three technical details in this block:
+
+- `stat = "sf_coordinates"` with `aes(geometry = ...)` is what lets `ggrepel` push apart
+  overlapping labels on a map.
+- `coord_sf(xlim, ylim)` crops the **view**, without changing the data.
+- The order of the layers is the drawing order: base first, points last.
+
+## Scale bar, north arrow and coordinate grid
+
+```{r}
+#| label: fig-mapa-ggspatial
+#| fig-cap: "Cartographic elements with ggspatial"
+#| fig-height: 5
+litoral <- muni |>
+  dplyr::filter(name_muni %in% c("Paranaguá", "Antonina", "Morretes", "Guaratuba",
+                          "Matinhos", "Pontal do Paraná", "Guaraqueçaba"))
+
+ggplot(litoral) +
+  geom_sf(aes(fill = name_muni), colour = "white", linewidth = 0.3) +
+  geom_sf(data = portos |> dplyr::filter(nome %in% c("Paranaguá", "Antonina")),
+          colour = "black", size = 2) +
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.25) +
+  ggspatial::annotation_north_arrow(
+    location = "tr", style = ggspatial::north_arrow_minimal(),
+    height = unit(1, "cm"), width = unit(1, "cm")
+  ) +
+  scale_fill_brewer(palette = "Blues", name = NULL) +
+  labs(title = "The coast of Paraná",
+       caption = "Source: IBGE, 2022 municipal boundaries (geobr).") +
+  theme_minimal(base_size = 10) +
+  theme(panel.grid = element_line(colour = "grey92", linewidth = 0.2))
+```
+
+A map that goes into an official document needs: a title, a source, a scale bar, a north
+indicator and a mention of the coordinate system. The first two go in `labs()`; the next two
+in `ggspatial`; the last one in the legend or in the document's footnote.
+
+## Panels
+
+```{r}
+#| label: fig-mapa-facet
+#| fig-cap: "One panel per state, with independent spatial scale"
+#| fig-height: 3.6
+muni |>
+  dplyr::mutate(area_km2 = as.numeric(units::set_units(sf::st_area(geom), km^2))) |>
+  ggplot() +
+  geom_sf(aes(fill = area_km2), colour = NA) +
+  facet_wrap(~abbrev_state) +
+  scale_fill_viridis_c(option = "mako", direction = -1, transform = "log10", name = "km²") +
+  theme_void(base_size = 9)
+```
+
+## Interactive maps
+
+### `leaflet`: interactive maps for publication
+
+```{r}
+leaflet::leaflet(portos) |>
+  leaflet::addProviderTiles("Esri.WorldGrayCanvas") |>
+  leaflet::addCircleMarkers(
+    radius = ~sqrt(tku_bi) * 2,
+    color = "#1a5b8a", fillOpacity = 0.6, stroke = FALSE,
+    popup = ~paste0("<b>", nome, "</b><br>TKU: ", tku_bi, " billion t·km")
+  ) |>
+  leaflet::addPolygons(data = sf::st_transform(litoral, 4326),
+              fillColor = "#e07b39", fillOpacity = 0.2,
+              color = "white", weight = 1, label = ~name_muni) |>
+  leaflet::addScaleBar(position = "bottomleft")
+```
+
+`leaflet` requires **geographic coordinates** (`EPSG:4326`): if the data are in UTM, it
+complains or draws wrongly. `sf::st_transform(x, 4326)` before plotting solves it.
+
+::: {.callout-note}
+## Basemap without an access key
+
+Some basemap providers now require an API key: `CartoDB.Positron`, widely
+used in tutorials, now appears covered by "API KEY REQUIRED". For a light, neutral
+background without registration, use `Esri.WorldGrayCanvas`; for satellite, `Esri.WorldImagery`; for the
+street map, `OpenStreetMap`. The full list is in `names(leaflet::providers)`.
+:::
+
+### `mapview`: quick visual checks
+
+::: {.callout-tip}
+## The most valuable use of an interactive map is not publishing. It is checking
+
+Before trusting any spatial result, throw the layer into a `mapview` over a satellite
+image and look: does the *buffer* cover what it should? Did the points land on the road or in the bush?
+Did the clip get the right municipality? Five seconds of visual checking avoid a wrong
+report. Unlike `leaflet`, `mapview` does not require reprojecting to `EPSG:4326` or building
+layer by layer. It is one line, with a basemap selector (satellite included) ready to use.
+:::
+
+For example, to check the Paraná coast subset made above:
+
+```{r}
+area_analise <- litoral
+
+mapview::mapview(area_analise, map.types = "Esri.WorldImagery")
+```
+
+Note that `litoral` is in SIRGAS 2000 (`EPSG:4674`), and `mapview` reprojected it on its own.
+
+### `mapgl`: modern vector maps
+
+`mapgl` exposes MapLibre/Mapbox GL, with vector rendering, 3D extrusion and smooth
+transitions. It is the best option when the interactive map is the final product: a dashboard for the
+Undersecretariat, for example.
+
+```{r}
+library(mapgl)
+
+mapgl::maplibre(bounds = portos, height = "525px") |>   # without height, the map takes 750 px
+  mapgl::add_circle_layer(
+    id = "portos",
+    source = portos,
+    circle_color = "#1a5b8a",
+    circle_radius = 8,
+    circle_opacity = 0.7,
+    tooltip = "nome"
+  )
+```
+
+In module 5 we come back to interactive maps inside Quarto reports, where they sit alongside
+text and tables.
+
+## Saving maps
+
+```{r}
+#| eval: false
+mapa <- ggplot(litoral) + geom_sf()
+
+ggsave("resultados/mapa_litoral.png", mapa,
+       width = 18, height = 14, units = "cm", dpi = 300)
+ggsave("resultados/mapa_litoral.pdf", mapa,
+       width = 18, height = 14, units = "cm")        # vector, for printing
+```
+
+For maps, prefer PDF or SVG: lines and labels stay sharp at any magnification, which
+matters when the document is printed on A3 or projected.

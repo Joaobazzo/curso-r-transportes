@@ -1,0 +1,90 @@
+# Resources and references {.unnumbered}
+
+## Package documentation
+
+**Wrangling and visualisation**
+
+- `dplyr`: data wrangling (filter, mutate, summarise etc.). <https://dplyr.tidyverse.org/>
+- `tidyr`: tidying and reshaping data (long/wide format). <https://tidyr.tidyverse.org/>
+- `duckplyr`: DuckDB backend for dplyr, faster on large datasets. <https://duckplyr.tidyverse.org/>
+- `data.table`: high-performance data wrangling. <https://rdatatable.gitlab.io/data.table/>
+- `stringr`: string and text handling. <https://stringr.tidyverse.org/>
+- `lubridate`: date and time handling. <https://lubridate.tidyverse.org/>
+- `ggplot2`: data visualisation based on the grammar of graphics. <https://ggplot2.tidyverse.org/>
+- `patchwork`: combining several ggplot2 charts into a single layout. <https://patchwork.data-imaginist.com/>
+- `purrr`: functional iteration (`map()` and variants), instead of `for`/`sapply`. <https://purrr.tidyverse.org/>
+- `duckdb`: DuckDB database driver for R (connection via `DBI`). <https://duckdb.org/docs/api/r>
+- `dbplyr`: translates `dplyr` verbs into SQL, to query databases. <https://dbplyr.tidyverse.org/>
+- `arrow`: efficient Parquet reading/writing and integration with larger-than-memory datasets. <https://arrow.apache.org/docs/r/>
+- `Matrix`: sparse matrices, essential for large OD matrices. <https://cran.r-project.org/package=Matrix>
+
+**Spatial**
+
+- `sf`: handling vector spatial data (simple features). <https://r-spatial.github.io/sf/>
+- `terra`: handling raster and vector data. <https://rspatial.github.io/terra/>
+- `leaflet`: interactive maps based on Leaflet.js. <https://rstudio.github.io/leaflet/>
+- `mapview`: quick visual checking of spatial objects, in one line. <https://r-spatial.github.io/mapview/>
+- `leafgl`: WebGL rendering for `mapview`, for large spatial datasets. <https://github.com/r-spatial/leafgl>
+- `mapgl`: interactive maps based on Mapbox GL / MapLibre. <https://walker-data.com/mapgl/>
+- MapLibre GL JS: the JavaScript library behind `mapgl`; its documentation explains
+  styles, layers and expressions. <https://maplibre.org/maplibre-gl-js/docs/>
+- `sfnetworks`: topological spatial networks (nodes and edges) from `sf` geometries. <https://luukvdmeer.github.io/sfnetworks/>
+
+**Brazilian public datasets**
+
+- `geobr`: download of Brazil's official spatial datasets. <https://ipeagit.github.io/geobr/>
+- `censobr`: download and reading of Demographic Census data. <https://ipeagit.github.io/censobr/>
+- `sidrar`: interface to IBGE's SIDRA API. <https://cran.r-project.org/package=sidrar>
+- `geocodebr`: geocoding of Brazilian addresses. <https://github.com/ipeaGIT/geocodebr>
+- `enderecobr`: standardisation of Brazilian addresses. <https://ipeagit.github.io/enderecobr>
+- `cepR`: lookup of Brazilian postcodes (CEP). <https://cran.r-project.org/package=cepR>
+- `osmdata`: download of OpenStreetMap data. <https://docs.ropensci.org/osmdata/>
+- `osmextract`: download and reading of OpenStreetMap extracts (Geofabrik etc.). <https://docs.ropensci.org/osmextract/>
+- `PNADcIBGE`: download, reading and analysis of Continuous PNAD microdata. <https://cran.r-project.org/package=PNADcIBGE>
+- `PNADCperiods`: identification of the Continuous PNAD reference periods. <https://cran.r-project.org/package=PNADCperiods>
+- `PNSIBGE`: download, reading and analysis of PNS (national health survey) microdata. <https://cran.r-project.org/package=PNSIBGE>
+
+**Transport and accessibility**
+
+- `r5r`: fast multimodal routing (based on R5). <https://ipeagit.github.io/r5r/>
+- `dodgr`: routing on graphs (good for cars). <https://urbananalyst.github.io/dodgr/>
+- `accessibility`: computing accessibility metrics from cost matrices. <https://ipeagit.github.io/accessibility/>
+- `aopdata`: data on access to jobs, health, education and social assistance. <https://ipeagit.github.io/aopdata/>
+- `gtfstools`: handling public transport GTFS data. <https://ipeagit.github.io/gtfstools/>
+- `gtfs2gps`: converting GTFS data into simulated GPS trajectories. <https://github.com/ipeaGIT/gtfs2gps>
+- `stplanr`: tools for transport planning. <https://docs.ropensci.org/stplanr/>
+- `flownet`: analysis and visualisation of flow (origin–destination) networks. <https://github.com/SebKrantz/flownet>
+- `flightsbr`: download of Brazilian flight and airport data. <https://ipeagit.github.io/flightsbr>
+- `odbr`: download of Brazilian Origin–Destination survey data. <https://hsvab.github.io/odbr/>
+
+## Open books and courses
+
+- **Introduction to urban accessibility with R**. <https://ipeagit.github.io/intro_access_book/>
+- **Geocomputation with R**. <https://r.geocompx.org/>
+- **R for Data Science (2nd ed.)**. <https://r4ds.hadley.nz/>
+- **Spatial Data Science with R and terra**. <https://rspatial.org/>
+- **Curso-R: study material** (in Portuguese). <https://curso-r.com/material/>
+- **Accessibility workshop (ipeaGIT, Bogotá 2024)**.
+  <https://ipeagit.github.io/access_workshop_bogota_2024/>
+- **Hillshade effect** (shaded relief in R).
+  <https://dominicroye.github.io/blog/hillshade-effect/>
+
+## Cheat sheets
+
+Posit's official *cheat sheets*, in PDF, sum up each package in two pages. They are all
+available for download at <https://posit.co/resources/cheatsheets/>. The three most used in the course are
+attached here:
+
+- [`dplyr`: data transformation](../recursos/folhas/dplyr.pdf) (PDF): `filter`, `mutate`,
+  `summarise`, joins.
+- [`ggplot2`: data visualisation](../recursos/folhas/ggplot2.pdf) (PDF): geometries, scales,
+  facets and themes.
+- [`sf`: vector spatial data](../recursos/folhas/sf.pdf) (PDF): geometric predicates and
+  operations, measures and transformations.
+
+## Tools
+
+- **Quarto**. <https://quarto.org/>
+- **RStudio**. <https://posit.co/downloads/>
+- **DuckDB**. <https://duckdb.org/>
+- **Git and GitHub**. <https://happygitwithr.com/> (using Git from R)

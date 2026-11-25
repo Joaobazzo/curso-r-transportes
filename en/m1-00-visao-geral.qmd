@@ -1,0 +1,88 @@
+# Module overview {#sec-m1-visao-geral}
+
+::: {.modulo-meta}
+**Workload:** 6 hours (3h synchronous + 3h asynchronous)\
+**Dates:** 28/09 and 01/10 (synchronous); 02/10 (asynchronous)\
+**Data used:** ANTAQ coastal shipping (TKU 2025), Comex Stat and an export of the Curitiba metropolitan region's four-step model (PTV VISUM)
+:::
+
+## What you will be able to do by the end of the module
+
+- Install and organise an R analysis project that someone else can run again.
+- Read spreadsheets and heavy text files, and export results as `.csv` and `.xlsx`.
+- Handle text (municipality names, port facilities, commodity codes) and dates.
+- Filter, group, summarise and reshape tables (*long* ↔ *wide*).
+- Diagnose quality problems: *encoding*, duplicates, missing values, *outliers* and
+  impossible values.
+- Combine different datasets with `join` and know **why** some rows do not match.
+- Read the export of a simulation model and check units, sentinel values and totals before
+  publishing any indicator.
+- Produce publication-quality charts with `ggplot2`.
+
+## Outline
+
+### Synchronous class (3h)
+
+| Block | Content | Chapter |
+|:--|:--|:--|
+| 1 | Installation (R, RStudio, Rtools), projects, packages, AI in the workflow | @sec-m1-ambiente |
+| 2 | Language structure: objects, types, vectors, matrices, `data.frame`, functions, iteration | @sec-m1-linguagem |
+| 3 | Dates with `lubridate` and text with `stringr` | @sec-m1-datas-strings |
+| 4 | Wrangling with `dplyr`/`duckplyr`, filters, *long-to-wide*, export | @sec-m1-manipulacao |
+| 5 | Data cleaning: *encoding*, duplicates, missing values, *outliers*, unrealistic values | @sec-m1-limpeza |
+
+### Asynchronous content (3h)
+
+| Block | Content | Chapter |
+|:--|:--|:--|
+| 6 | `join`/`merge` and fixing keys to merge datasets | @sec-m1-joins |
+| 7 | Visualisation with `ggplot2`: geometries, scales, themes, annotations, palettes, Jenks | @sec-m1-ggplot2 |
+| 8 | Guided case study: coastal shipping TKU and Comex Stat exports | @sec-m1-estudo-de-caso |
+| 8b | Case study: the output of a four-step model (units, sentinel values and anchor totals) | @sec-m1-modelo4etapas |
+| 9 | Exercises with commented solutions | @sec-m1-exercicios |
+
+## Module packages
+
+This is the first module, so the list below is the starting point: every package used from
+here on is added to this base, never replaces it. The following modules only list what
+is **new** compared with the previous module. Run the block below **once** before the
+first class. Installation may take a few minutes.
+
+```{r}
+#| eval: false
+pacotes <- c(
+  # reading and writing
+  "readr", "readxl", "writexl", "data.table", "duckplyr",
+  # wrangling
+  "dplyr", "tidyr", "stringr", "lubridate", "forcats", "janitor",
+  # visualisation
+  "ggplot2", "scales", "patchwork", "classInt", "ggrepel",
+  # reports and reproducibility
+  "knitr", "rmarkdown", "renv", "reprex"
+)
+
+faltando <- setdiff(pacotes, rownames(installed.packages()))
+if (length(faltando) > 0) install.packages(faltando)
+```
+
+To check that everything is in place:
+
+```{r}
+#| eval: false
+sapply(
+  c("dplyr", "tidyr", "stringr", "lubridate", "ggplot2", "readxl"),
+  requireNamespace, quietly = TRUE
+)
+```
+
+## Conventions used in the material
+
+- Code blocks can be run. The output appears right below, preceded by `#>`.
+- We use R's native *pipe*, `|>`, available since version 4.1.
+- Calls such as `dplyr::filter()` name the package explicitly: it is good practice in
+  scripts that other people will read and it avoids name clashes.
+- File paths are always **relative to the project root** (`dados/arquivo.csv`),
+  never absolute (`C:/Users/...`). That is what lets the script run on any
+  colleague's machine.
+- Object and column names in the code are in Portuguese, as in the original course
+  (`pacotes` = packages, `faltando` = missing, `dados` = data, `resultados` = results).

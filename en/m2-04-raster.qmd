@@ -1,0 +1,354 @@
+# Rasters with `terra` {#sec-m2-raster}
+
+A raster is a georeferenced matrix: elevation, slope, land use, satellite imagery,
+population grid. The reference package is `terra`, the successor of `raster`.
+
+```{r}
+library(terra)
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+# default basemap for mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+## Getting a digital elevation model
+
+Instead of typing the coordinates of a rectangle by hand, we delimit the area from a
+**real municipality**, with `geobr`, and let `elevatr` download the DEM for that area. We use
+**Morretes (PR)**, because of the elevation change between the coast and the Serra do Mar (it is the same area
+as the module's case study and the slope analysis in module 4), but the code
+works for any municipality: just change `municipio_dem`/`uf_dem`.
+
+```{r}
+municipio_dem <- "Morretes"
+uf_dem        <- "PR"
+
+arquivo_dem <- "dados/brutos/dem_morretes.tif"
+
+if (!file.exists(arquivo_dem)) {
+  area_muni <- geobr::read_municipality(code_muni = uf_dem, year = 2022, showProgress = FALSE) |>
+    dplyr::filter(name_muni == municipio_dem)
+
+  # a 5 km margin around the municipality, so that the DEM has context
+  # and does not stop exactly at the administrative boundary
+  area <- area_muni |> sf::st_buffer(dist = 5000) |> sf::st_transform(4326)
+
+  dem_raw <- elevatr::get_elev_raster(locations = area, z = 10, clip = "bbox")
+  terra::writeRaster(terra::rast(dem_raw), arquivo_dem, overwrite = TRUE)
+}
+
+dem <- terra::rast(arquivo_dem)
+dem
+```
+
+The object's printout already answers the essential questions: dimensions in cells, resolution,
+extent, CRS and layer name.
+
+```{r}
+c(
+  colunas    = ncol(dem),
+  linhas     = nrow(dem),
+  celulas    = terra::ncell(dem),
+  camadas    = terra::nlyr(dem)
+)
+terra::res(dem)              # cell size, in the CRS unit
+terra::crs(dem, describe = TRUE)$name
+terra::global(dem, c("min", "max", "mean"), na.rm = TRUE)
+```
+
+::: {.callout-note}
+## DEM sources for official use
+
+`elevatr` uses terrain *tiles* from AWS, derived from SRTM/Copernicus. They are great for
+exploratory analysis and teaching, with no registration. For an official document, prefer a source
+you can cite:
+
+- **TOPODATA/INPE**: <https://data.inpe.br/dados/topodata/>. SRTM refined to 30 m, sheets
+  by grid square, no registration. It is the most used reference in Brazilian studies.
+- **Copernicus DEM GLO-30**: 30 m, global coverage, via OpenTopography.
+- The procedure in the chapter is identical: `rast("caminho/do/arquivo.tif")`.
+:::
+
+## Visualising
+
+```{r}
+#| label: fig-dem-base
+#| fig-cap: "Elevation of the Serra do Mar (m)"
+#| fig-height: 4.5
+plot(dem, main = "Elevation (m)")
+```
+
+To integrate with `ggplot2` and combine with vector layers, use `tidyterra`:
+
+```{r}
+#| label: fig-dem-ggplot
+#| fig-cap: "The same raster with tidyterra, over the municipal boundaries"
+#| fig-height: 4.8
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+if (!file.exists(arquivo)) {
+  muni <- dplyr::bind_rows(
+    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
+    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  )
+  sf::st_write(muni, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE)
+
+# view limits from the raster's own extent, not typed by hand:
+# that way the map adjusts itself if you change municipio_dem to another place
+zoom_dem <- sf::st_bbox(dem)
+
+ggplot() +
+  tidyterra::geom_spatraster(data = dem) +
+  geom_sf(data = muni, fill = NA, colour = "white", linewidth = 0.3) +
+  coord_sf(xlim = zoom_dem[c("xmin", "xmax")], ylim = zoom_dem[c("ymin", "ymax")], expand = FALSE) +
+  scale_fill_viridis_c(option = "turbo", na.value = NA, name = "Elevation (m)") +
+  theme_void(base_size = 10)
+```
+
+## Crop and mask
+
+These are two different operations, almost always used together:
+
+- `crop()` reduces the **extent** to the geometry's rectangle;
+- `mask()` turns everything **outside** the geometry into `NA`.
+
+```{r}
+#| label: fig-crop-mask
+#| fig-cap: "crop (left) and crop + mask (right) by the municipality of Morretes"
+#| fig-height: 3.6
+morretes <- muni |> dplyr::filter(name_muni == "Morretes") |> sf::st_transform(terra::crs(dem))
+
+dem_crop <- terra::crop(dem, terra::vect(morretes))
+dem_mask <- terra::mask(dem_crop, terra::vect(morretes))
+
+par(mfrow = c(1, 2), mar = c(2, 2, 2, 4))
+plot(dem_crop, main = "crop")
+plot(dem_mask, main = "crop + mask")
+par(mfrow = c(1, 1))
+```
+
+To check the crop over a real basemap (satellite, streets), `mapview` also accepts
+rasters directly:
+
+```{r}
+mapview::mapview(dem_mask) + mapview::mapview(morretes, alpha.regions = 0)
+```
+
+`vect()` converts an `sf` object into `terra`'s vector format (`SpatVector`). It is the bridge
+between the two packages; the other way round, `st_as_sf()`.
+
+## Reproject, resample, aggregate
+
+```{r}
+terra::res(dem)         # before: in degrees, because the CRS is geographic (WGS 84)
+
+# reproject: note the method - "bilinear" for continuous, "near" for categorical
+dem_utm <- terra::project(dem, "EPSG:31982", method = "bilinear")
+terra::res(dem_utm)     # after: in metres, in UTM 22S
+```
+
+The same cell size, about 0.00065°, becomes about 70 m after reprojection. That is
+why measuring area, distance or slope requires a projected CRS: in degrees, "one cell"
+has no fixed size on the ground.
+
+```{r}
+# aggregate: reduces the resolution (useful to speed up exploratory analyses)
+dem_500 <- aggregate(dem_utm, fact = 5, fun = "mean")
+c(original_m = terra::res(dem_utm)[1], agregado_m = terra::res(dem_500)[1])
+```
+
+```{r}
+#| eval: false
+terra::resample(a, b, method = "bilinear")   # puts `a` on the grid of `b` (essential for algebra)
+terra::disagg(x, fact = 2)                   # increases the resolution (interpolates)
+```
+
+::: {.callout-important}
+To compute between two rasters, they must be on the **same grid**: same CRS, same
+resolution, same origin. That is what `resample()` is for. Without it, `r1 - r2` fails with "extents
+do not match".
+:::
+
+## Raster algebra
+
+```{r}
+# arithmetic and logical operations are vectorised, cell by cell
+acima_800 <- dem_utm > 800
+terra::freq(acima_800)
+```
+
+```{r}
+# reclassify into elevation bands
+faixas <- matrix(c(
+  -Inf,  50, 1,    # coastal plain
+    50, 300, 2,    # lower slope
+   300, 800, 3,    # slope
+   800, Inf, 4     # plateau
+), ncol = 3, byrow = TRUE)
+
+dem_classes <- terra::classify(dem_utm, faixas)
+terra::freq(dem_classes) |> dplyr::mutate(pct = round(100 * count / sum(count), 1))
+```
+
+The table says how much of the area is in each band; the map shows **where**:
+
+```{r}
+#| label: fig-dem-classes
+#| fig-cap: "The DEM reclassified into four elevation bands"
+#| fig-height: 4.5
+plot(dem_classes, type = "classes",
+     levels = c("Coastal plain", "Lower slope", "Slope", "Plateau"),
+     col = c("#2c7fb8", "#7fcdbb", "#fdae61", "#a6611a"),
+     main = "Elevation bands")
+```
+
+```{r}
+#| eval: false
+terra::app(x, fun = mean)                 # applies a function per cell across layers
+terra::ifel(dem > 800, 1, 0)              # raster if-else
+terra::focal(dem, w = 3, fun = "mean")    # moving window (smoothing, edge detection)
+```
+
+## Slope and terrain
+
+`terra` computes terrain derivatives in one function. **Reproject to metres first**. In
+degrees, the slope comes out wrong.
+
+```{r}
+terreno <- terra::terrain(dem_utm, v = c("slope", "aspect"), unit = "degrees")
+terreno
+```
+
+```{r}
+#| label: fig-declividade
+#| fig-cap: "Elevation (left) and slope (right) in the Serra do Mar"
+#| fig-height: 3.6
+par(mfrow = c(1, 2), mar = c(2, 2, 2, 4))
+plot(dem_utm, main = "Elevation (m)")
+plot(terreno$slope, main = "Slope (degrees)")
+par(mfrow = c(1, 1))
+```
+
+Side by side, it is clear that slope is not elevation: the plateau, which is high, is almost flat; what
+stands out on the right is the mountain range's **escarpment**, the transition strip between the coast and
+the plateau.
+
+```{r}
+terra::global(terreno$slope, c("mean", "max"), na.rm = TRUE) |> round(1)
+```
+
+In module 4 this raster is combined with road alignments to compare design alternatives.
+
+## Extracting values by geometry
+
+This is the operation that connects raster and vector. It is probably the most useful in the chapter.
+
+```{r}
+# by point: the elevation of each municipal seat, from geobr
+# (instead of typing longitude/latitude by hand)
+arquivo_sedes <- "dados/brutos/sedes_2022.gpkg"
+if (!file.exists(arquivo_sedes)) {
+  sf::st_write(geobr::read_municipal_seat(year = 2022, showProgress = FALSE),
+               arquivo_sedes, quiet = TRUE)
+}
+
+sedes <- sf::st_read(arquivo_sedes, quiet = TRUE) |>
+  dplyr::filter(name_muni %in% c("Curitiba", "Morretes", "Paranaguá")) |>
+  sf::st_transform(terra::crs(dem_utm))
+
+terra::vect(sedes)      # the same object, in terra's vector format
+
+# what extract returns: a data.frame with one row per point, in the same order
+alt_sedes <- terra::extract(dem_utm, terra::vect(sedes), ID = FALSE)
+alt_sedes
+```
+
+The result does not include the municipality name: only the elevation, in the order of the points. That is why the
+next step puts the name back with `bind_cols`:
+
+```{r}
+alt_sedes |>
+  dplyr::bind_cols(local = sedes$name_muni) |>
+  dplyr::rename(altitude_m = 1) |>
+  dplyr::mutate(altitude_m = round(altitude_m)) |>
+  knitr::kable()
+```
+
+```{r}
+# by polygon: zonal statistics, mean and maximum elevation by municipality
+muni_serra <- muni |>
+  dplyr::filter(name_muni %in% c("Morretes", "Antonina", "Paranaguá", "Piraquara", "Curitiba")) |>
+  sf::st_transform(terra::crs(dem_utm))
+
+zonal_alt <- terra::extract(dem_utm, terra::vect(muni_serra),
+                     fun = mean, na.rm = TRUE, ID = FALSE)
+zonal_alt     # one row per municipality, in the order of muni_serra
+```
+
+Again, only the value. The final table attaches the municipality name by position:
+
+```{r}
+muni_serra |>
+  sf::st_drop_geometry() |>
+  dplyr::transmute(municipio = name_muni,
+            altitude_media_m = round(zonal_alt[[1]])) |>
+  dplyr::arrange(dplyr::desc(altitude_media_m)) |>
+  knitr::kable()
+```
+
+```{r}
+#| eval: false
+terra::extract(r, v, fun = "max")                  # another statistic
+terra::extract(r, v, fun = mean, weights = TRUE)   # weights by the fraction of the cell in the geometry
+terra::extract(r, v, exact = TRUE)                 # exact fraction (slower, more precise)
+terra::zonal(r, terra::rasterize(v, r, "id"), fun = "mean")  # much faster on large datasets
+```
+
+## Writing and converting formats
+
+```{r}
+#| eval: false
+terra::writeRaster(dem_utm, "resultados/dem_utm.tif", overwrite = TRUE)
+
+# compressed GeoTIFF, which is what you deliver
+terra::writeRaster(terreno$slope, "resultados/declividade.tif",
+            overwrite = TRUE,
+            gdal = c("COMPRESS=DEFLATE", "TILED=YES"))
+
+# raster -> vector (class polygons; contours are in the next block)
+poligonos <- terra::as.polygons(dem_classes) |> sf::st_as_sf()
+
+# vector -> raster
+grade <- terra::rasterize(terra::vect(muni_serra), dem_utm, field = "code_muni")
+
+# raster -> table (for analysis in dplyr)
+tabela <- as.data.frame(dem_utm, xy = TRUE, na.rm = TRUE)
+```
+
+Contour lines are the typical case of raster → vector conversion. Before delivering the
+file, check on the map whether they follow the relief of the satellite image: switch the
+basemap in the selector in the top-left corner and click on a contour to see the elevation.
+
+```{r}
+contornos <- terra::as.contour(dem_utm, levels = seq(0, 1600, by = 200))
+contornos <- sf::st_as_sf(contornos)
+
+mapview::mapview(contornos, zcol = "level", layer.name = "Elevation (m)",
+                 map.types = c("Esri.WorldImagery", "OpenStreetMap"))
+```
+
+The conversion to a table deserves a mention: with `as.data.frame(r, xy = TRUE)` the raster becomes a
+`data.frame` with columns `x`, `y` and the value. From there everything from module 1 applies. It is the
+simplest way to answer questions such as "what is the elevation distribution in the right-of-way",
+with `summarise` and `ggplot2`.
+
+::: {.callout-tip}
+## Mind the size
+
+A 30 m raster covering a state has hundreds of millions of cells. `as.data.frame()`
+tries to bring all of it into memory. Crop (`crop`/`mask`) or aggregate (`aggregate`) first, and
+prefer `extract`/`zonal`, which work without materialising the whole matrix.
+:::

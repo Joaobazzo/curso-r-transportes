@@ -1,0 +1,125 @@
+# Module overview {#sec-m3}
+
+![Urban growth of São Paulo (September 2013). Source: [NASA Earth Observatory](https://science.nasa.gov/earth/earth-observatory/growth-of-sao-paulo-brazil-83987/).](../img/saopaulo_oli_2013244_swir_lrg.jpg)
+
+::: {.modulo-meta}
+**Workload:** 6 hours (3h synchronous + 3h asynchronous)\
+**Dates:** 13/10 and 14/10 (synchronous); 16/10 (asynchronous)\
+**Packages:** `purrr`, `terra`, `elevatr`, `geocodebr`, `enderecobr`, `duckdb`, `duckplyr`, `Matrix`, `sf`\
+**Case studies:** slope × alignment on the BR-116 (Serra do Mar); OD matrix and spatial flows of coastal shipping, with TKU calculation\
+**Also:** Comex Stat (MDIC), datasets by NCM and by municipality
+:::
+
+## What you will be able to do by the end of the module
+
+- Turn repeated pieces of code into functions and apply them to many cases with `purrr`.
+- Extract terrain and slope profiles along alignments, compare design
+  alternatives with quantitative criteria and point out highway segments next to steep slopes.
+- Turn lists of addresses into coordinates (geocoding) and assess the quality of the
+  result.
+- Query large datasets with SQL, straight from R, without loading everything into memory.
+- Integrate federal datasets with codes that are **not** IBGE's, and detect when a `join`
+  is silently losing rows.
+- Represent origin–destination matrices efficiently and turn them into **spatial
+  flows**: the desire lines that appear on freight maps.
+- Compute transport indicators (TKU) from an OD matrix.
+
+## Outline
+
+### Synchronous class (3h)
+
+| Block | Content | Chapter |
+|:--|:--|:--|
+| 1 | Geocoding addresses with `geocodebr` | @sec-m3-geocodificacao |
+| 2 | Processing with SQL via DuckDB; performance comparison | @sec-m3-duckdb |
+| 3 | Comex Stat: types, leading zeros and the `join` that wipes out São Paulo | @sec-m3-comexstat |
+
+OpenStreetMap and routing, by car with `dodgr` and by public transport with `r5r`,
+are left for module 4 (@sec-m4-osm), where they are the basis of the accessibility calculation. The
+OSM data used there already come in this module's data package.
+
+### Asynchronous content (3h)
+
+| Block | Content | Chapter |
+|:--|:--|:--|
+| 4 | From script to function: your own functions and iteration with `purrr` | @sec-m3-funcoes |
+| 5 | Case study: slope × alignment and steep slopes along the Serra do Mar highways | @sec-m3-declividade |
+| 6 | OD matrices, sparse matrices and spatial flows | @sec-m3-matrizes |
+| 7 | Case study: coastal shipping flows and TKU on the map of Brazil | @sec-m3-estudo-de-caso |
+| 8 | Exercises | @sec-m3-exercicios |
+
+## Before class: packages and data
+
+Run the module's setup script **before the first session**: it downloads large
+files, and the Ministry's network can make that slow. Open the course project in RStudio and
+paste into the console:
+
+```{r}
+#| eval: false
+source("https://raw.githubusercontent.com/Joaobazzo/curso-r-transportes/main/R/preparar_modulo3.R")
+```
+
+It does three things, and ends with the message **Tudo pronto para o Módulo 3** ("All set for Module 3"):
+
+1. **Installs the missing packages**, from the list below.
+2. **Downloads the module's data package** (`dados_modulo3.zip`, from the
+   [Releases](https://github.com/Joaobazzo/curso-r-transportes/releases) page) to `dados/brutos/`.
+   That is what avoids downloading the São Paulo–Santos road network live from OpenStreetMap, a
+   query that takes several minutes and sometimes fails. The package also has the
+   Comex Stat data, in `dados/brutos/comexstat/`: the 2024 municipal exports and the
+   municipality table.
+3. **If any Comex Stat file is still missing**, it tries to download it straight from MDIC's
+   server.
+
+You can run it more than once: whatever is already installed or downloaded is skipped.
+
+The module's packages, for those who prefer to install by hand:
+
+```{r}
+#| eval: false
+pacotes <- c(
+  # OSM and networks
+  "sf", "osmdata", "osmextract", "sfnetworks", "tidygraph", "dodgr",
+  # geocoding
+  "geocodebr", "enderecobr", "geobr",
+  # large datasets and SQL
+  "duckdb", "duckplyr", "duckspatial", "DBI", "dbplyr", "arrow", "data.table",
+  # functions, matrices and flows
+  "purrr", "Matrix", "stplanr",
+  # terrain and slope
+  "terra", "tidyterra", "elevatr", "ggspatial",
+  # wrangling, reading and charts (already from earlier modules)
+  "dplyr", "tidyr", "stringr", "stringi", "readr", "readxl", "writexl", "units",
+  "ggplot2", "scales", "patchwork", "mapview", "knitr"
+)
+
+# duckdb pinned to version 1.x: duckplyr does not yet work with duckdb 2.0.
+# Install it before the others, from a CRAN snapshot prior to 2.0 (with a Windows binary)
+if (!requireNamespace("duckdb", quietly = TRUE) || packageVersion("duckdb") >= "2.0.0") {
+  install.packages("duckdb", repos = "https://packagemanager.posit.co/cran/2026-10-20")
+}
+
+faltando <- setdiff(pacotes, rownames(installed.packages()))
+if (length(faltando) > 0) install.packages(faltando)
+```
+
+Do not update `duckdb` after this: if RStudio offers the update to 2.0, decline it.
+
+::: {.callout-note}
+## `geocodebr` downloads its own data
+
+On the first geocoding, `geocodebr` downloads the CNEFE data (IBGE's address register)
+to a cache folder on your computer. This happens only once, but it can take
+a few minutes. If you can, run the first example of @sec-m3-geocodificacao before class.
+:::
+
+## A note on scale
+
+This is the module in which the data no longer fit comfortably in memory. Three habits that
+run through every chapter:
+
+1. **Crop before loading**: filter in the query (SQL, `osmextract`'s `query=`,
+   `sf`'s `wkt_filter`), not afterwards.
+2. **Store intermediate results** in `.parquet` or `.rds`, and read from there.
+3. **Measure**: `system.time()` around each heavy step shows where the bottleneck is.
+   It is often not where you imagine.

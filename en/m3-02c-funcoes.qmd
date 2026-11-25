@@ -1,0 +1,155 @@
+# From script to function {#sec-m3-funcoes}
+
+::: {.modulo-meta}
+**Data:** the four-step model extract (@sec-m1-modelo4etapas)
+**Packages:** `purrr`, `dplyr`, `duckdb`
+**Prerequisite:** the functions section of @sec-m1-linguagem
+:::
+
+In module 1 you wrote small functions. This chapter is about the next step, the one
+that separates people who write *scripts* from people who write *tools*: noticing that a snippet is
+being copied and pasted, turning it into a function, and applying it to many cases at once.
+
+```{r}
+library(dplyr)
+
+con <- duckdb::dbConnect(duckdb::duckdb())
+links <- DBI::dbGetQuery(con, "
+  SELECT * FROM 'dados/processados/modelo4etapas/links_rmc_2018_completo.parquet'
+")
+duckdb::dbDisconnect(con, shutdown = TRUE)
+```
+
+## The symptom: copy and paste
+
+In @sec-m1-modelo4etapas, we computed the network indicators for the full network and then
+for the structural network. Now the manager also asks for "motorways only" and "connectors only". The
+natural route is to copy the block:
+
+```{r}
+#| eval: false
+completa <- links |>
+  summarise(veic_km = sum(veic_km, na.rm = TRUE),
+            atraso  = sum(veic_h_carreg - veic_h_livre, na.rm = TRUE))
+
+estrutural <- links |> filter(typeno < 50) |>
+  summarise(veic_km = sum(veic_km, na.rm = TRUE),
+            atraso  = sum(veic_h_carreg - veic_h_livre, na.rm = TRUE))
+
+rodovias <- links |> filter(typeno %/% 10 == 1) |>
+  summarise(veic_km = sum(veic_km, na.rm = TRUE),
+            atraso  = sum(veic_h_carreg - veic_h_livre, na.rm = TRUE))
+# ... and so on
+```
+
+Three problems. If the definition of delay changes, you have to remember to change it in four places.
+If you forget one, the scenarios stop being comparable, and nothing warns you. And each new scenario is
+one more copied block.
+
+::: {.callout-tip}
+## The rule of three
+
+Copied the same snippet for the third time? It is a function.
+:::
+
+## Extracting the function
+
+What changes between the blocks is **the input data**. The calculation is always the same. So the
+calculation becomes the body of the function, and the data become the argument:
+
+```{r}
+#' Performance indicators of an assigned network
+#'
+#' @param links data.frame with the corrected columns of the VISUM extract
+#' @param cenario scenario label, to identify the row in the result
+#' @return a one-row data.frame
+indicadores_rede <- function(links, cenario = "sem nome") {
+  obrigatorias <- c("veic_km", "veic_h_livre", "veic_h_carreg", "vc")
+  faltando <- setdiff(obrigatorias, names(links))
+  if (length(faltando) > 0) {
+    stop("Faltam colunas: ", paste(faltando, collapse = ", "))
+  }
+
+  links |>
+    summarise(
+      links         = n(),
+      veic_km       = sum(veic_km, na.rm = TRUE),
+      atraso_veic_h = sum(veic_h_carreg - veic_h_livre, na.rm = TRUE),
+      vel_media_kmh = sum(veic_km, na.rm = TRUE) / sum(veic_h_carreg, na.rm = TRUE),
+      saturados     = sum(vc >= 1, na.rm = TRUE)
+    ) |>
+    mutate(cenario = cenario, .before = 1)
+}
+
+indicadores_rede(links, "Full network")
+```
+
+Three things to notice:
+
+1. **Input validation.** If someone passes the raw table, without the corrected columns, the
+   function stops with a clear message (*Faltam colunas*, "missing columns"), instead of returning a wrong number.
+2. **Documentation at the top.** The `#'` comments say what goes in and what comes out. That is what
+   lets someone else use the function without reading its body.
+3. **A predictable return.** Always a one-row table, with the same columns. That is what
+   lets you stack the results later.
+
+Now the test that matters: does the function reproduce the anchor totals of @sec-m1-modelo4etapas?
+
+```{r}
+r <- indicadores_rede(links)
+stopifnot(abs(r$veic_km - 3676335) < 5, r$saturados == 3436)
+```
+
+## Applying it to many cases with `purrr`
+
+The scenarios are now just **different filters**. In R, a function can be stored in a list
+like any other object:
+
+```{r}
+cenarios <- list(
+  "Full network"       = \(x) x,
+  "Structural network" = \(x) filter(x, typeno < 50),
+  "Motorways only"     = \(x) filter(x, typeno %/% 10 == 1),
+  "Connectors only"    = \(x) filter(x, typeno %/% 10 == 7)
+)
+```
+
+The notation `\(x)` is an anonymous function, short, written right where it is used. It is the
+same as `function(x)`.
+
+`purrr::imap()` goes through the list, handing over at each step the element and its name:
+
+```{r}
+resultado <- purrr::imap(cenarios, \(filtro, nome) indicadores_rede(filtro(links), nome)) |>
+  purrr::list_rbind()
+
+resultado |>
+  mutate(across(where(is.numeric), \(v) round(v, 1))) |>
+  knitr::kable(format.args = list(big.mark = ","))
+```
+
+A fifth scenario is one more line in the list. The definition of delay is in a single place.
+
+### `map`, `lapply` and `for`
+
+The three do the same thing. The difference is what they return and how much you need to write:
+
+```{r}
+#| eval: false
+# for: you look after the container
+saida <- vector("list", length(cenarios))
+for (i in seq_along(cenarios)) {
+  saida[[i]] <- indicadores_rede(cenarios[[i]](links), names(cenarios)[i])
+}
+
+# lapply: base R, no package
+lapply(names(cenarios), \(n) indicadores_rede(cenarios[[n]](links), n))
+
+# purrr: a family with the output type in the name
+purrr::map(cenarios, \(f) nrow(f(links)))       # list
+purrr::map_int(cenarios, \(f) nrow(f(links)))   # integer vector, or an error
+```
+
+The advantage of `purrr` is not speed: it is that `map_int()`, `map_dbl()` and `map_chr()`
+**guarantee the type** of the output. If an element does not return an integer, the function stops right
+away, instead of producing a mixed vector that breaks three steps later.

@@ -1,0 +1,388 @@
+# Case study: the BR-116 catchment {#sec-m2-estudo-de-caso}
+
+The question of this chapter is a recurring request in any transport planning
+department:
+
+> *How many people live in the catchment of a federal highway segment, how are they
+> distributed across municipalities, and how many of them are less than 5 km from the axis?*
+
+It is the task normally solved in QGIS with *buffer* + intersection + sum of attributes.
+We will do the same in code, with official data, and with the pitfalls explained.
+
+The segment chosen is the **BR-116 where it crosses the Serra do Mar**, between the Curitiba Metropolitan
+Region and the coast: steep terrain, concentrated settlement and a logistics corridor that
+links the Port of Paranaguá to the interior. But the steps in this chapter work for any
+highway well mapped in OSM: only the value of `ref` in the query and the bounding box
+(`bbox`) of the segment change. Some options to redo the exercise with another highway:
+
+```{r}
+rodovias_sugeridas <- data.frame(
+  br     = c("BR-116", "BR-101", "BR-153", "BR-262", "BR-381"),
+  segment = c("Serra do Mar, Curitiba-coast",
+             "Santa Catarina coast, Florianópolis-Joinville",
+             "Transbrasiliana, segment in Goiás",
+             "Serra do Espinhaço, Vitória-Belo Horizonte",
+             "Fernão Dias, São Paulo-Belo Horizonte"),
+  uf     = c("PR/SC", "SC", "GO", "ES/MG", "SP/MG"),
+  reason = c("steep terrain, corridor to the Port of Paranaguá (this chapter's example)",
+             "coastal axis, almost continuous urban settlement",
+             "long, low-density highway, a contrast with an urban segment",
+             "iron ore corridor, mountainous terrain",
+             "one of the busiest road corridors in the country")
+)
+
+knitr::kable(rodovias_sugeridas)
+```
+
+Pick a highway from the table (or look up the BR- code of the highway in your region) and redo the
+chapter replacing `value = "BR-116"` with the chosen code and adjusting the `bbox` to the area of
+interest. Here we carry on with the BR-116.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+# default basemap for mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+
+crs_trabalho <- 31982    # SIRGAS 2000 / UTM 22S, in metres, to measure and buffer
+```
+
+## Step 1: The road axis
+
+```{r}
+arquivo_br116 <- "dados/brutos/br116_serra.gpkg"
+
+if (!file.exists(arquivo_br116)) {
+  consulta <- osmdata::opq(bbox = c(-49.40, -25.75, -48.40, -25.15), timeout = 120) |>
+    osmdata::add_osm_feature(key = "ref", value = "BR-116") |>
+    osmdata::osmdata_sf()
+
+  sf::st_write(
+    consulta$osm_lines |>
+      dplyr::select(dplyr::any_of(c("osm_id", "name", "ref", "highway", "lanes", "maxspeed"))) |>
+      sf::st_transform(4674),
+    arquivo_br116, quiet = TRUE
+  )
+}
+
+br116 <- sf::st_read(arquivo_br116, quiet = TRUE) |> sf::st_transform(crs_trabalho)
+
+c(trechos = nrow(br116),
+  extensao_km = round(as.numeric(sum(sf::st_length(br116))) / 1000, 1))
+```
+
+Note that the summed length is greater than the real length of the corridor: OSM has separate
+carriageways, slip roads and frontage roads as distinct features. To measure corridor length
+this would need handling; to define a **catchment**, it does no harm,
+because `st_union()` dissolves the overlap.
+
+```{r}
+eixo <- sf::st_union(br116)
+```
+
+::: {.callout-note}
+## The official version of this step
+
+In a product for publication, the axis does not come from OSM, but from **DNIT's SNV**, which has
+the BR code, segment, jurisdiction and carriageway status.
+
+```{r}
+#| eval: false
+snv <- sf::st_read("dados/brutos/snv/SNV_202601A.shp", quiet = TRUE) |>
+  sf::st_transform(crs_trabalho)
+
+eixo <- snv |>
+  dplyr::filter(vl_br == "116", sg_uf %in% c("PR", "SC")) |>
+  sf::st_union()
+```
+
+The rest of the chapter is identical. What changes is the citation of the source in the report. The names of the
+SNV columns change between versions; run `names(snv)` first.
+:::
+
+## Step 2: The catchment bands
+
+```{r}
+faixas <- c(2000, 5000, 10000)
+
+influencia <- lapply(faixas, \(d) {
+  sf::st_buffer(eixo, dist = d) |>
+    sf::st_as_sf() |>
+    dplyr::mutate(faixa_m = d)
+})
+
+influencia <- influencia |>
+  dplyr::bind_rows() |>
+  dplyr::rename(geom = x) |>
+  dplyr::arrange(dplyr::desc(faixa_m))     # largest to smallest, to draw in layers
+
+# area of each band, in a separate table
+area_km2 <- units::set_units(sf::st_area(influencia), km^2)
+
+tabela_faixas <- sf::st_drop_geometry(influencia)
+tabela_faixas$area_km2 <- round(as.numeric(area_km2), 1)
+
+knitr::kable(tabela_faixas)
+```
+
+Three bands, not one, because the question "who is affected" rarely has a single answer:
+2 km is the immediate neighbourhood, 5 km is the area of direct access, 10 km is the economic
+area of influence. Presenting all three leaves the decision to whoever reads the report.
+
+Before moving on, check visually that the bands cover the expected corridor:
+
+```{r}
+mapview::mapview(influencia, zcol = "faixa_m") + mapview::mapview(br116)
+```
+
+## Step 3: Population from the IBGE statistical grid
+
+To sum population inside an irregular polygon, the ideal data are those with the **smallest unit
+possible**. We will use the IBGE statistical grid, in which each cell has the resident
+population. That way, the sum inside the band is direct, without having to split census tracts.
+
+```{r}
+arquivo_grade <- "dados/brutos/grade_pr.gpkg"
+
+if (!file.exists(arquivo_grade)) {
+  grade_pr <- geobr::read_statistical_grid(year = 2022, code_muni = "PR", showProgress = FALSE)
+  sf::st_write(grade_pr, arquivo_grade, quiet = TRUE)
+}
+
+grade <- sf::st_read(arquivo_grade, quiet = TRUE) |> sf::st_transform(crs_trabalho)
+
+dim(grade)
+names(grade)
+```
+
+```{r}
+# spatial crop by the largest band, done before any calculation:
+# it cuts hundreds of thousands of cells down to what matters
+maior_faixa <- influencia |> dplyr::filter(faixa_m == max(faixa_m))
+
+grade_recorte <- grade[sf::st_intersects(grade, maior_faixa, sparse = FALSE)[, 1], ]
+nrow(grade_recorte)
+```
+
+```{r}
+# the grid's population column
+pop_col <- dplyr::intersect(c("pop_total", "POP", "pop"), names(grade_recorte))[1]
+grade_recorte <- grade_recorte |> dplyr::mutate(pop = as.numeric(.data[[pop_col]]))
+
+c(celulas = nrow(grade_recorte), populacao_total = sum(grade_recorte$pop, na.rm = TRUE))
+```
+
+There are thousands of cells, too heavy for `mapview` to draw at once. To see what the
+grid actually looks like, a sample is enough: the cells within 3 km of a point on the axis, on the way out
+of Curitiba.
+
+```{r}
+ponto_eixo <- sf::st_sfc(sf::st_point(c(-49.2066, -25.3895)), crs = 4326) |>
+  sf::st_transform(crs_trabalho)
+
+parcela_grade <- grade_recorte[
+  sf::st_is_within_distance(grade_recorte, ponto_eixo, dist = 3000, sparse = FALSE)[, 1], ]
+
+mapview::mapview(parcela_grade, zcol = "pop", layer.name = "Population per cell") +
+  mapview::mapview(br116, color = "#b3402a", lwd = 3, layer.name = "BR-116")
+```
+
+Click on a cell to see its attributes: each square has an identifier and the resident
+population. The smaller cells are in urban areas, where the IBGE grid is finer.
+
+::: {.callout-important}
+## Why not use the census tract directly
+
+Census tracts are larger than the grid cells, and the catchment cuts most
+of them in half. Summing the population of the tracts **touched** overestimates; summing only the
+tracts **entirely inside** underestimates. The correct way out, when tracts are used, is
+**area weighting**: assuming the population is spread evenly within the tract.
+
+```{r}
+#| eval: false
+setores <- geobr::read_census_tract(code_tract = "PR", year = 2010,
+                                    simplified = FALSE, showProgress = FALSE) |>
+  sf::st_transform(crs_trabalho) |>
+  dplyr::left_join(pop_por_setor, by = "code_tract")     # population from censobr
+
+ponderado <- setores |>
+  dplyr::mutate(area_total = sf::st_area(geom)) |>
+  sf::st_intersection(maior_faixa) |>
+  dplyr::mutate(
+    fracao = as.numeric(sf::st_area(geom) / area_total),
+    pop_na_faixa = pop * fracao
+  )
+
+sum(ponderado$pop_na_faixa)
+```
+
+This assumption is fragile in large rural tracts. That is precisely why the statistical
+grid, with much smaller cells, gives a better result for rights-of-way and catchment
+areas. Record in the report which method was used.
+:::
+
+## Step 4: Population by band
+
+```{r}
+pop_por_faixa <- lapply(sort(faixas), \(d) {
+  f <- influencia |> dplyr::filter(faixa_m == d)
+  dentro <- grade_recorte[sf::st_intersects(grade_recorte, f, sparse = FALSE)[, 1], ]
+  data.frame(
+    faixa_m   = d,
+    celulas   = nrow(dentro),
+    populacao = sum(dentro$pop, na.rm = TRUE)
+  )
+}) |>
+  dplyr::bind_rows() |>
+  dplyr::mutate(
+    area_km2 = as.numeric(units::set_units(
+      sf::st_area(influencia$geom[match(faixa_m, influencia$faixa_m)]), km^2)),
+    densidade = populacao / area_km2
+  )
+
+pop_por_faixa |>
+  dplyr::transmute(
+    `Band (km)` = faixa_m / 1000,
+    `Area (km²)` = round(area_km2, 1),
+    `Population`  = scales::comma(populacao),
+    `Inhab./km²`   = round(densidade, 1)
+  ) |>
+  knitr::kable(align = "rrrr")
+```
+
+Density falling as the band widens is the expected and informative result: settlement
+is concentrated next to the axis.
+
+## Step 5: Distribution by municipality
+
+```{r}
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+if (!file.exists(arquivo)) {
+  muni <- dplyr::bind_rows(
+    geobr::read_municipality(code_muni = "PR", year = 2022, showProgress = FALSE),
+    geobr::read_municipality(code_muni = "SC", year = 2022, showProgress = FALSE)
+  )
+  sf::st_write(muni, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE) |> sf::st_transform(crs_trabalho)
+
+faixa5 <- influencia |> dplyr::filter(faixa_m == 5000)
+
+pop_muni <- grade_recorte[sf::st_intersects(grade_recorte, faixa5, sparse = FALSE)[, 1], ] |>
+  # the grid already has IBGE's code_muni/name_muni; we drop them to avoid
+  # a name clash with the join below, which is the source we want to use
+  dplyr::select(pop) |>
+  # the join uses the CENTRE of each cell: with st_intersects, cells on the border
+  # would be counted in two municipalities and the total population would double
+  sf::st_point_on_surface() |>
+  sf::st_join(muni |> dplyr::select(code_muni, name_muni, abbrev_state)) |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(populacao = sum(pop, na.rm = TRUE),
+            celulas = dplyr::n(),
+            .by = c(code_muni, name_muni, abbrev_state)) |>
+  dplyr::filter(!is.na(code_muni)) |>
+  dplyr::arrange(dplyr::desc(populacao))
+
+pop_muni |>
+  dplyr::mutate(part = populacao / sum(populacao)) |>
+  dplyr::transmute(Municipality = name_muni, State = abbrev_state,
+            `Population in the 5 km band` = scales::comma(populacao),
+            `Share (%)` = scales::percent(part, accuracy = 0.1)) |>
+  knitr::kable(align = "llrr")
+```
+
+Note the join by the cell's centre and the preserved IBGE code: it is what lets you take this result
+to any other municipal dataset (GDP, vehicle fleet, tax revenue) with module 1's `left_join`.
+
+## Step 6: The map
+
+```{r}
+#| label: fig-caso-faixa
+#| fig-cap: "BR-116 catchment bands in the Serra do Mar and resident population per cell"
+#| fig-height: 5.6
+recorte_vis <- sf::st_bbox(influencia |> dplyr::filter(faixa_m == 10000))
+
+ggplot() +
+  geom_sf(data = muni, fill = "grey98", colour = "grey80", linewidth = 0.2) +
+  geom_sf(data = grade_recorte |> dplyr::filter(pop > 0),
+          aes(fill = pop), colour = NA) +
+  geom_sf(data = influencia, fill = NA, colour = "#1a5b8a",
+          linewidth = 0.4, linetype = "dashed") +
+  geom_sf(data = br116, colour = "#b3402a", linewidth = 0.8) +
+  scale_fill_viridis_c(option = "rocket", direction = -1, transform = "log10",
+                       name = "Population\nper cell") +
+  coord_sf(xlim = recorte_vis[c("xmin", "xmax")],
+           ylim = recorte_vis[c("ymin", "ymax")], expand = FALSE) +
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.25) +
+  labs(
+    title = "BR-116 / Serra do Mar: 2, 5 and 10 km catchment bands",
+    caption = paste("Sources: road axis OpenStreetMap; population IBGE, statistical grid.",
+                    "Own elaboration.")
+  ) +
+  theme_void(base_size = 10) +
+  theme(plot.title = element_text(face = "bold", size = 11))
+```
+
+The map above covers the whole corridor, which leaves little room to see detail where
+settlement is densest. A second map, zoomed in on the Curitiba area, shows the
+distribution of population in the cells near the start of the corridor better:
+
+```{r}
+#| label: fig-caso-faixa-curitiba
+#| fig-cap: "Zoom on the Curitiba area: same catchment and population per cell"
+#| fig-height: 5.2
+zoom_curitiba <- muni |>
+  dplyr::filter(name_muni == "Curitiba") |>
+  sf::st_buffer(8000) |>
+  sf::st_bbox()
+
+ggplot() +
+  geom_sf(data = muni, fill = "grey98", colour = "grey80", linewidth = 0.2) +
+  geom_sf(data = grade_recorte |> dplyr::filter(pop > 0),
+          aes(fill = pop), colour = NA) +
+  geom_sf(data = influencia, fill = NA, colour = "#1a5b8a",
+          linewidth = 0.4, linetype = "dashed") +
+  # white outline underneath + thick line on top: the highway stands out from the grid
+  geom_sf(data = br116, colour = "white", linewidth = 3) +
+  geom_sf(data = br116, colour = "#1a5b8a", linewidth = 1.6) +
+  scale_fill_viridis_c(option = "rocket", direction = -1, transform = "log10",
+                       name = "Population\nper cell") +
+  coord_sf(xlim = zoom_curitiba[c("xmin", "xmax")],
+           ylim = zoom_curitiba[c("ymin", "ymax")], expand = FALSE) +
+  ggspatial::annotation_scale(location = "bl", width_hint = 0.25) +
+  labs(title = "Detail: start of the corridor, Curitiba area") +
+  theme_void(base_size = 10) +
+  theme(plot.title = element_text(face = "bold", size = 11))
+```
+
+## Step 7: Export
+
+```{r}
+#| eval: false
+dir.create("resultados", showWarnings = FALSE)
+
+# spatial layers, in a single GeoPackage, in the official CRS
+sf::st_write(sf::st_transform(influencia, 4674),  "resultados/br116_faixas.gpkg",
+         layer = "faixas_influencia", delete_dsn = TRUE)
+sf::st_write(sf::st_transform(br116, 4674),       "resultados/br116_faixas.gpkg",
+         layer = "eixo_br116", append = TRUE)
+
+# tables for the report
+writexl::write_xlsx(
+  list("Por faixa" = pop_por_faixa, "Por município" = pop_muni),
+  "resultados/br116_populacao.xlsx"
+)
+```
+
+## What this case study showed
+
+1. The *buffer* → clip → sum workflow, which in GIS is a sequence of clicks, is 15
+   lines here. And those 15 lines can be run again for another BR by changing one filter.
+2. The choice of CRS is not a detail: a *buffer* in metres requires a metric projection, and checking
+   the area (π r²) is the sanity test.
+3. The unit of the population data determines the method: the statistical grid allows a direct sum;
+   census tracts require area weighting, and that must be written in the report.
+4. The IBGE code, preserved by the spatial join, is the bridge to any other municipal
+   dataset. That is exactly what we will do in module 3.

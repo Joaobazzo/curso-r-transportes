@@ -1,0 +1,272 @@
+# Working environment {#sec-m1-ambiente}
+
+## What to install
+
+There are three components, in this order:
+
+1. **R**: the language itself. <https://cran.r-project.org/>. Install the latest version
+   (4.4 or later).
+2. **RStudio Desktop**: the development environment. <https://posit.co/downloads/>.
+3. **Rtools** (Windows only): build tools, needed to install
+   packages that must be compiled from source, such as `sf` and `terra`:
+   <https://cran.r-project.org/bin/windows/Rtools/>. Pick the version that matches your
+   R version.
+
+::: {.callout-important}
+## Installing on an institutional machine
+
+On Ministry computers, R and RStudio usually have to be installed by the IT
+team. In the same ticket, it is worth asking for: (i) R and RStudio, (ii) Rtools, (iii) write permission on
+a user package library folder and (iv) access to `cran.r-project.org`,
+`github.com` and the data domains (`servicodados.ibge.gov.br`, `apiservice.mdic.gov.br`,
+`web3.antaq.gov.br`). Without item (iv), installing packages and *downloading* data fail.
+:::
+
+Check the installation in the RStudio console:
+
+```{r}
+R.version.string
+```
+
+## Always work inside a project
+
+An **RStudio project** is a folder with an `.Rproj` file. It sets the *working
+directory*, which makes relative paths stable. Go to `File > New Project > New Directory`.
+
+Recommended structure:
+
+```
+meu-projeto/
+├── meu-projeto.Rproj
+├── dados/            # input data (never edited by hand)
+│   └── brutos/       # raw data
+├── R/                # scripts
+│   ├── 01-leitura.R
+│   ├── 02-limpeza.R
+│   └── 03-analise.R
+├── resultados/       # tables and charts produced
+└── relatorios/       # reports: .qmd / .Rmd
+```
+
+Three rules that avoid most reproducibility problems:
+
+1. **Never** use `setwd("C:/Users/...")`. Use the project and relative paths.
+2. **Never** edit raw data. Cleaning is done in code, so that it can be audited and
+   redone when the data are updated.
+3. Turn off automatic restoring of `.RData` in
+   `Tools > Global Options > General`, unticking *Restore .RData into workspace at startup*
+   and choosing *Never* in *Save workspace*. That way your session always starts clean and you
+   find out early if the script depends on something that is not written in it.
+
+To build paths across operating systems, use `file.path()`:
+
+```{r}
+file.path("dados", "cabotagem_tku_2025.csv")
+```
+
+## How to organise the course scripts
+
+This material's recommendation is simple and worth following to the letter: **one R script per
+module**, inside your project. When you open Module 2, create `R/modulo2.R` (or
+`modulo2.qmd`) and paste the code blocks from this site into it, in order. Each module is
+**independent**: the Module 2 script does not expect the Module 1 script to have run first, and
+Module 3 does not depend on Module 2. This is on purpose, not a limitation:
+
+- Each chapter downloads and stores in `dados/brutos/` (or reads from `dados/`) everything it needs, so
+  running a module's script from start to finish, in a fresh R session, always works.
+- You can revisit Module 2 weeks later without re-running earlier modules
+  to "rebuild the state" of the session.
+- Copy-and-paste mistakes stay contained in a single script instead of spreading to the
+  rest of the course.
+
+```
+meu-projeto/
+├── meu-projeto.Rproj
+├── dados/
+│   └── brutos/
+├── R/
+│   ├── modulo1.R      # everything you run in Module 1, top to bottom
+│   ├── modulo2.R      # starts from scratch: library(sf), reading the data, etc.
+│   └── modulo3.R
+└── resultados/
+```
+
+The only care really needed: start each script in a clean session (the tip in the previous
+section, about turning off automatic `.RData` restore, exists exactly for this) and
+with the `library()`/`::` calls from the start of the chapter. If a block fails because an object "does not
+exist", it is almost always because an earlier chunk of the **same** module has not been pasted or
+run yet.
+
+## Packages
+
+```{r}
+#| eval: false
+install.packages("dplyr")      # installs (once)
+library(dplyr)                 # loads (in each session)
+dplyr::filter                  # uses without loading
+packageVersion("dplyr")        # installed version
+update.packages(ask = FALSE)   # updates everything
+```
+
+CRAN packages are installed with `install.packages()`. Development versions on GitHub are
+installed differently. This is common for transport packages such as `flownet`:
+
+```{r}
+#| eval: false
+install.packages("remotes")
+remotes::install_github("SebKrantz/flownet")
+```
+
+::: {.callout-tip}
+## Record the versions
+
+At the end of a script or report, `sessionInfo()` (or `sessioninfo::session_info()`)
+prints the R version and the version of every loaded package. Pasting that output into the annex of a
+technical report is what makes it possible to reproduce the result months later.
+:::
+
+## Lock versions with `renv`
+
+`sessionInfo()` **records** the versions. `renv` goes further: it **reproduces** the environment.
+Each project gets its own package library, isolated from the others, and a
+`renv.lock` file listing the exact version of each package used.
+
+The problem it solves is concrete. You deliver a technical note in 2026 with a script
+that runs. In 2028 someone needs to update the numbers, opens the script, and it fails: `sf`
+changed an argument, `dplyr` deprecated a function. Without `renv`, nobody knows any more which
+versions produced that result.
+
+```{r}
+#| eval: false
+install.packages("renv")
+
+renv::init()       # once, at the start of the project: creates the library and renv.lock
+renv::snapshot()   # after installing or updating packages: writes the versions to the lock
+renv::status()     # is the lock consistent with what the code uses?
+renv::restore()    # on someone else's machine (or yours, two years from now)
+```
+
+The workflow, in practice:
+
+1. Create the project and run `renv::init()`.
+2. Install packages as usual, with `install.packages()`.
+3. When the script works, run `renv::snapshot()`.
+4. Put `renv.lock` under version control together with the code (Git and GitHub, in Module 5). **Do not** version the
+   `renv/library/` folder, which is large and which `renv` itself already adds to `.gitignore`.
+
+Whoever receives the project runs a single command, `renv::restore()`, and gets exactly the same
+versions.
+
+::: {.callout-note}
+## `renv` on an institutional machine
+
+`renv` keeps a global package *cache*, so the same version of `sf` is not downloaded
+again for each project. On computers behind a proxy, `restore()` depends on the same access to CRAN
+as `install.packages()`; if one fails, so does the other. Sort out access first.
+:::
+
+## Where to look for help
+
+```{r}
+#| eval: false
+?mean                      # function documentation
+help(package = "dplyr")    # package documentation
+vignette(package = "sf")   # long tutorials of the package
+example(mean)              # runnable examples
+```
+
+A package's documentation usually also has a *website*, easier to read, with usage articles:
+`sf`, `dplyr`, `r5r` and `geobr` are good examples.
+
+## AI in the workflow
+
+AI assistants speed up R work a lot, especially in three situations:
+
+- **Turning intent into code**: "group by destination state and sum the TKU" becomes `dplyr`
+  code in seconds.
+- **Interpreting error messages**: pasting the message and the surrounding lines usually gives the
+  diagnosis right away.
+- **Converting routines**: turning a procedure done in ArcGIS/QGIS, or a spreadsheet
+  with formulas, into an equivalent script.
+
+Ways to use them inside RStudio or VS Code:
+
+| Tool | How it fits the workflow |
+|:--|:--|
+| GitHub Copilot | Autocomplete inside RStudio (`Tools > Global Options > Copilot`) |
+| Claude, ChatGPT, Gemini (browser) | Paste code/error and ask for an explanation or review |
+| `ellmer` package | Call models from inside R, within a script |
+| `chattr`, `gander` | *Chat* interface attached to RStudio |
+
+### What you **cannot** paste
+
+Any text pasted into an AI assistant hosted outside the organisation leaves the Ministry's network. In
+services for personal use, it may also be used to train future models. The rule is
+simple: **if you would not publish the content on the Ministry's website, do not paste it.**
+
+In our context, this includes:
+
+- Spreadsheets from ongoing studies, drafts of technical notes, terms of reference.
+- Any personal data (name, CPF tax number, licence plate, an individual's address), which is also
+  covered by Brazil's data protection law (LGPD).
+- Credentials: passwords, API *tokens*, database connection *strings*. A *token*
+  pasted once must be considered leaked.
+
+### How to ask for help without pasting the data
+
+Most of the time the AI does not need your data. It needs its **structure** and the
+**error**. Three safe ways, from the simplest to the most complete:
+
+**1. Describe the format.** Instead of pasting the table:
+
+```{r}
+#| eval: false
+str(links)        # paste the OUTPUT of this: column names and types, without the content
+names(links)
+```
+
+**2. Build a toy dataset** with the same structure and made-up values:
+
+```{r}
+exemplo <- data.frame(
+  no        = c(1, 1, 2),
+  sentido   = c("direto", "inverso", "direto"),
+  volvehprt = c(100, 80, 250),
+  comprimento_km = c(0.5, 0.5, 1.2)
+)
+dput(exemplo)     # paste the output: it is text and recreates the table instantly
+```
+
+**3. Make a minimal reproducible example with `reprex`.** It runs your snippet in a clean
+session and formats code and output ready to paste into a *chat*, a forum or an *issue*:
+
+```{r}
+#| eval: false
+install.packages("reprex")
+
+reprex::reprex({
+  exemplo <- data.frame(no = c(1, 1, 2), volvehprt = c(100, 80, 250))
+  exemplo |> dplyr::summarise(total = sum(volvehprt), .by = no)
+})
+```
+
+Building the `reprex` solves half the problems before you even ask: by isolating
+the error in a five-line example, you often find the cause on your own.
+
+::: {.callout-warning}
+## Check what was generated
+
+1. **AI makes things up.** Arguments that do not exist, functions from outdated packages, column
+   names that are not in your data. Run it and check on a small subset where you know
+   the right answer.
+2. **AI does not know your dataset.** It does not know that VISUM's `VEHKMTRAVPRT` comes in metres,
+   nor that the Comex Stat municipality code is not the IBGE one (@sec-m3-comexstat). That
+   knowledge is yours, and it is what makes the result defensible.
+3. **Ask for the explanation, not just the code.** The goal of the course is for you to be able to read,
+   fix and technically defend what the script does.
+:::
+
+A useful prompt in our context has four parts: what you have, what you want, with which
+tool and what the constraint is. For example: *"I have a data.frame with columns origin state, destination
+state and TKU. I want the 10 largest interstate links by TKU, using dplyr, keeping the
+column names."*

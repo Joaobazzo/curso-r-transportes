@@ -1,0 +1,672 @@
+# Network diagnosis {.unnumbered}
+
+When `dodgr` (@sec-m4-roteamento) returns `NA` for a route, or a distance matrix
+comes out full of holes, the problem is almost never in the routing function: it is in the **network**.
+Pieces of the network that do not connect to the rest, roads that cross without a shared node, one-way
+stretches that lead into a dead end. This page is a complete case study, with module 4's
+São Paulo–Santos network: the diagnosis of each problem, the maps that show where it
+is, and the solutions, compared at the end.
+
+It is reproducible from start to finish: every block is run when the site is built, and
+the same code runs on your machine from the course folder. It takes about 4 minutes.
+
+```{r}
+#| message: false
+library(dplyr)
+library(sf)
+library(dodgr)
+
+dodgr::dodgr_cache_off()   # the graph is edited along the page: no cache, no surprises
+
+crs_metrico <- 31983       # SIRGAS 2000 / UTM 23S: distances in metres in the SP region
+
+# empty map, framed on the data, with the height used on the site
+mapa_base <- function(dados, altura = "525px") {
+  mapgl::maplibre(style = mapgl::carto_style("positron"), bounds = dados, height = altura)
+}
+```
+
+## 1. Reading and cleaning the network
+
+The network is the one from the routing chapter: OSM's main roads (from `motorway` to
+`secondary`) in a rectangle between São Paulo and Santos.
+
+```{r}
+arquivo_rede <- "dados/brutos/rede_sao_paulo_santos.gpkg"
+
+# the rectangle of the OSM query; it is also the edge of the study area
+retangulo <- c(xmin = -46.80, ymin = -24.02, xmax = -46.25, ymax = -23.45)
+
+if (!file.exists(arquivo_rede)) {
+  # slow download (several minutes): the file usually already comes in the data package
+  osmdata::set_overpass_url("https://overpass.kumi.systems/api/interpreter")
+
+  res <- osmdata::opq(bbox = unname(retangulo), timeout = 300) |>
+    osmdata::add_osm_feature(key = "highway", value = c(
+      "motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
+      "secondary", "secondary_link")) |>
+    osmdata::osmdata_sf()
+
+  res$osm_lines |>
+    dplyr::select(dplyr::any_of(c("osm_id", "name", "ref", "highway", "maxspeed",
+                                  "oneway", "lanes"))) |>
+    sf::st_write(arquivo_rede, quiet = TRUE)
+}
+
+rede_bruta <- sf::st_read(arquivo_rede, quiet = TRUE) |>
+  dplyr::rename(geometry = geom)
+
+table(rede_bruta$oneway, useNA = "ifany")
+```
+
+The basic cleaning fixes what would make `dodgr` complain or go wrong silently:
+
+```{r}
+rede <- rede_bruta |>
+  # empty or invalid geometries break weight_streetnet()
+  dplyr::filter(!sf::st_is_empty(geometry)) |>
+  sf::st_make_valid() |>
+  # the same OSM way should not appear twice
+  dplyr::distinct(osm_id, .keep_all = TRUE) |>
+  # dodgr only understands oneway = "yes"/"no"; "alternating" (direction that alternates during
+  # the day) and empty become "no", that is, two-way
+  dplyr::mutate(oneway = dplyr::if_else(oneway %in% "yes", "yes", "no"))
+
+# if st_make_valid() produced MULTILINESTRING or collections, split into LINESTRING
+if (!all(sf::st_geometry_type(rede) == "LINESTRING")) {
+  rede <- rede |>
+    sf::st_collection_extract("LINESTRING") |>
+    sf::st_cast("LINESTRING", warn = FALSE)
+}
+
+c(trechos_brutos = nrow(rede_bruta), trechos_tratados = nrow(rede))
+table(rede$oneway)
+```
+
+On this network, the cleaning discards no segment; what changes is the `oneway` column, which
+no longer has values that `dodgr` does not understand.
+
+The edge of the study area is the query rectangle, not the network's own bounding box: OSM
+returns whole ways, including what goes past the limit.
+
+```{r}
+area_estudo <- sf::st_bbox(retangulo, crs = sf::st_crs(4326)) |>
+  sf::st_as_sfc() |>
+  sf::st_transform(crs_metrico)
+borda <- sf::st_cast(area_estudo, "MULTILINESTRING")
+borda_mapa <- sf::st_sf(geometry = sf::st_transform(borda, 4326))   # for the maps
+
+# distance to the edge; a point outside the rectangle counts as "on the edge"
+dist_borda <- function(pontos) {
+  d <- as.numeric(sf::st_distance(pontos, borda))
+  fora <- !lengths(sf::st_intersects(pontos, area_estudo))
+  ifelse(fora, 0, d)
+}
+```
+
+## 2. Building the graph and counting the pieces
+
+```{r}
+grafo <- dodgr::weight_streetnet(rede, wt_profile = "motorcar", type_col = "highway")
+
+arestas_por_comp <- table(grafo$component)
+length(arestas_por_comp)                               # how many components
+head(sort(arestas_por_comp, decreasing = TRUE), 8)     # edges in the largest ones
+```
+
+The `component` column says which connected piece each edge belongs to; component 1 is always
+the largest. The network has `r length(arestas_por_comp)` components, and the main one holds
+`r format(round(100 * arestas_por_comp[["1"]] / nrow(grafo), 2))`% of the
+edges. The rest are loose pieces: few in edges, but each is a place from which no
+route leaves.
+
+## 3. Where the loose pieces are, and why
+
+For each vertex of the loose pieces, we measure the distance to the nearest vertex of the
+main component and to the edge of the study area:
+
+```{r}
+vertices <- dodgr::dodgr_vertices(grafo) |>
+  sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE) |>
+  sf::st_transform(crs_metrico)
+
+principal <- dplyr::filter(vertices, component == 1)
+soltos    <- dplyr::filter(vertices, component > 1)
+
+mais_proximo <- sf::st_nearest_feature(soltos, principal)
+soltos$dist_principal <- as.numeric(sf::st_distance(soltos, principal[mais_proximo, ],
+                                                    by_element = TRUE))
+soltos$id_principal <- principal$id[mais_proximo]
+soltos$dist_borda   <- dist_borda(soltos)
+```
+
+And we join the network's lines to each component, to see the road type and length, and to
+test whether the loose piece **crosses** the main one without sharing a node:
+
+```{r}
+# the network lines (with geometry, type and road name) that make up the requested components
+vias_malha <- dplyr::select(rede, way_id = osm_id, highway, name, geometry)
+
+linhas_por_comp <- function(comps) {
+  # each OSM way (way_id) appears once per component
+  vias_comp <- grafo |>
+    dplyr::filter(component %in% comps) |>
+    dplyr::distinct(way_id, component)
+
+  vias_comp |>
+    dplyr::left_join(vias_malha, by = "way_id") |>
+    sf::st_as_sf() |>
+    sf::st_transform(crs_metrico)
+}
+
+linhas_soltas    <- linhas_por_comp(unique(soltos$component))
+linhas_principal <- linhas_por_comp(1)
+
+linhas_soltas$cruza <- lengths(sf::st_intersects(linhas_soltas, linhas_principal)) > 0
+```
+
+With these measures, each piece gets a **likely cause**, tested in this order:
+
+| Cause | Rule | Solution |
+|:--|:--|:--|
+| Cut at the edge | less than 500 m from the edge | download OSM with a margin and crop afterwards |
+| Near-coincident ends | less than 5 m from the main component | snap the ends together |
+| Road outside the profile or the download | less than 300 m from the main component | download more road types, or create a connector |
+| Crosses without a node | crosses the main component with no shared vertex | in OSM, it is an overpass (do not connect); outside OSM, create the nodes |
+| Isolated | none of the above | a connector, if it makes sense, or discard |
+
+The summary combines three tables, all with one row per loose component. We build each one
+separately and then join them.
+
+The first comes from the **vertices**: how many there are and how close the piece gets to the main component and to the
+edge (the shortest distance among its vertices):
+
+```{r}
+por_vertices <- soltos |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(
+    vertices         = dplyr::n(),
+    dist_principal_m = min(dist_principal),
+    dist_borda_m     = min(dist_borda),
+    .by = component
+  )
+```
+
+The second comes from the network's **lines**: the road types in the piece and how many of its lines cross
+the main component:
+
+```{r}
+por_linhas <- linhas_soltas |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(
+    vias        = paste(sort(unique(highway)), collapse = ", "),
+    cruzamentos = sum(cruza),
+    .by = component
+  )
+```
+
+The third comes from the **graph**: the number of edges and the length. The graph has both directions of each
+road, so the sum of the distances is divided by 2:
+
+```{r}
+por_arestas <- grafo |>
+  dplyr::filter(component > 1) |>
+  dplyr::summarise(
+    arestas = dplyr::n(),
+    km      = sum(d) / 2 / 1000,
+    .by = component
+  )
+```
+
+Now, the three together, and the likely cause, by the rules in the table above. `case_when()` tests the
+rules in order and keeps the first one that holds:
+
+```{r}
+resumo <- por_vertices |>
+  dplyr::left_join(por_linhas,  by = "component") |>
+  dplyr::left_join(por_arestas, by = "component") |>
+  dplyr::mutate(causa = dplyr::case_when(
+    dist_borda_m < 500     ~ "Cut at the edge",
+    dist_principal_m < 5   ~ "Near-coincident ends",
+    dist_principal_m < 300 ~ "Road outside the profile or download",
+    cruzamentos > 0        ~ "Crosses without a node",
+    TRUE                   ~ "Isolated"
+  )) |>
+  dplyr::arrange(dplyr::desc(arestas))
+
+resumo |>
+  dplyr::select(component, arestas, km, vias, dist_principal_m, dist_borda_m, causa) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","),
+               col.names = c("Component", "Edges", "km", "Roads", "Dist. to main (m)",
+                             "Dist. to edge (m)", "Likely cause"))
+```
+
+```{r}
+resumo |>
+  dplyr::summarise(pedacos = dplyr::n(), arestas = sum(arestas), km = sum(km), .by = causa) |>
+  dplyr::arrange(dplyr::desc(arestas)) |>
+  knitr::kable(digits = 1,
+               col.names = c("Likely cause", "Pieces", "Edges", "km"))
+```
+
+On the map, the loose pieces coloured by cause, over the roads of the main component within
+1 km of them. Hover over a segment to see the component and the distance:
+
+```{r}
+cores_causa <- c("Cut at the edge" = "#7A1F0F", "Near-coincident ends" = "#E7A07A",
+                 "Road outside the profile or download" = "#C2542D", "Crosses without a node" = "#2F6B9A",
+                 "Isolated" = "#173A57")
+cores_causa <- cores_causa[names(cores_causa) %in% resumo$causa]
+
+causas <- dplyr::select(resumo, component, causa, dist_principal_m)
+
+soltos_mapa <- linhas_soltas |>
+  dplyr::left_join(causas, by = "component") |>
+  dplyr::mutate(rotulo = paste0("component ", component, ": ", causa, " (",
+                                round(dist_principal_m), " m from the main one)")) |>
+  sf::st_transform(4326)
+
+perto <- sf::st_is_within_distance(linhas_principal, linhas_soltas, dist = 1000)
+contexto <- linhas_principal[lengths(perto) > 0, ] |> sf::st_transform(4326)
+
+mapa_base(soltos_mapa) |>
+  mapgl::add_line_layer(id = "borda", source = borda_mapa,
+                        line_color = "#333333", line_width = 1.5, line_dasharray = c(2, 2)) |>
+  mapgl::add_line_layer(id = "principal", source = contexto,
+                        line_color = "#9a9a9a", line_width = 1.5) |>
+  mapgl::add_line_layer(
+    id = "soltos", source = soltos_mapa, line_width = 4, tooltip = "rotulo",
+    line_color = mapgl::match_expr("causa", values = names(cores_causa),
+                                   stops = unname(cores_causa))
+  ) |>
+  mapgl::add_legend("Likely cause", values = names(cores_causa),
+                    colors = unname(cores_causa), type = "categorical")
+```
+
+### Up close: one piece of each cause
+
+Zooming in on one example of each cause, with a dashed line between the point of the loose piece and the
+nearest vertex of the main component:
+
+```{r}
+mapa_detalhe <- function(comp) {
+  pedaco <- dplyr::filter(soltos_mapa, component == comp)
+  # the closest pair of vertices: one from the loose piece, one from the main component
+  par  <- dplyr::filter(soltos, component == comp) |> dplyr::slice_min(dist_principal, n = 1)
+  alvo <- dplyr::filter(principal, id == par$id_principal)
+  ponta_a <- sf::st_coordinates(sf::st_transform(par, 4326))
+  ponta_b <- sf::st_coordinates(sf::st_transform(alvo, 4326))
+  ligacao <- sf::st_sf(
+    distancia = paste(round(par$dist_principal, 1), "m"),
+    geometry  = sf::st_sfc(sf::st_linestring(rbind(ponta_a, ponta_b)), crs = 4326)
+  )
+  janela <- sf::st_buffer(sf::st_transform(pedaco, crs_metrico), 400) |>
+    sf::st_union() |>
+    sf::st_transform(4326)
+  vizinhas <- contexto[lengths(sf::st_intersects(contexto, janela)) > 0, ]
+
+  mapa_base(janela, altura = "380px") |>
+    mapgl::add_line_layer(id = paste0("p", comp), source = vizinhas,
+                          line_color = "#9a9a9a", line_width = 2, tooltip = "highway") |>
+    mapgl::add_line_layer(id = paste0("s", comp), source = pedaco, line_width = 5,
+                          line_color = unname(cores_causa[pedaco$causa[1]]), tooltip = "rotulo") |>
+    mapgl::add_line_layer(id = paste0("l", comp), source = ligacao, line_color = "#000000",
+                          line_width = 2, line_dasharray = c(1, 1), tooltip = "distancia")
+}
+
+exemplos <- resumo |> dplyr::slice_max(arestas, n = 1, by = causa)
+```
+
+```{r}
+# one map per example, each with a title
+htmltools::tagList(lapply(seq_len(nrow(exemplos)), function(i) {
+  htmltools::tagList(
+    htmltools::tags$p(htmltools::tags$strong(exemplos$causa[i]),
+                      sprintf(" (component %d, %s km, %s m from the main one)",
+                              exemplos$component[i],
+                              format(round(exemplos$km[i], 1)),
+                              format(round(exemplos$dist_principal_m[i], 1)))),
+    mapa_detalhe(exemplos$component[i])
+  )
+}))
+```
+
+What the examples show:
+
+- **Near-coincident ends**: the loose road ends a few metres from another, but OSM does not
+  have the meeting node. It is a mapping error, and a connector a few metres long solves it.
+- **Road outside the profile or download**: the loose stretch would connect to the rest through a
+  `tertiary` or local road, which was not downloaded. The real fix is to include those road
+  types in the OSM query; the connector is a stopgap.
+- **Cut at the edge**: the road leaves the rectangle and comes back, or only connects to the rest outside it.
+  Download OSM with a margin of a few kilometres and crop only the results.
+- **Isolated**: far from everything. Either you accept a long connector, or you discard it.
+
+## 4. Quick fix: only the main component
+
+In most studies, this is enough. Origin and destination points are then linked to the
+nearest vertex of the connected network:
+
+```{r}
+grafo_principal <- grafo[grafo$component == 1, ]
+
+c(arestas_antes = nrow(grafo), arestas_depois = nrow(grafo_principal),
+  km_descartados = round(sum(resumo$km), 1))
+```
+
+## 5. One-way streets: you can go, but you cannot come back
+
+`component` says whether the pieces **touch**, not whether it is possible to go and come back respecting the
+direction of the roads. That is what **strongly connected components** are for: within one, from any
+vertex you can reach any other. A vertex outside the largest strong component is a place you
+can reach but cannot leave (a dead end), or the reverse: the route gives `NA`, with no error.
+
+```{r}
+g_igraph <- dodgr::dodgr_to_igraph(grafo_principal)
+fortes   <- igraph::components(g_igraph, mode = "strong")
+ids_fortes <- names(fortes$membership)[fortes$membership == which.max(fortes$csize)]
+
+presos <- setdiff(igraph::V(g_igraph)$name, ids_fortes)
+
+c(componentes_fortes = fortes$no,
+  vertices_presos    = length(presos),
+  pct_presos         = round(100 * length(presos) / igraph::vcount(g_igraph), 1))
+```
+
+For each trapped vertex, we test whether it can be reached from the core, and whether one can
+get back from it to the core:
+
+```{r}
+um_do_nucleo <- which(igraph::V(g_igraph)$name == ids_fortes[1])
+ida   <- igraph::distances(g_igraph, v = um_do_nucleo, to = presos, mode = "out")
+volta <- igraph::distances(g_igraph, v = um_do_nucleo, to = presos, mode = "in")
+
+v_presos <- vertices |>
+  dplyr::filter(id %in% presos) |>
+  dplyr::left_join(data.frame(id = presos, entra = is.finite(ida[1, ]),
+                              sai = is.finite(volta[1, ])), by = "id") |>
+  dplyr::mutate(tipo = dplyr::case_when(
+    entra & !sai ~ "Sink: in but not out",
+    !entra & sai ~ "Source: out but not in",
+    TRUE         ~ "Neither in nor out"
+  ))
+v_presos$dist_borda <- dist_borda(v_presos)
+
+dplyr::count(sf::st_drop_geometry(v_presos), tipo, sort = TRUE)
+
+# near the edge? and on what type of road?
+round(100 * mean(v_presos$dist_borda < 1000))       # % less than 1 km from the edge
+grafo_principal |>
+  dplyr::filter(from_id %in% presos | to_id %in% presos) |>
+  dplyr::count(highway, sort = TRUE) |>
+  head(6)
+```
+
+On the map, each trapped vertex, coloured by type. Zoom in on a slip road or an
+interchange to see the pattern:
+
+```{r}
+cores_tipo <- c("Sink: in but not out" = "#C2542D", "Source: out but not in" = "#2F6B9A",
+                "Neither in nor out" = "#7A7A7A")
+
+presos_mapa <- v_presos |>
+  dplyr::select(id, tipo) |>
+  sf::st_transform(4326)
+
+mapa_base(presos_mapa) |>
+  mapgl::add_line_layer(id = "borda2", source = borda_mapa,
+                        line_color = "#333333", line_width = 1.5, line_dasharray = c(2, 2)) |>
+  mapgl::add_circle_layer(
+    id = "presos", source = presos_mapa, circle_radius = 2.5, circle_opacity = 0.8,
+    circle_color = mapgl::match_expr("tipo", values = names(cores_tipo),
+                                     stops = unname(cores_tipo)),
+    tooltip = "tipo"
+  ) |>
+  mapgl::add_legend("Vertices trapped by one-way streets", values = names(cores_tipo),
+                    colors = unname(cores_tipo), type = "categorical")
+```
+
+Most trapped vertices are far from the edge, on slip roads (`_link`) and secondary roads. The
+likely hypothesis is that the way back depends on roads that were not downloaded: the same problem as in
+section 3, now with direction of travel. The routing solution is to keep only the strong core:
+
+```{r}
+grafo_forte <- grafo_principal[grafo_principal$from_id %in% ids_fortes &
+                               grafo_principal$to_id   %in% ids_fortes, ]
+nrow(grafo_forte)
+```
+
+## 6. Crossings without a node: datasets outside OSM
+
+In OSM, roads that cross at grade share a node; those that cross without a node are
+overpasses and tunnels, and must **not** be connected. On this network,
+`r sum(linhas_soltas$cruza)` loose segments cross the main component without a node, and those are such cases.
+
+In datasets such as DNIT's SNV or your own *shapefile*, however, lines often cross without a
+shared vertex, and the graph comes out all chopped up. A minimal example, with two roads in an X:
+
+```{r}
+x_sem_no <- sf::st_sf(
+  osm_id  = c("a", "b"), highway = c("primary", "secondary"), oneway = "no",
+  geometry = sf::st_sfc(sf::st_linestring(rbind(c(-46.34, -23.96), c(-46.32, -23.94))),
+                        sf::st_linestring(rbind(c(-46.34, -23.94), c(-46.32, -23.96))),
+                        crs = 4326))
+
+dodgr::weight_streetnet(x_sem_no, wt_profile = "motorcar", type_col = "highway",
+                        id_col = "osm_id")$component |> table()
+```
+
+Two components: the roads cross, but the graph does not know it. The function below creates a node at each
+crossing and snaps ends less than 5 m apart:
+
+```{r}
+nodar_linhas <- function(linhas, tolerancia_m = 5, crs = crs_metrico) {
+  linhas <- sf::st_transform(linhas, crs)
+  linhas <- sf::st_snap(linhas, linhas, tolerance = tolerancia_m)   # joins nearby ends
+
+  # st_node() creates a node at each crossing; st_cast() separates the pieces between nodes
+  pedacos <- linhas |>
+    sf::st_union() |>
+    sf::st_node() |>
+    sf::st_cast("LINESTRING") |>
+    sf::st_sf(geometry = _)
+
+  # each piece inherits the attributes of the original line it lies on (by its midpoint)
+  meio   <- sf::st_cast(sf::st_line_sample(pedacos, sample = 0.5), "POINT")
+  origem <- sf::st_nearest_feature(meio, linhas)
+  pedacos <- sf::st_sf(sf::st_drop_geometry(linhas)[origem, , drop = FALSE],
+                       geometry = sf::st_geometry(pedacos))
+  pedacos$osm_id <- paste0(pedacos$osm_id, "_", seq_len(nrow(pedacos)))   # unique ids
+  sf::st_transform(pedacos, 4326)
+}
+
+x_nodado <- nodar_linhas(x_sem_no)
+x_nodado
+
+dodgr::weight_streetnet(x_nodado, wt_profile = "motorcar", type_col = "highway",
+                        id_col = "osm_id")$component |> table()
+```
+
+A single component, with four segments meeting at the crossing. Do not apply this to an
+OSM network: it would connect every overpass to the road below.
+
+## 7. Reconnecting the loose pieces
+
+When you do not want to lose the pieces, you create a **link edge** (in both directions)
+between each loose piece and the nearest vertex of the main component. A distance limit prevents
+absurd links, and a penalty makes routing avoid using the connector as a shortcut:
+
+```{r}
+reconectar_componentes <- function(grafo, limite_m = 300, penalidade = 3, vel_kmh = 20) {
+  v <- dodgr::dodgr_vertices(grafo) |>
+    sf::st_as_sf(coords = c("x", "y"), crs = 4326, remove = FALSE) |>
+    sf::st_transform(crs_metrico)
+  principal <- v[v$component == 1, ]
+  soltos    <- v[v$component > 1, ]
+  if (nrow(soltos) == 0) return(grafo)
+
+  idx <- sf::st_nearest_feature(soltos, principal)
+  soltos$to_id  <- principal$id[idx]
+  soltos$to_lon <- principal$x[idx]
+  soltos$to_lat <- principal$y[idx]
+  soltos$d      <- as.numeric(sf::st_distance(soltos, principal[idx, ], by_element = TRUE))
+
+  # one link per piece: the closest pair of vertices, within the limit
+  lig <- soltos |>
+    sf::st_drop_geometry() |>
+    dplyr::slice_min(d, n = 1, with_ties = FALSE, by = component) |>
+    dplyr::filter(d <= limite_m)
+  if (nrow(lig) == 0) return(grafo)
+
+  ida <- data.frame(from_id = lig$id,    from_lon = lig$x,      from_lat = lig$y,
+                    to_id   = lig$to_id, to_lon   = lig$to_lon, to_lat   = lig$to_lat,
+                    d = lig$d)
+  volta <- data.frame(from_id = ida$to_id,   from_lon = ida$to_lon,   from_lat = ida$to_lat,
+                      to_id   = ida$from_id, to_lon   = ida$from_lon, to_lat   = ida$from_lat,
+                      d = ida$d)
+
+  novas <- dplyr::bind_rows(ida, volta) |>
+    dplyr::mutate(
+      d             = pmax(d, 1),              # coincident ends: 1 m, never zero
+      d_weighted    = d * penalidade,          # discourages using the connector
+      highway       = "conector",
+      time          = d / (vel_kmh / 3.6),
+      time_weighted = time * penalidade
+    )
+  novas$edge_id <- max(grafo$edge_id) + seq_len(nrow(novas))
+
+  saida <- dplyr::bind_rows(as.data.frame(grafo), novas)
+  saida$component <- NULL
+  saida <- dodgr::dodgr_components(saida)      # recomputes: component 1 is the largest again
+  class(saida) <- class(grafo)                 # gives back the dodgr class
+  attr(saida, "wt_profile") <- attr(grafo, "wt_profile")
+  saida
+}
+```
+
+The function runs until the number of components stops changing: a piece far from the main component may
+end up close to another that has just been connected.
+
+```{r}
+grafo_rec <- grafo
+rodadas <- c(length(unique(grafo_rec$component)))
+repeat {
+  grafo_rec <- reconectar_componentes(grafo_rec, limite_m = 300)
+  rodadas <- c(rodadas, length(unique(grafo_rec$component)))
+  if (rodadas[length(rodadas)] == rodadas[length(rodadas) - 1]) break
+}
+rodadas                                   # components after each round
+
+conectores <- grafo_rec[grafo_rec$highway == "conector", ]
+c(conectores = nrow(conectores) / 2, maior_m = round(max(conectores$d)))
+```
+
+On the map, the connectors created (in black) and the pieces they link. Notice how almost all of them
+are very short:
+
+```{r}
+conectores_sf <- conectores |>
+  dplyr::filter(from_id < to_id) |>           # one per pair (there and back are the same stroke)
+  dplyr::mutate(geometry = sf::st_sfc(
+    lapply(seq_len(dplyr::n()), \(i) sf::st_linestring(rbind(c(from_lon[i], from_lat[i]),
+                                                             c(to_lon[i], to_lat[i])))),
+    crs = 4326),
+    rotulo = paste(round(d), "m")) |>
+  sf::st_as_sf()
+
+mapa_base(soltos_mapa) |>
+  mapgl::add_line_layer(id = "principal3", source = contexto,
+                        line_color = "#9a9a9a", line_width = 1.5) |>
+  mapgl::add_line_layer(id = "soltos3", source = soltos_mapa, line_width = 4,
+                        line_color = mapgl::match_expr("causa", values = names(cores_causa),
+                                                       stops = unname(cores_causa))) |>
+  mapgl::add_line_layer(id = "conectores", source = conectores_sf, line_color = "#000000",
+                        line_width = 4, tooltip = "rotulo") |>
+  mapgl::add_circle_layer(id = "conectores_ponta", source = sf::st_cast(conectores_sf, "POINT"),
+                          circle_color = "#000000", circle_radius = 3)
+```
+
+Three precautions:
+
+- **The penalty matters.** Without it, a route may use the connector as a shortcut. When measuring
+  accessibility, it is worth reporting how many routes go through a connector.
+- **One-way streets are not solved here.** The connector is two-way, but the piece may be one-way
+  inside; the next section shows how many remain.
+- **The connector is a stopgap.** It hides a flaw in the network; the real fix, when
+  possible, is to download or repair the missing road.
+
+## 8. Checking: routes before and after
+
+Two samples of points, routed on five versions of the graph: 300 vertices drawn at random across the
+network, and one vertex from each loose piece. The question is simple: for how many pairs is there no route?
+
+```{r}
+so_o_forte <- function(g) {
+  g1 <- g[g$component == 1, ]
+  f  <- igraph::components(dodgr::dodgr_to_igraph(g1), mode = "strong")
+  ids <- names(f$membership)[f$membership == which.max(f$csize)]
+  g1[g1$from_id %in% ids & g1$to_id %in% ids, ]
+}
+
+grafos <- list(
+  "Original"                     = grafo,
+  "Main only"                    = grafo_principal,
+  "Main only, strong core"       = grafo_forte,
+  "Reconnected"                  = grafo_rec,
+  "Reconnected, strong core"     = so_o_forte(grafo_rec)
+)
+
+set.seed(42)
+amostra_rede   <- vertices |> sf::st_drop_geometry() |> dplyr::slice_sample(n = 300)
+amostra_soltos <- soltos   |> sf::st_drop_geometry() |> dplyr::slice_sample(n = 1, by = component)
+
+sem_rota <- function(g, pts) {
+  pts <- as.matrix(pts[, c("x", "y")])
+  m <- dodgr::dodgr_dists(g, from = pts, to = pts)
+  100 * mean(is.na(m[row(m) != col(m)]))
+}
+
+comparacao <- data.frame(
+  grafo   = names(grafos),
+  arestas = vapply(grafos, nrow, integer(1)),
+  rede    = vapply(grafos, sem_rota, numeric(1), pts = amostra_rede),
+  soltos  = vapply(grafos, sem_rota, numeric(1), pts = amostra_soltos),
+  row.names = NULL
+)
+
+comparacao |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","),
+               col.names = c("Graph", "Edges", "No route: whole network (%)",
+                             "No route: loose pieces (%)"))
+```
+
+```{r}
+ids_nucleo_rec <- unique(c(grafos[["Reconnected, strong core"]]$from_id,
+                           grafos[["Reconnected, strong core"]]$to_id))
+recuperados <- soltos |>
+  sf::st_drop_geometry() |>
+  dplyr::summarise(no_nucleo = mean(id %in% ids_nucleo_rec), .by = component)
+```
+
+In a pruned graph, a point that was in a discarded piece is linked to the nearest
+vertex that remains, and so it gets a route; the distance of that "jump" is left out of the calculation.
+
+## What this network teaches
+
+- There are `r nrow(resumo)` **loose pieces**, with
+  `r format(round(sum(resumo$km), 1))` km of road. The most common cause is a
+  link through a road that was not downloaded: the network only has roads up to `secondary`.
+- **One-way streets** are the bigger problem: `r format(length(presos), big.mark = ",")` vertices
+  (`r format(round(100 * length(presos) / igraph::vcount(g_igraph), 1))`%)
+  are outside the core where you can go and come back, and they are what make the route come out `NA`.
+- **Reconnecting** joins the pieces into a single component, but only
+  `r sum(recuperados$no_nucleo >= 0.5)` of the `r nrow(recuperados)` get a way there and back: the
+  connector does not solve one-way streets.
+- To route on this network, the solution that brings the pairs with no route down to zero is the **strong core**, with the
+  points linked to it.
+- To lose no piece at all, the way is the source of the problem: also download the
+  `tertiary` and `tertiary_link` roads and repeat this diagnosis. This page did not test that
+  hypothesis; it is the natural exercise to settle it.
+
+The same routine works for any network: build the graph, count the weak and the
+strong components, put the loose pieces on a map, and only then choose the fix.

@@ -1,0 +1,347 @@
+# Comex Stat: the `join` that makes São Paulo disappear {#sec-m3-comexstat}
+
+::: {.modulo-meta}
+**Data:** Comex Stat (MDIC), municipal export dataset and lookup tables
+**Downloaded by:** `R/preparar_modulo3.R` (@sec-m3), in the module's data package
+**Prerequisites:** @sec-m1-joins and @sec-m3-duckdb
+:::
+
+Comex Stat is the most used public dataset for analysing Brazilian foreign trade, and it is
+where the most mistakes are made. This chapter walks through one specific mistake: a `join` that runs without
+complaining, matches 90% of the rows, and erases the country's largest exporting state from the report.
+
+## The two datasets, and what cannot be combined
+
+The portal publishes two files per year and per flow, and they do **not** have the same granularity:
+
+| | `ncm/EXP_2024.csv` | `mun/EXP_2024_MUN.csv` |
+|:--|:--|:--|
+| Product | NCM, 8 digits | **HS4**, 4 digits |
+| Territory | state (`SG_UF_NCM`) | **municipality** (`CO_MUN`) |
+| Transport mode | `CO_VIA` | **not available** |
+| Customs unit of shipment | `CO_URF` | **not available** |
+| Statistical quantity | `QT_ESTAT` | **not available** |
+
+::: {.callout-important}
+## Municipality and transport mode do not exist in the same table
+
+This is not a limitation of the file you downloaded: it is the structure of the dataset. Any analysis of
+"municipal origin of cargo by mode" can only be done **by state**, assuming that the state's modal
+split holds for all of its municipalities. That assumption must be written in the
+report, not implicit in the code.
+
+Knowing what the dataset does **not** answer is part of the job, and finding it out before promising
+the product is the difference between a calm meeting and a bad one.
+:::
+
+## Step 1: Download
+
+```{r}
+dir.create("dados/brutos/comexstat", recursive = TRUE, showWarnings = FALSE)
+
+baixa <- function(url, arquivo) {
+  caminho <- file.path("dados/brutos/comexstat", arquivo)
+  if (!file.exists(caminho)) {
+    utils::download.file(url, caminho, mode = "wb", quiet = TRUE)
+    # the server returns a PHP page when the path does not exist,
+    # and download.file() does not complain
+    if (startsWith(readLines(caminho, n = 1, warn = FALSE), "<")) {
+      file.remove(caminho); stop("Veio HTML/PHP em vez de CSV: ", url)
+    }
+  }
+  caminho
+}
+
+arq_exp <- baixa(
+  "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/EXP_2024_MUN.csv",
+  "EXP_2024_MUN.csv")
+
+arq_mun <- baixa(
+  "https://balanca.economia.gov.br/balanca/bd/tabelas/UF_MUN.csv",
+  "tab_UF_MUN.csv")
+
+round(file.size(c(arq_exp, arq_mun)) / 1024^2, 1)
+```
+
+Note that the lookup tables are **not** under `comexstat-bd/`, but directly in
+`bd/tabelas/`. It is a detail that costs half an hour to anyone who does not know it.
+
+::: {.callout-warning}
+## When MDIC's server fails
+
+In October 2026, the security certificate of `balanca.economia.gov.br` had expired, and
+`download.file()` failed with an SSL error (on Windows, `SEC_E_CERT_EXPIRED`). That is why the
+two files of this chapter come in the module's data package, copied from the server without
+changes. With them in `dados/brutos/comexstat/`, the function above downloads nothing: it just returns the
+path.
+
+Outside the course, if you need another year and the server is still like this, you can download without
+verifying the certificate. Only do this with public data, never with logins or confidential data:
+
+```{r}
+#| eval: false
+curl::curl_download(
+  "https://balanca.economia.gov.br/balanca/bd/comexstat-bd/mun/EXP_2023_MUN.csv",
+  "dados/brutos/comexstat/EXP_2023_MUN.csv",
+  handle = curl::new_handle(ssl_verifypeer = 0L, ssl_verifyhost = 0L)
+)
+```
+:::
+
+## Step 2: Read while keeping the leading zeros
+
+First the wrong way, the one anyone would use, letting R guess the types:
+
+```{r}
+ingenuo <- readr::read_delim(arq_exp, delim = ";", show_col_types = FALSE,
+                             locale = readr::locale(encoding = "latin1"))
+
+ingenuo |> dplyr::select(CO_ANO, CO_MES, SH4, CO_PAIS, SG_UF_MUN, CO_MUN) |>
+  head(3)
+```
+
+`CO_MES`, `SH4` and `CO_MUN` became numbers. It looks harmless. It is not:
+
+```{r}
+c(
+  cafe_original = "0901",
+  cafe_lido     = as.character(unique(ingenuo$SH4[ingenuo$SH4 == 901])[1])
+)
+```
+
+The HS4 code for coffee is `0901`. Read as a number, it becomes `901`. The same happens with **all**
+chapters 01 to 09 of the Harmonized System, which is exactly where Brazilian agribusiness
+lives: meat and coffee; soybeans, in chapter 12, escape, but sugar, fruit, cereals and fish
+do not. A `join` with the HS4 table loses all of this silently.
+
+The correct reading declares the types. The rule for this dataset is simple: **a field starting with
+`CO_`, `SG_` or `SH` is a code, not a number.**
+
+```{r}
+con <- duckdb::dbConnect(duckdb::duckdb())
+
+exp_mun <- DBI::dbGetQuery(con, sprintf("
+  SELECT CO_ANO, CO_MES, SH4, CO_PAIS, SG_UF_MUN, CO_MUN,
+         CAST(KG_LIQUIDO AS DOUBLE) AS kg,
+         CAST(VL_FOB     AS DOUBLE) AS fob_usd
+  FROM read_csv('%s', delim=';', header=true, all_varchar=true, encoding='latin-1')
+", normalizePath(arq_exp, winslash = "/")))
+
+mun_tab <- DBI::dbGetQuery(con, sprintf("
+  SELECT * FROM read_csv('%s', delim=';', header=true, all_varchar=true, encoding='latin-1')
+", normalizePath(arq_mun, winslash = "/")))
+
+duckdb::dbDisconnect(con, shutdown = TRUE)
+
+dim(exp_mun)
+```
+
+`all_varchar=true` reads everything as text, and only what really is a number is converted afterwards.
+It is more work and it is the only safe way.
+
+## Step 3: The anchor totals
+
+Before any `join`, record what you will check against:
+
+```{r}
+ancora <- exp_mun |>
+  dplyr::summarise(
+    linhas      = dplyr::n(),
+    municipios  = dplyr::n_distinct(CO_MUN),
+    fob_bilhoes = sum(fob_usd) / 1e9
+  )
+ancora |> knitr::kable(digits = 1)
+```
+
+## Step 4: The `join` that "works"
+
+The municipality table has a column called `CO_MUN_GEO`. The name suggests an IBGE geocode,
+so the temptation is to join it directly with `geobr`:
+
+```{r}
+arquivo <- "dados/brutos/muni_br.gpkg"
+if (!file.exists(arquivo)) {
+  br <- geobr::read_municipality(code_muni = "all", year = 2022,
+                                 simplified = TRUE, showProgress = FALSE)
+  sf::st_write(br, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE) |>
+  dplyr::mutate(code_muni = as.character(code_muni))
+
+por_municipio <- exp_mun |>
+  dplyr::summarise(fob_usd = sum(fob_usd), .by = CO_MUN)
+
+ingenuo_join <- por_municipio |>
+  dplyr::left_join(sf::st_drop_geometry(muni), by = c("CO_MUN" = "code_muni"))
+
+c(
+  linhas          = nrow(ingenuo_join),
+  casaram         = sum(!is.na(ingenuo_join$name_muni)),
+  pct_casaram     = round(100 * mean(!is.na(ingenuo_join$name_muni)), 1),
+  pct_fob_casado  = round(100 * sum(ingenuo_join$fob_usd[!is.na(ingenuo_join$name_muni)]) /
+                            sum(ingenuo_join$fob_usd), 1)
+)
+```
+
+No error. No warning. More than 85% of the municipalities matched. Whoever stops here publishes the
+map.
+
+## Step 5: The investigation
+
+The habit from @sec-m1-joins: **always look at what was left out.**
+
+```{r}
+nao_casaram <- ingenuo_join |>
+  dplyr::filter(is.na(name_muni)) |>
+  dplyr::left_join(dplyr::select(mun_tab, CO_MUN_GEO, NO_MUN, SG_UF),
+                   by = c("CO_MUN" = "CO_MUN_GEO"))
+
+nao_casaram |>
+  dplyr::summarise(municipios = dplyr::n(),
+                   fob_bilhoes = sum(fob_usd) / 1e9,
+                   .by = SG_UF) |>
+  dplyr::arrange(dplyr::desc(fob_bilhoes)) |>
+  knitr::kable(digits = 1)
+```
+
+It is not scattered noise. It is **four whole states**, and one of them is São Paulo.
+
+```{r}
+nao_casaram |>
+  dplyr::slice_max(fob_usd, n = 5) |>
+  dplyr::transmute(CO_MUN, NO_MUN, SG_UF, fob_bilhoes = round(fob_usd / 1e9, 2)) |>
+  knitr::kable()
+```
+
+Jundiaí appears in Comex as `3425904`. In IBGE, Jundiaí is `3525904`. The last five
+digits are the same; what changes is the **state prefix**.
+
+## Step 6: The fix
+
+Comex Stat uses its own state numbering, which matches IBGE's in 23 states and
+differs in four:
+
+| State | Comex | IBGE |
+|:--|:--|:--|
+| São Paulo | 34 | 35 |
+| Mato Grosso do Sul | 52 | 50 |
+| Goiás | 53 | 52 |
+| Distrito Federal | 54 | 53 |
+
+There are also two codes with no territory: `93` (EX, an operation not assigned to a municipality) and `99`
+(ND, not declared).
+
+```{r}
+prefixo_comex_para_ibge <- c("34" = "35", "52" = "50", "53" = "52", "54" = "53")
+
+co_mun_comex_para_ibge <- function(co_mun) {
+  co_mun  <- as.character(co_mun)
+  prefixo <- substr(co_mun, 1, 2)
+  sufixo  <- substr(co_mun, 3, 7)
+  novo    <- prefixo_comex_para_ibge[prefixo]
+  prefixo <- ifelse(is.na(novo), prefixo, novo)
+  out <- paste0(prefixo, sufixo)
+  out[substr(co_mun, 1, 2) %in% c("93", "99")] <- NA_character_
+  out
+}
+
+stopifnot(
+  co_mun_comex_para_ibge("3106705") == "3106705",  # Betim/MG, unchanged
+  co_mun_comex_para_ibge("3425904") == "3525904"   # Jundiaí/SP, changes
+)
+```
+
+```{r}
+corrigido <- por_municipio |>
+  dplyr::mutate(code_muni = co_mun_comex_para_ibge(CO_MUN)) |>
+  dplyr::left_join(sf::st_drop_geometry(muni), by = "code_muni")
+
+c(
+  pct_municipios = round(100 * mean(!is.na(corrigido$name_muni)), 1),
+  pct_fob        = round(100 * sum(corrigido$fob_usd[!is.na(corrigido$name_muni)]) /
+                           sum(corrigido$fob_usd), 1)
+)
+```
+
+## Step 7: Checking
+
+A correct `join` cannot have created or lost rows, and the total must match the
+anchor from step 3:
+
+```{r}
+c(
+  linhas_antes  = nrow(por_municipio),
+  linhas_depois = nrow(corrigido),
+  fob_antes_bi  = round(sum(por_municipio$fob_usd) / 1e9, 3),
+  fob_depois_bi = round(sum(corrigido$fob_usd) / 1e9, 3)
+)
+```
+
+```{r}
+corrigido |>
+  dplyr::filter(is.na(name_muni)) |>
+  dplyr::summarise(casos = dplyr::n(), fob_bilhoes = sum(fob_usd) / 1e9) |>
+  knitr::kable(digits = 2)
+```
+
+What is left without a match are the `EX` and `ND` codes, which **are not territory**.
+They must not go on the map, but they cannot vanish from the total either: the map's sum plus the
+non-territorial codes must reproduce the country's total exports.
+
+## Step 8: The map, now defensible
+
+```{r}
+#| fig-height: 6
+#| fig-cap: "Brazilian exports in 2024 by municipality of the exporting company's domicile."
+mapa <- muni |>
+  dplyr::left_join(
+    corrigido |> dplyr::select(code_muni, fob_usd) |> dplyr::filter(!is.na(code_muni)),
+    by = "code_muni"
+  ) |>
+  dplyr::mutate(fob_bi = fob_usd / 1e9)
+
+ggplot2::ggplot(mapa) +
+  ggplot2::geom_sf(ggplot2::aes(fill = fob_bi), colour = NA) +
+  ggplot2::scale_fill_viridis_c(trans = "log10", na.value = "grey92",
+                                labels = scales::label_number(accuracy = 0.01)) +
+  ggplot2::labs(fill = "US$ billion (log)",
+                title = "Exports by municipality, 2024",
+                subtitle = "Domicile of the exporting company, not the place of production") +
+  ggplot2::theme_void(base_size = 11) +
+  ggplot2::theme(legend.position = "bottom")
+```
+
+::: {.callout-warning}
+## The municipality is the company's, not the production's
+
+This is Comex Stat's third trap, and it is conceptual, not technical. The municipality
+recorded is the **tax domicile of the exporting company**. A trading company headquartered in São
+Paulo that exports soybeans from Mato Grosso appears as São Paulo.
+
+For cargo-origin analysis, this rules out the municipal data as a proxy for production. The
+chart's subtitle above is not decoration: it is the caveat that stops someone from using the map
+for the wrong question.
+:::
+
+## Checklist
+
+::: {.callout-tip}
+## Before trusting any `join` with a federal dataset
+
+1. **Declare the types when reading.** A code field is text. A leading zero is information.
+2. **Count before and after.** The `join` cannot create or lose rows without you knowing.
+3. **Always look at what was left out.** And look at it *grouped*: if the unmatched rows concentrate
+   in one state, one year or one type, it is not noise, it is a system.
+4. **Do not trust the column name.** `CO_MUN_GEO` is not the IBGE geocode.
+5. **Check the total against the anchor.** The map's sum plus what is not territory must
+   reproduce the country's total.
+:::
+
+## Exercise
+
+The `UF_MUN.csv` table has 5,570 rows, two of which are the special codes `EX` and `ND`.
+That leaves 5,568 municipalities, while IBGE recognises 5,570.
+
+Find out which municipalities are missing from the Comex table, by comparing with `geobr`, and explain
+what would happen to a historical series study that used this table as its reference
+register.

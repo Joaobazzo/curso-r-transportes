@@ -1,0 +1,391 @@
+# Data wrangling {#sec-m1-manipulacao}
+
+From here on we use the course's real dataset: the **TKU of coastal shipping** (ANTAQ,
+2025), with 732 records of pairs of port facilities. TKU (*tonelada-quilômetro útil*) is the
+cargo tonnage times the distance carried, in tonne-km. The file is listed in
+[Example data](a-dados.qmd) and is in the repository, in `dados/`.
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(stringr)
+```
+
+## Reading
+
+### Spreadsheets
+
+```{r}
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx")
+dim(bruto)
+names(bruto)
+```
+
+Look at the name of the last column: `TKU\n(t x km)`, with a line break and brackets. Names
+like this force you to write `` `TKU\n(t x km)` `` with backticks in every reference. The
+first thing to do with any spreadsheet is to standardise the names:
+
+```{r}
+bruto |> janitor::clean_names() |> names()
+```
+
+`janitor::clean_names()` turns everything into lower case, replaces spaces and punctuation with `_` and
+removes accents. The names become usable, but are still long. Since we know the structure of the
+file, we will set short names **by position**, guarded by a check. If ANTAQ
+changes the number of columns in the next release, the script stops instead of renaming wrongly.
+The new names are year, cargo profile, HS2 commodity group, then country, state, city and
+facility of origin and of destination, and the TKU:
+
+```{r}
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+base <- bruto
+stopifnot(ncol(base) == length(colunas))
+names(base) <- colunas
+
+dplyr::glimpse(base)
+```
+
+Still at this stage, a filter worth explaining: **132 of the 732 records have TKU equal to
+zero**. They are combinations of commodity and cargo profile with no flow in the period, published
+as empty rows with `-` in the identification fields. They are analysed in detail in
+@sec-m1-limpeza; here we just set them aside.
+
+```{r}
+base |> dplyr::count(tem_fluxo = tku > 0)
+
+base <- base |> dplyr::filter(tku > 0)
+nrow(base)
+```
+
+If you prefer to rename by the original name, explicitly:
+
+```{r}
+#| eval: false
+base <- bruto |>
+  dplyr::rename(
+    ano           = Ano,
+    perfil        = `Perfil da Carga`,
+    sh2           = `Grupo de Mercadoria (SH2)`,
+    uf_origem     = `UF de Origem`,
+    cidade_origem = `Cidade de Origem`,
+    tku           = `TKU\n(t x km)`
+  )
+```
+
+Other useful arguments of `read_excel()`:
+
+```{r}
+#| eval: false
+readxl::read_excel("arquivo.xlsx", sheet = "Dados")        # sheet by name
+readxl::read_excel("arquivo.xlsx", skip = 3)               # skips decorative header rows
+readxl::read_excel("arquivo.xlsx", n_max = 1000)           # only the first rows (for inspection)
+readxl::read_excel("arquivo.xlsx", col_types = "text")     # reads everything as text (avoids coercion)
+readxl::read_excel("arquivo.xlsx", na = c("", "-", "n/d")) # what should become NA
+```
+
+### Text files
+
+```{r}
+csv <- readr::read_csv("dados/cabotagem_tku_2025.csv", show_col_types = FALSE)
+dim(csv)
+names(csv) |> head(4)
+```
+
+For files in the Brazilian format, with `;` as separator and a decimal comma, use `read_csv2()`.
+Give the *encoding* when the file comes from a legacy system:
+
+```{r}
+#| eval: false
+readr::read_csv2("arquivo.csv", locale = readr::locale(encoding = "latin1"))
+```
+
+### Large files: `duckplyr`
+
+`readr` and `read_excel` load everything into memory. When the file has millions of rows
+(GTFS, GPS data, toll records, routing matrices), it is worth using `duckplyr`, which
+runs the query in **DuckDB** and brings only the result into memory.
+
+```{r}
+#| eval: false
+library(duckplyr)
+
+# reading is "lazy": nothing is loaded yet
+grande <- duckplyr::read_csv_duckdb("dados/roteamento_milhoes.csv")
+
+resultado <- grande |>
+  dplyr::filter(uf_destino == "PR") |>
+  dplyr::summarise(tku = sum(tku, na.rm = TRUE), .by = uf_origem) |>
+  dplyr::collect()          # only here is the query run
+```
+
+The syntax is the same as `dplyr`; the difference is `collect()` at the end, which materialises the
+result. In module 3 we compare the processing time of the two approaches with
+`system.time()` on a routing dataset.
+
+::: {.callout-note}
+## Which package to use
+
+| Situation | Tool |
+|:--|:--|
+| Up to ~1 million rows, code other people will read | `dplyr` |
+| Files that do not fit in memory, queries with filters and aggregation | `duckplyr` / `duckdb` |
+| Intensive wrangling with many operations per group | `data.table` |
+
+The three live together in the same script: it is common to read with `duckplyr`, aggregate, `collect()` and carry on
+in `dplyr`.
+:::
+
+::: {.callout-note}
+## About `data.table`
+
+`data.table` is generally **faster** than `dplyr` for heavy wrangling (many
+`group_by`s, tables with tens of millions of rows). The reason it is not this course's main package
+is teaching, not technical: its syntax (`DT[i, j, by]`, with unquoted column references
+and operators such as `:=`) is more compact but less readable for people who are
+learning. If after the course you decide to move a whole script to `data.table` for
+performance, any AI assistant (@sec-m1-ambiente) reliably converts a `dplyr` snippet to
+`data.table`, because it is a mechanical translation between equivalent syntaxes.
+Check the result against the same anchor totals as in the previous chapter.
+:::
+
+## The `dplyr` verbs
+
+### `select()`: choose columns
+
+```{r}
+base |>
+  dplyr::select(uf_origem, uf_destino, tku) |>
+  head(3)
+```
+
+```{r}
+#| eval: false
+dplyr::select(base, tidyr::starts_with("uf"))          # by prefix
+dplyr::select(base, tidyr::contains("cidade"))         # by part of the name
+dplyr::select(base, -pais_origem, -pais_destino)  # remove
+dplyr::select(base, carga = perfil)    # select and rename
+dplyr::select(base, dplyr::where(is.numeric))          # by type
+```
+
+### `filter()`: choose rows
+
+```{r}
+base |>
+  dplyr::filter(uf_destino == "PR") |>
+  nrow()
+
+base |>
+  dplyr::filter(uf_origem == "AM", tku > 1e9) |>          # the comma means "and"
+  dplyr::select(cidade_origem, uf_destino, tku)
+
+base |>
+  dplyr::filter(uf_destino %in% c("PR", "SC", "RS")) |>   # South region
+  nrow()
+
+base |>
+  dplyr::filter(stringr::str_detect(perfil, "Granel")) |>
+  dplyr::count(perfil)
+```
+
+```{r}
+base |>
+  dplyr::filter(uf_origem != uf_destino) |>               # excludes flows within a state
+  nrow()
+```
+
+### `mutate()`: create and change columns
+
+```{r}
+base <- base |>
+  dplyr::mutate(
+    tku_bi   = tku / 1e9,
+    ligacao  = stringr::str_c(uf_origem, " > ", uf_destino),
+    interestadual = uf_origem != uf_destino,
+    faixa = dplyr::case_when(
+      tku >= 1e9 ~ "alto",
+      tku >= 1e6 ~ "médio",
+      .default   = "baixo"
+    )
+  )
+
+base |> dplyr::select(ligacao, tku_bi, faixa) |> head(4)
+```
+
+### `arrange()`: sort
+
+```{r}
+base |>
+  dplyr::arrange(dplyr::desc(tku)) |>
+  dplyr::select(ligacao, cidade_origem, cidade_destino, tku_bi) |>
+  head(5)
+```
+
+### `summarise()` and grouping
+
+```{r}
+base |>
+  dplyr::summarise(
+    ligacoes = dplyr::n(),
+    tku_total = sum(tku, na.rm = TRUE),
+    tku_medio = mean(tku, na.rm = TRUE),
+    tku_max   = max(tku, na.rm = TRUE)
+  )
+```
+
+Grouping is the most used operation of all. The modern syntax uses the `.by` argument:
+
+```{r}
+por_uf_destino <- base |>
+  dplyr::summarise(
+    ligacoes  = dplyr::n(),
+    tku_bi    = sum(tku, na.rm = TRUE) / 1e9,
+    .by = uf_destino
+  ) |>
+  dplyr::arrange(dplyr::desc(tku_bi))
+
+por_uf_destino |> head(10)
+```
+
+The equivalent with `group_by()`, which you will see in older material:
+
+```{r}
+#| eval: false
+base |>
+  dplyr::group_by(uf_destino) |>
+  dplyr::summarise(tku_bi = sum(tku, na.rm = TRUE) / 1e9) |>
+  dplyr::ungroup()
+```
+
+Grouping by more than one variable, with a percentage share:
+
+```{r}
+base |>
+  dplyr::summarise(tku = sum(tku, na.rm = TRUE), .by = c(perfil, uf_destino)) |>
+  dplyr::mutate(part = tku / sum(tku), .by = perfil) |>
+  dplyr::filter(part > 0.10) |>
+  dplyr::arrange(perfil, dplyr::desc(part))
+```
+
+Note that `mutate(..., .by = ...)` computes **within the group without collapsing the table**. It
+works like a calculated field in a pivot table.
+
+### `count()`, `distinct()`, `slice_max()`
+
+```{r}
+base |> dplyr::count(perfil, sort = TRUE)
+base |> dplyr::distinct(uf_origem) |> nrow()
+base |> dplyr::slice_max(tku, n = 3) |> dplyr::select(ligacao, tku_bi)
+base |> dplyr::slice_max(tku, n = 1, by = uf_destino) |> dplyr::select(uf_destino, ligacao, tku_bi) |> head(5)
+```
+
+## Reshaping: *long* ↔ *wide*
+
+Tables for human reading are **wide** (one column per category); tables for analysis and
+charts are **long** (one row per observation). `tidyr` converts between the two forms.
+
+### *Long to wide*: the OD matrix
+
+```{r}
+od_longo <- base |>
+  dplyr::filter(uf_origem != uf_destino) |>
+  dplyr::summarise(tku_bi = sum(tku, na.rm = TRUE) / 1e9, .by = c(uf_origem, uf_destino))
+
+head(od_longo, 4)
+
+od_largo <- od_longo |>
+  tidyr::pivot_wider(
+    names_from  = uf_destino,
+    values_from = tku_bi,
+    values_fill = 0
+  ) |>
+  dplyr::arrange(uf_origem)
+
+od_largo
+```
+
+This is exactly the structure of an **origin–destination matrix**, ready to export to
+Excel or convert into a `matrix`:
+
+```{r}
+m <- as.matrix(od_largo[, -1])
+rownames(m) <- od_largo$uf_origem
+round(m[1:5, 1:5], 2)
+```
+
+### *Wide to long*: back to the analytical form
+
+```{r}
+od_largo |>
+  tidyr::pivot_longer(
+    cols = -uf_origem,
+    names_to  = "uf_destino",
+    values_to = "tku_bi"
+  ) |>
+  dplyr::filter(tku_bi > 0) |>
+  dplyr::arrange(dplyr::desc(tku_bi)) |>
+  head(5)
+```
+
+A frequent case with SIDRA and Census data: several year columns that should be a single
+`ano` (year) column.
+
+```{r}
+pop <- data.frame(
+  municipio = c("Paranaguá", "Santos"),
+  pop_2010  = c(140469, 419400),
+  pop_2022  = c(156174, 418375)
+)
+
+pop |>
+  tidyr::pivot_longer(
+    cols = tidyr::starts_with("pop_"),
+    names_to = "ano",
+    names_prefix = "pop_",
+    names_transform = list(ano = as.integer),
+    values_to = "populacao"
+  )
+```
+
+## Exporting results
+
+```{r}
+#| eval: false
+dir.create("resultados", showWarnings = FALSE)
+
+# CSV in the international standard (decimal point)
+readr::write_csv(por_uf_destino, "resultados/tku_por_uf_destino.csv")
+
+# CSV to open in Excel set to Portuguese (semicolon, decimal comma)
+readr::write_csv2(por_uf_destino, "resultados/tku_por_uf_destino_excel.csv")
+
+# Excel, with one sheet per table
+writexl::write_xlsx(
+  list(
+    "TKU por UF" = por_uf_destino,
+    "Matriz OD"  = od_largo
+  ),
+  "resultados/cabotagem_2025.xlsx"
+)
+
+# R's native format: keeps types exactly
+saveRDS(base, "resultados/cabotagem_limpa.rds")
+base2 <- readRDS("resultados/cabotagem_limpa.rds")
+
+# Open and efficient format, to exchange with Python/QGIS
+arrow::write_parquet(base, "resultados/cabotagem.parquet")
+```
+
+::: {.callout-tip}
+## Which format to deliver
+
+- **Excel (`.xlsx`)**: when the recipient will open and read it. Use named sheets.
+- **CSV**: when the file feeds another system. Agree on the separator first.
+- **RDS**: between steps of your own workflow. Fast and with no loss of types.
+- **Parquet**: large datasets shared between tools.
+- In the following modules come `.gpkg` and `.shp`, for spatial data.
+:::

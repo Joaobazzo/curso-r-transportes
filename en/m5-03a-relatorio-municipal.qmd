@@ -1,0 +1,307 @@
+# A municipal report: Paranaguá {#sec-relatorio-paranagua}
+
+Before automating a report for many cases (@sec-m5-parametrizados), you need a
+report that works for **one** case. This chapter is that report, for Paranaguá (PR),
+home of Paraná's main port: a short diagnosis of the municipality's territory, population and
+economy, and of the coastal shipping that passes through it.
+
+It brings together packages from several modules: `geobr` and `censobr` (@sec-m2-bases) for the territory and the
+Census, `sidrar` for IBGE's series, `dplyr` and `ggplot2` for everything else. No number in the
+text is typed in: they all come from the code, and that is why the same text works for another municipality.
+
+::: {.callout-note}
+## Downloads on the first run
+
+`censobr` downloads the 2022 Census for the whole country, in Parquet, and stores it on your computer: about
+200 MB the first time (most of it is the persons table, with colour or race), and nothing on
+later runs. `geobr` also stores the boundaries. `sidrar` queries IBGE's API on each
+run and needs an internet connection.
+:::
+
+## The municipality in two variables
+
+```{r}
+#| message: false
+library(dplyr)
+library(ggplot2)
+
+municipio <- "Paranaguá"
+uf        <- "PR"
+
+# the IBGE code: the key that links geobr, censobr and SIDRA
+codigo <- geobr::lookup_muni(name_muni = municipio, year = 2022) |>
+  dplyr::filter(abbrev_state == uf) |>
+  dplyr::pull(code_muni)
+
+codigo
+```
+
+The rest of the chapter uses only `municipio`, `uf` and `codigo`. The name and the state appear only
+once, in this block. It is this discipline that, in the next chapter, turns the report into a template
+for any municipality: just change this block.
+
+## Territory
+
+```{r}
+limite  <- geobr::read_municipality(code_muni = codigo, year = 2022, showProgress = FALSE)
+setores <- geobr::read_census_tract(code_tract = codigo, year = 2022, simplified = FALSE,
+                                    showProgress = FALSE)
+
+area_km2 <- as.numeric(sf::st_area(limite)) / 1e6
+```
+
+```{r}
+# population and status (urban or rural) of each tract, from the 2022 Census
+basico <- censobr::read_tracts(year = 2022, dataset = "Basico", as_data_frame = FALSE,
+                               showProgress = FALSE) |>
+  dplyr::filter(code_muni == codigo) |>
+  dplyr::select(code_tract, situacao, populacao = V0001) |>
+  dplyr::collect() |>
+  # tracts without a status are bodies of water (bays, wide rivers), with no residents
+  dplyr::mutate(situacao = dplyr::coalesce(situacao, "Water body"))
+
+setores <- setores |>
+  dplyr::left_join(basico, by = "code_tract") |>
+  dplyr::mutate(area_setor = as.numeric(sf::st_area(geometry)) / 1e6)   # km²
+
+pct_urbano <- with(setores, 100 * sum(area_setor[situacao == "Urbana"]) / sum(area_setor))
+```
+
+`r municipio` covers `r format(round(area_km2), big.mark = ",")` km², divided into
+`r format(nrow(setores), big.mark = ",")` census tracts. The urban tracts occupy
+`r format(round(pct_urbano, 1))`% of the municipality's area.
+
+```{r}
+#| label: fig-pgua-territorio
+#| fig-cap: "Census tracts by status (2022 Census)"
+#| fig-height: 5
+ggplot(setores) +
+  geom_sf(aes(fill = situacao), colour = "white", linewidth = 0.1) +
+  geom_sf(data = limite, fill = NA, colour = "grey20", linewidth = 0.4) +
+  scale_fill_manual(values = c(Urbana = "#1a5b8a", Rural = "#c9d6b3",
+                               "Water body" = "#d6e6f2"),
+                    labels = c(Urbana = "Urban", Rural = "Rural", "Water body" = "Water body"),
+                    name = NULL) +
+  theme_void()
+```
+
+## Population: censuses and estimates
+
+SIDRA has the census population and the annual estimates IBGE publishes between them:
+
+```{r}
+#| message: false
+censo_2010 <- sidrar::get_sidra(x = 1378, variable = 93, geo = "City",
+                                geo.filter = list("City" = codigo),
+                                classific = "c2", category = list(0))   # c2 = sex; 0 = total
+censo_2022 <- sidrar::get_sidra(x = 4709, variable = 93, geo = "City",
+                                geo.filter = list("City" = codigo))
+estimativas <- sidrar::get_sidra(x = 6579, variable = 9324, period = "all", geo = "City",
+                                 geo.filter = list("City" = codigo))
+
+populacao <- dplyr::bind_rows(
+  Census   = dplyr::bind_rows(censo_2010, censo_2022),
+  Estimate = estimativas,
+  .id = "fonte"
+) |>
+  dplyr::transmute(fonte, ano = as.integer(Ano), populacao = Valor)
+
+pop_2022 <- populacao$populacao[populacao$fonte == "Census" & populacao$ano == 2022]
+ultima   <- dplyr::slice_max(dplyr::filter(populacao, fonte == "Estimate"), ano)
+```
+
+```{r}
+#| label: fig-pgua-populacao
+#| fig-cap: "Resident population: IBGE censuses and estimates"
+#| fig-height: 3.4
+ggplot(populacao, aes(ano, populacao / 1000, colour = fonte)) +
+  geom_line(data = dplyr::filter(populacao, fonte == "Estimate"), linewidth = 0.4) +
+  geom_point(aes(size = fonte)) +
+  scale_size_manual(values = c(Census = 3, Estimate = 1.2), guide = "none") +
+  scale_colour_manual(values = c(Census = "#b3402a", Estimate = "#1a5b8a"), name = NULL) +
+  labs(x = NULL, y = "Thousand inhabitants") +
+  theme_minimal(base_size = 10)
+```
+
+The 2022 Census counted `r format(pop_2022, big.mark = ",")` inhabitants; the most recent estimate,
+for `r ultima$ano`, is `r format(ultima$populacao, big.mark = ",")`. Notice the difference between the
+2021 estimate and the 2022 Census: a decade's estimates are projected from the
+previous census and, when the new census arrives, the series is corrected. That is why the report uses the
+census as the reference and says where each number comes from.
+
+## Economy: GDP
+
+```{r}
+#| message: false
+pib <- sidrar::get_sidra(x = 5938, variable = 37, period = "all", geo = "City",
+                         geo.filter = list("City" = codigo)) |>
+  dplyr::transmute(ano = as.integer(Ano), pib_bi = Valor / 1e6)   # thousand reais -> billions
+
+pib_2022 <- pib$pib_bi[pib$ano == 2022]
+pib_per_capita <- pib_2022 * 1e9 / pop_2022
+```
+
+```{r}
+#| label: fig-pgua-pib
+#| fig-cap: "Municipal GDP at current prices (IBGE)"
+#| fig-height: 3.2
+ggplot(pib, aes(ano, pib_bi)) +
+  geom_col(fill = "#1a5b8a") +
+  labs(x = NULL, y = "R$ billion, current") +
+  theme_minimal(base_size = 10)
+```
+
+In 2022, the GDP of `r municipio` was R$ `r format(round(pib_2022, 1))`
+billion, or R$ `r format(round(pib_per_capita, -2), big.mark = ",")` per inhabitant. In
+port municipalities, GDP per capita tends to reflect the value passing through the port more
+than the income of the people who live there; income is two sections further on.
+
+## Population across the territory
+
+```{r}
+setores <- dplyr::mutate(setores, densidade = populacao / area_setor)   # inhab/km²
+```
+
+```{r}
+#| label: fig-pgua-densidade
+#| fig-cap: "Population density by census tract (2022 Census)"
+#| fig-height: 5
+ggplot(setores) +
+  geom_sf(aes(fill = densidade), colour = NA) +
+  geom_sf(data = limite, fill = NA, colour = "grey20", linewidth = 0.4) +
+  scale_fill_viridis_c(trans = "log10", labels = scales::label_number(accuracy = 1, big.mark = ","),
+                       name = "inhab/km²", na.value = "grey90") +
+  theme_void()
+```
+
+## Income and colour or race
+
+The 2022 Census publishes, by tract, the average income of household heads and the
+population by colour or race:
+
+```{r}
+renda <- censobr::read_tracts(year = 2022, dataset = "ResponsavelRenda", as_data_frame = FALSE,
+                              showProgress = FALSE) |>
+  dplyr::filter(code_muni == codigo) |>
+  dplyr::select(code_tract, renda = V06004) |>    # average income of household heads (R$)
+  dplyr::collect()
+
+cor <- censobr::read_tracts(year = 2022, dataset = "Pessoas", as_data_frame = FALSE,
+                            showProgress = FALSE) |>
+  dplyr::filter(code_muni == codigo) |>
+  dplyr::select(code_tract, White = raca_V01317, Black = raca_V01318, Asian = raca_V01319,
+                Brown = raca_V01320, Indigenous = raca_V01321) |>
+  dplyr::collect()
+
+setores <- setores |>
+  dplyr::left_join(renda, by = "code_tract")
+```
+
+```{r}
+#| label: fig-pgua-renda
+#| fig-cap: "Average monthly income of household heads (2022 Census)"
+#| fig-height: 5
+ggplot(setores) +
+  geom_sf(aes(fill = renda), colour = NA) +
+  geom_sf(data = limite, fill = NA, colour = "grey20", linewidth = 0.4) +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1, na.value = "grey90",
+                       labels = scales::label_number(big.mark = ",", prefix = "R$ "),
+                       name = NULL) +
+  theme_void()
+```
+
+```{r}
+#| label: fig-pgua-cor
+#| fig-cap: "Population by colour or race (2022 Census)"
+#| fig-height: 2.6
+por_cor <- cor |>
+  tidyr::pivot_longer(-code_tract, names_to = "cor", values_to = "pessoas") |>
+  dplyr::summarise(pessoas = sum(pessoas, na.rm = TRUE), .by = cor) |>
+  dplyr::mutate(pct = 100 * pessoas / sum(pessoas))
+
+ggplot(por_cor, aes(pct, reorder(cor, pct))) +
+  geom_col(fill = "#1a5b8a") +
+  geom_text(aes(label = paste0(format(round(pct, 1)), "%")),
+            hjust = -0.15, size = 3) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(x = "% of the population", y = NULL) +
+  theme_minimal(base_size = 10)
+```
+
+## Coastal shipping
+
+ANTAQ's coastal shipping throughput, in tonne-kilometres (TKU), seen from the
+municipality: what leaves it (**outbound**) and what arrives (**inbound**).
+
+```{r}
+colunas <- c("ano", "perfil", "sh2",
+             "pais_origem", "uf_origem", "cidade_origem", "instalacao_origem",
+             "pais_destino", "uf_destino", "cidade_destino", "instalacao_destino",
+             "tku")
+
+cabotagem <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx", na = c("", "-"))
+names(cabotagem) <- colunas
+
+cabotagem <- cabotagem |>
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), stringr::str_squish)) |>
+  dplyr::filter(tku > 0)
+
+# each link that touches the municipality, with the direction and the municipality at the other end
+fluxos <- dplyr::bind_rows(
+  Outbound = cabotagem |>
+    dplyr::filter(cidade_origem == municipio, uf_origem == uf) |>
+    dplyr::mutate(parceiro = cidade_destino, uf_parceiro = uf_destino),
+  Inbound = cabotagem |>
+    dplyr::filter(cidade_destino == municipio, uf_destino == uf) |>
+    dplyr::mutate(parceiro = cidade_origem, uf_parceiro = uf_origem),
+  .id = "sentido"
+) |>
+  dplyr::mutate(parceiro = dplyr::if_else(is.na(parceiro), "EEZ/Platform",
+                                          paste0(parceiro, " (", uf_parceiro, ")")))
+
+resumo <- fluxos |>
+  dplyr::summarise(ligacoes = dplyr::n(), tku_bi = sum(tku) / 1e9,
+                   parceiros = dplyr::n_distinct(parceiro), .by = sentido)
+
+resumo |> knitr::kable(digits = 2,
+                       col.names = c("Direction", "Links", "TKU (billion t·km)",
+                                                  "Partner municipalities"))
+```
+
+In `r cabotagem$ano[1]`, coastal shipping links with origin or destination in `r municipio`
+added up to `r format(round(sum(resumo$tku_bi), 1))` billion t·km.
+
+```{r}
+#| label: fig-pgua-perfil
+#| fig-cap: "TKU by cargo profile and direction"
+#| fig-height: 2.8
+fluxos |>
+  dplyr::summarise(tku_bi = sum(tku) / 1e9, .by = c(sentido, perfil)) |>
+  ggplot(aes(tku_bi, reorder(perfil, tku_bi), fill = sentido)) +
+  geom_col() +
+  scale_fill_manual(values = c(Outbound = "#1a5b8a", Inbound = "#b3402a"), name = NULL) +
+  labs(x = "TKU (billion t·km)", y = NULL) +
+  theme_minimal(base_size = 10)
+```
+
+```{r}
+#| label: fig-pgua-parceiros
+#| fig-cap: "Main partner municipalities in coastal shipping"
+#| fig-height: 3.4
+fluxos |>
+  dplyr::summarise(tku_bi = sum(tku) / 1e9, .by = c(parceiro, sentido)) |>
+  dplyr::filter(parceiro %in% (dplyr::count(fluxos, parceiro, wt = tku, sort = TRUE) |>
+                                 dplyr::slice_head(n = 8) |> dplyr::pull(parceiro))) |>
+  ggplot(aes(tku_bi, reorder(parceiro, tku_bi, sum), fill = sentido)) +
+  geom_col() +
+  scale_fill_manual(values = c(Outbound = "#1a5b8a", Inbound = "#b3402a"), name = NULL) +
+  labs(x = "TKU (billion t·km)", y = NULL) +
+  theme_minimal(base_size = 10)
+```
+
+## From report to template
+
+This chapter is already a complete report, and it works for one municipality. To produce it for the
+five municipalities with the most coastal shipping in the country, the temptation is to copy the file five times and
+replace "Paranaguá" by hand. The next chapter shows the better way: turn the first
+block into **parameters** and render the same file five times.

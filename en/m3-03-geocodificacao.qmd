@@ -1,0 +1,311 @@
+# Geocoding {#sec-m3-geocodificacao}
+
+Geocoding is turning an address into a coordinate. It is a recurring and underrated step: the
+quality of the result determines the quality of everything that follows. Most of the
+work is not in the geocoding itself, but in **splitting the address into its fields** before
+it: street, number, neighbourhood, postcode (CEP), municipality and state, each in its own column.
+
+```{r}
+library(dplyr)
+library(stringr)
+library(sf)
+
+# default basemap for mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+## The `geocodebr` package
+
+`geocodebr` (ipeaGIT) geocodes Brazilian addresses using **CNEFE**, IBGE's National Register
+of Addresses for Statistical Purposes. Two advantages over commercial
+services: it is free and it runs locally, without sending addresses outside. That matters
+when the data are administrative and cannot leave the organisation's network.
+
+```{r}
+enderecos <- data.frame(
+  id         = 1:4,
+  logradouro = c("Praça Cívica", "Avenida Goiás", "Avenida Afonso Pena", "Avenida Paulista"),
+  numero     = c(1, 400, 1212, 1578),
+  cep        = c("74003-010", "74005-010", "30130-003", "01310-200"),
+  bairro     = c("Setor Central", "Setor Central", "Centro", "Bela Vista"),
+  municipio  = c("Goiânia", "Goiânia", "Belo Horizonte", "São Paulo"),
+  estado     = c("GO", "GO", "MG", "SP")
+)
+
+campos <- geocodebr::definir_campos(
+  estado     = "estado",
+  municipio  = "municipio",
+  logradouro = "logradouro",
+  numero     = "numero",
+  cep        = "cep",
+  localidade = "bairro"       # in geocodebr, "localidade" is the neighbourhood
+)
+
+resultado <- geocodebr::geocode(
+  enderecos       = enderecos,
+  campos_endereco = campos,
+  verboso         = FALSE
+)
+
+resultado |>
+  dplyr::select(id, logradouro, numero, municipio, lat, lon, precisao, desvio_metros) |>
+  knitr::kable()
+```
+
+The `endereco_encontrado` (address found) column shows **what** `geocodebr` actually found in CNEFE, which
+is not always what was asked for:
+
+```{r}
+resultado |>
+  dplyr::select(id, logradouro, endereco_encontrado) |>
+  knitr::kable()
+```
+
+On the first run, `geocodebr` downloads CNEFE (about 1.5 GB) to a local cache folder
+(`geocodebr::listar_pasta_cache()`). From then on, geocoding takes seconds.
+
+The output has the coordinates and, above all, the **type of match**: the most
+important information in the process.
+
+| `precisao` | What it means | Recommended use |
+|:--|:--|:--|
+| `numero` | the address exists in the register | any analysis |
+| `numero_aproximado` | position estimated between two known numbers | analysis by block or tract |
+| `logradouro` | got the street right, not the number | analysis by neighbourhood |
+| `cep` | got the postcode right, not the street | analysis by neighbourhood |
+| `localidade` / `municipio` | only the neighbourhood or the municipality is reliable | aggregations only |
+
+```{r}
+resultado |> dplyr::count(precisao, sort = TRUE)
+```
+
+The `desvio_metros` column estimates the coordinate's error. Compare the four addresses:
+
+- **Avenida Afonso Pena, 1212**, in Belo Horizonte, and **Avenida Paulista, 1578** exist
+  in the register with that number: precision `numero`;
+- **Avenida Goiás, 400**, in Goiânia, does not have number 400 in the register, and the point was
+  estimated between the neighbouring numbers: `numero_aproximado`;
+- **Praça Cívica** was not found as a street: `endereco_encontrado` has only the
+  neighbourhood, the municipality and the postcode, and the point fell on the postcode's centroid.
+
+All four "were geocoded", but only the first two are fit for an analysis at the
+plot scale.
+
+::: {.callout-important}
+## Never use the coordinate without looking at the precision
+
+An address geocoded to the municipality's centroid becomes a point in the middle of the city. If you
+compute accessibility or distance with that point, the result is fiction. And, worse, a
+fiction that looks precise. Filter by the precision level acceptable for the analysis and
+**report how many addresses were discarded**.
+:::
+
+## Before geocoding: splitting the fields
+
+For `geocodebr`, an address is not a text: it is a set of **columns**, one per field.
+That is what `definir_campos()` declares:
+
+| `definir_campos()` field | What goes in the column | Example |
+|:--|:--|:--|
+| `logradouro` | the type and name of the street, **without the number** | `Avenida Paulista` |
+| `numero` | only the number; `S/N`, `0` or `10A` become `NA` | `1578` |
+| `localidade` | the neighbourhood | `Bela Vista` |
+| `cep` | the postcode, with or without the hyphen | `01310-200` |
+| `municipio` | the name or the 7-digit IBGE code (mandatory) | `São Paulo` |
+| `estado` | the state's abbreviation or name (mandatory) | `SP` |
+
+There is no **complement** field: flat, room, block or "rear" do not go into the
+geocoding. If the complement stays stuck to the street name, it gets in the way of finding the street.
+
+And **there is no need to standardise** the addresses first. `geocode()` calls `enderecobr`
+internally (argument `padronizar_enderecos = TRUE`, the default): abbreviations (`R.`, `Av.`),
+accents, upper case and `nº` are handled by it. The work left to you is what it
+does not do: **put each piece of the address in its own column**.
+
+Administrative datasets usually have the address in a single column, with the complement and the neighbourhood
+in the middle. Municipality, state and postcode sometimes already come separately, as here:
+
+```{r}
+base <- data.frame(
+  id        = 1:4,
+  endereco  = c("R. XV de Novembro, 300 - Centro",
+                "Av. Afonso Pena 1212 sala 5 - Centro",
+                "Avenida Paulista, 1578, apto 51 - Bela Vista",
+                "Rua Sete de Setembro nº 45, fundos - Centro"),
+  cep       = c("80020-310", "30130-003", "01310-200", NA),
+  municipio = c("Curitiba", "Belo Horizonte", "São Paulo", "Curitiba"),
+  uf        = c("PR", "MG", "SP", "PR")
+)
+```
+
+Splitting is a job for a regular expression. This one follows the most common pattern: street, number
+(or `S/N`, "no number"), complement and, after a ` - `, the neighbourhood:
+
+```{r}
+separar_endereco <- function(x) {
+  partes <- stringr::str_match(
+    x, "(?i)^(.*?)[, ]+(?:n[º°o]\\.? ?)?(\\d{1,6}|s/n)\\b[ ,]*?(.*?)(?: - (.*))?$")
+  data.frame(
+    logradouro  = partes[, 2],
+    numero      = partes[, 3],
+    complemento = dplyr::na_if(stringr::str_remove(partes[, 4], "^[ ,]+"), ""),
+    bairro      = partes[, 5]
+  )
+}
+
+separados <- cbind(base, separar_endereco(base$endereco))
+
+separados |>
+  dplyr::select(endereco, logradouro, numero, complemento, bairro) |>
+  knitr::kable()
+```
+
+The complement was split off only to get it out of the way: it does not go into `definir_campos()`.
+Notice also that the text is still "dirty" (`R.`, `Av.`), and that is fine:
+
+```{r}
+com_campos <- geocodebr::geocode(
+  enderecos       = separados,
+  campos_endereco = geocodebr::definir_campos(
+    estado = "uf", municipio = "municipio", logradouro = "logradouro",
+    numero = "numero", cep = "cep", localidade = "bairro"
+  ),
+  verboso = FALSE
+)
+```
+
+To see how much the splitting is worth, we geocode the same dataset without splitting anything, with the whole
+address in the street column:
+
+```{r}
+sem_campos <- geocodebr::geocode(
+  enderecos       = dplyr::mutate(base, logradouro = endereco),
+  campos_endereco = geocodebr::definir_campos(
+    estado = "uf", municipio = "municipio", logradouro = "logradouro", cep = "cep"
+  ),
+  verboso = FALSE
+)
+
+dplyr::inner_join(
+  dplyr::select(sem_campos, id, endereco, precisao_junto = precisao, desvio_junto = desvio_metros),
+  dplyr::select(com_campos, id, precisao_separado = precisao, desvio_separado = desvio_metros),
+  by = "id"
+) |>
+  knitr::kable()
+```
+
+With the address in a single column, `geocodebr` finds no street at all: the points fall on the postcode's
+centroid or, without a postcode, on the municipality's, kilometres away from the address. With the fields split, all
+four reach the number, exact or approximate. The whole difference lies in how the columns are organised.
+
+The splitting rule is fragile: a street such as `Rua 7 de Setembro` would have the 7 read as the number, and a
+neighbourhood written without the ` - ` would end up in the complement. Always check a sample before
+geocoding the whole dataset.
+
+The case of highways (`Rodovia BR-116, km 25, s/n`) shows another limit: a highway address does not
+have a door number, and no urban geocoder solves it. For these, the route is different:
+locating by the **km** along the axis, which is a linear referencing operation.
+
+```{r}
+#| eval: false
+# approximate position of km 25 along a segment
+ponto_km <- function(linha, km) {
+  sf::st_line_sample(sf::st_geometry(linha), sample = km * 1000 / as.numeric(sf::st_length(linha))) |>
+    sf::st_cast("POINT")
+}
+```
+
+::: {.callout-note}
+## When to standardise on your own
+
+`enderecobr`, the package `geocodebr` uses internally, can also be used directly,
+with one function per field. It is not needed to geocode, but it helps to **inspect** the
+dataset, **deduplicate** addresses or match it with another source:
+
+```{r}
+#| eval: false
+enderecobr::padronizar_logradouros(c("R. XV de Novembro", "AV. BRASIL"))
+enderecobr::padronizar_ceps(c("74003010", "1310200"))
+enderecobr::padronizar_numeros(c("0045", "s/n", "SN"))
+enderecobr::padronizar_bairros(c("setor central", "JD. AMERICA"))
+```
+
+It makes the text uniform, but it does not split fields: `"AV. BRASIL 1200 APTO 51"` becomes
+`"AVENIDA BRASIL 1200 APARTAMENTO 51"`, with the number and the complement still inside the street.
+:::
+
+## Checking the result
+
+Three mandatory checks before using geocoded coordinates:
+
+```{r}
+pontos <- resultado |>
+  dplyr::filter(!is.na(lon), !is.na(lat)) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4674)
+
+# 1. how many were not geocoded?
+c(total = nrow(resultado), geocodificados = nrow(pontos),
+  taxa = round(nrow(pontos) / nrow(resultado), 3))
+
+# 2. did they fall in the declared municipality?
+arquivo <- "dados/brutos/muni_br.gpkg"
+if (!file.exists(arquivo)) {
+  br <- geobr::read_municipality(code_muni = "all", year = 2022,
+                                 simplified = TRUE, showProgress = FALSE)
+  sf::st_write(br, arquivo, quiet = TRUE)
+}
+muni <- sf::st_read(arquivo, quiet = TRUE)
+
+conferencia <- pontos |>
+  sf::st_join(muni |> dplyr::select(code_muni, name_muni)) |>
+  dplyr::mutate(bate = stringr::str_to_upper(name_muni) == stringr::str_to_upper(municipio))
+
+dplyr::count(sf::st_drop_geometry(conferencia), bate)
+
+# 3. visual inspection: the step people skip and should not
+mapview::mapview(pontos, zcol = "precisao", layer.name = "Precision")
+```
+
+Check 2 is the most valuable: an address that "was geocoded successfully" but fell in another
+municipality is an error that goes unnoticed in any aggregate statistic. And it shows up
+immediately in this count.
+
+## Reverse geocoding
+
+The opposite route, coordinate to address, is also in `geocodebr`. The input is an
+`sf` object of points:
+
+```{r}
+coords <- data.frame(id = 1:2,
+                     lon = c(-49.2733, -46.6333),
+                     lat = c(-25.4284, -23.5505)) |>
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4674)
+
+geocodebr::geocode_reverso(coords, verboso = FALSE) |>
+  sf::st_drop_geometry() |>
+  knitr::kable()
+```
+
+In practice, the most common use of reverse geocoding in transport is not getting the address,
+but **assigning the zone**: given a GPS point, which census tract, neighbourhood or traffic
+zone is it in? That is a spatial join, and you already know how to do it:
+
+```{r}
+#| eval: false
+pontos |> sf::st_join(zonas, join = st_within)
+```
+
+::: {.callout-note}
+## About versions
+
+`geocodebr` is recent and its interface still changes between versions. Argument names and
+output columns may differ. Run `?geocodebr::geocode` and
+`utils::packageVersion("geocodebr")` before reusing code from tutorials, including
+this one. The logic (split the fields, geocode, check the precision, validate spatially) is what
+does not change.
+:::
+
+With the addresses turned into checked points, we have the first input of any
+routing: **from where and to where**. The second is missing: **along what**, the road network on which
+trips take place. That is what module 4 downloads from OpenStreetMap and prepares
+(@sec-m4-osm).

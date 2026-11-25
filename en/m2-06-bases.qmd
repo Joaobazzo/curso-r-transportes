@@ -1,0 +1,331 @@
+# Brazilian public datasets {#sec-m2-bases}
+
+This chapter is what makes R particularly productive for the Ministry's work: instead of
+browsing portals, downloading ZIPs and opening shapefiles one by one, the main Brazilian
+datasets come through functions: versioned, documented and with the IBGE code as the key.
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+# default basemap for mapview(): OpenStreetMap
+mapview::mapviewOptions(basemaps = c("OpenStreetMap", "Esri.WorldGrayCanvas", "Esri.WorldImagery"))
+```
+
+## `geobr`: official IBGE boundaries and geometries
+
+Documentation and examples: <https://ipeagit.github.io/geobr/>.
+
+```{r}
+#| eval: false
+geobr::list_geobr()   # every function, with the available years
+```
+
+The ones we use most:
+
+| Function | What it returns |
+|:--|:--|
+| `read_country()`, `read_region()`, `read_state()` | national, regional and state boundaries |
+| `read_municipality()` | municipal boundaries |
+| `read_census_tract()` | census tracts |
+| `read_weighting_area()` | weighting areas |
+| `read_statistical_grid()` | IBGE statistical grid |
+| `read_urban_area()` | urbanised areas |
+| `read_health_facilities()` | health facilities (CNES) |
+| `read_schools()` | schools (School Census) |
+| `read_biomes()`, `read_conservation_units()`, `read_indigenous_land()` | environmental and territorial boundaries |
+
+```{r}
+arquivo <- "dados/brutos/muni_br.gpkg"
+
+if (!file.exists(arquivo)) {
+  br <- geobr::read_municipality(code_muni = "all", year = 2022,
+                                 simplified = TRUE, showProgress = FALSE)
+  sf::st_write(br, arquivo, quiet = TRUE)
+}
+br <- sf::st_read(arquivo, quiet = TRUE)
+
+nrow(br)
+head(br, 3) |> sf::st_drop_geometry()
+```
+
+Arguments that matter:
+
+- `code_muni` / `code_state`: accepts an IBGE code, a state abbreviation (`"PR"`) or `"all"`.
+- `year`: the boundaries change with each census and each new municipality. **Always state it**.
+- `simplified = TRUE` (default): lightweight geometry, for maps. Use `FALSE` to measure area.
+- `cache = TRUE` (default): the file is stored locally after the first *download*.
+- `output`: the type of object returned. The default, `"sf"`, loads everything into memory; see below
+  the alternative for large datasets.
+
+::: {.callout-tip}
+## Large datasets: `output = "duckdb"`
+
+Census tracts, the statistical grid or the unsimplified municipal boundaries weigh hundreds
+of MB, and spatial operations on them become slow in `sf`. In those cases, ask `geobr`
+for a **DuckDB** table, with `output = "duckdb"`. It is not loaded into memory: `geobr`
+returns a "lazy" table from the `duckspatial` package, and filters and spatial operations
+run in the database. Only the result comes back to R, as an ordinary `sf` object, at `collect()`.
+
+```{r}
+#| eval: false
+mun <- geobr::read_municipality(code_muni = "all", year = 2022, output = "duckdb")
+
+mun |>
+  dplyr::filter(abbrev_state == "PR") |>
+  duckspatial::ddbs_transform("EPSG:5880") |>          # metric projection, as in sf
+  duckspatial::ddbs_area(new_column = "area_m2") |>
+  dplyr::collect()                                     # only here do the data come into R
+```
+
+`duckspatial` is introduced in the DuckDB chapter (@sec-m3-duckdb). For the course examples,
+`sf` is enough; `duckspatial` makes a difference when the dataset does not fit comfortably in memory.
+:::
+
+::: {.callout-tip}
+## Don't know the municipality's IBGE code by heart? Look it up in the boundaries
+
+The boundaries we just read already contain the name and code of every municipality:
+
+```{r}
+br |>
+  sf::st_drop_geometry() |>
+  dplyr::filter(stringr::str_detect(name_muni, "Fortaleza")) |>
+  dplyr::select(code_muni, name_muni, abbrev_state)
+```
+
+Notice that five municipalities came back, in four states: "Fortaleza" appears in the name of several. That is
+why the name alone is not a key, and the IBGE code is. The other way round, from code to name:
+
+```{r}
+br |>
+  sf::st_drop_geometry() |>
+  dplyr::filter(code_muni == 4106902) |>
+  dplyr::select(code_muni, name_muni, abbrev_state)
+```
+
+`geobr` also has `lookup_muni()`, which does the same search online, without needing
+the boundaries:
+
+```{r}
+#| eval: false
+geobr::lookup_muni(name_muni = "fortaleza", year = 2022)
+geobr::lookup_muni(code_muni = 4106902, year = 2022)
+```
+:::
+
+::: {.callout-warning}
+## The right boundaries for each use
+
+For **maps**, `simplified = TRUE` is what you want: it renders fast and the difference is
+invisible at print scale. To **measure area, intersect or compute population in a
+catchment**, use `simplified = FALSE`. The simplified geometry cuts corners and
+introduces an error of a few per cent, besides leaving gaps between neighbouring polygons.
+:::
+
+## `censobr`: Census microdata and aggregates
+
+Documentation: <https://ipeagit.github.io/censobr/>. `censobr` distributes the Census in
+Parquet format, with lazy reading: the function returns an `arrow` object that is only materialised at
+`collect()`. This makes it possible to work with the whole Census on an ordinary laptop.
+
+```{r}
+#| eval: false
+# aggregates by census tract
+setores <- censobr::read_tracts(year = 2022, dataset = "Basico",
+                                as_data_frame = FALSE, showProgress = FALSE)
+
+pop_setor <- setores |>
+  dplyr::filter(abbrev_state == "PR") |>
+  dplyr::select(code_tract, code_muni, name_muni, V0001) |>   # V0001 = resident population
+  dplyr::collect()
+```
+
+```{r}
+#| eval: false
+# population and household microdata
+censobr::read_population(year = 2010, columns = c("code_muni", "V0601", "V6036"))
+censobr::read_households(year = 2010, columns = c("code_muni", "V0201"))
+
+# variable dictionary: essential, the names are codes
+censobr::data_dictionary(year = 2022, dataset = "tracts")
+```
+
+::: {.callout-tip}
+## `add_labels`: translates the codes of categorical variables
+
+Since a recent update, `read_population()` and `read_households()` accept
+`add_labels = "pt"`, which replaces each categorical variable's raw code with its label
+(in Portuguese), directly when reading, without having to join with `data_dictionary()` by hand:
+
+```{r}
+#| eval: false
+censobr::read_population(year = 2010, columns = c("code_muni", "V0601", "V6036"),
+                         add_labels = "pt")
+```
+
+Check the installed version with `packageVersion("censobr")`: this material assumes `>= 0.6.0`,
+which is when `add_labels` was introduced.
+:::
+
+::: {.callout-note}
+## About the available years
+
+`censobr` covers 2000, 2010 and, in the latest versions, the 2022 Census, which was released
+gradually. If `year = 2022` is not available in your version, switch to `2010`: the
+code is identical, only the variable names change. Check with
+`packageVersion("censobr")` and `censobr::data_dictionary()`.
+:::
+
+Matching `censobr` (attributes) and `geobr` (geometry) is done through the tract or
+municipality code: module 1's `join`, now with geometry on one side.
+
+```{r}
+#| eval: false
+setores_geo <- geobr::read_census_tract(code_tract = "PR", year = 2022,
+                                        simplified = FALSE, showProgress = FALSE)
+
+setores_pop <- setores_geo |>
+  dplyr::left_join(pop_setor, by = "code_tract", relationship = "one-to-one")
+```
+
+## `sidrar`: SIDRA/IBGE tables
+
+Documentation: <https://cran.r-project.org/package=sidrar>. SIDRA is where the aggregate
+series live: population estimates, projections, municipal GDP, PNAD, agricultural output. `sidrar`
+fetches any table by its number.
+
+```{r}
+#| eval: false
+# Resident population by municipality (2022 Census, table 4709)
+pop <- sidrar::get_sidra(
+  x = 4709,
+  variable = 93,
+  geo = "City",
+  geo.filter = list("State" = 41)    # 41 = Paraná
+)
+
+# Municipal GDP (table 5938)
+pib <- sidrar::get_sidra(x = 5938, variable = 37, period = "2021",
+                         geo = "City", geo.filter = list("State" = 41))
+
+# search for tables and look at the structure of one of them
+sidrar::search_sidra("população")
+sidrar::info_sidra(4709)
+```
+
+The output comes "wide" and with long column names in Portuguese. It is a classic case for
+`janitor::clean_names()` and for module 1's `pivot_longer`.
+
+```{r}
+#| eval: false
+pop_limpa <- pop |>
+  janitor::clean_names() |>
+  dplyr::transmute(
+    code_muni = as.numeric(municipio_codigo),
+    municipio = municipio,
+    populacao = valor
+  )
+```
+
+::: {.callout-tip}
+SIDRA limits the size of a query. For long series for every municipality in Brazil,
+split by state in a loop (`lapply` over state codes) and stack with `bind_rows()`. It is the pattern from
+module 1.
+:::
+
+## `osmdata` and `osmextract`: OpenStreetMap
+
+Documentation: <https://docs.ropensci.org/osmdata/> and <https://docs.ropensci.org/osmextract/>.
+Two routes, for different needs:
+
+- **`osmdata`** queries the Overpass API live. Ideal for small areas and specific
+  features (petrol stations, terminals, one highway).
+- **`osmextract`** downloads ready-made regional extracts as `.pbf` (Geofabrik). Ideal for whole
+  road networks and for feeding `r5r` in module 4.
+
+```{r}
+arquivo_br116 <- "dados/brutos/br116_serra.gpkg"
+
+if (!file.exists(arquivo_br116)) {
+  consulta <- osmdata::opq(bbox = c(-49.40, -25.75, -48.40, -25.15), timeout = 120) |>
+    osmdata::add_osm_feature(key = "ref", value = "BR-116") |>
+    osmdata::osmdata_sf()
+
+  br116 <- consulta$osm_lines |>
+    dplyr::select(dplyr::any_of(c("osm_id", "name", "ref", "highway", "lanes", "maxspeed"))) |>
+    sf::st_transform(4674)
+
+  sf::st_write(br116, arquivo_br116, quiet = TRUE)
+}
+
+br116 <- sf::st_read(arquivo_br116, quiet = TRUE)
+nrow(br116)
+sf::st_geometry_type(br116, by_geometry = FALSE) |> unique()
+```
+
+OSM does not clip the geometry to the query's `bbox`, so it is worth checking visually whether the
+returned segments really fall in the area of interest:
+
+```{r}
+mapview::mapview(br116)
+```
+
+```{r}
+#| label: fig-br116
+#| fig-cap: "Segments of the BR-116 in the Serra do Mar area, according to OpenStreetMap"
+#| fig-height: 4.4
+arquivo <- "dados/brutos/muni_pr_sc.gpkg"
+muni <- sf::st_read(arquivo, quiet = TRUE)
+
+ggplot() +
+  geom_sf(data = muni, fill = "grey97", colour = "grey85", linewidth = 0.2) +
+  geom_sf(data = br116, colour = "#e07b39", linewidth = 0.7) +
+  coord_sf(xlim = c(-49.45, -48.35), ylim = c(-25.80, -25.10)) +
+  labs(caption = "Source: OpenStreetMap.") +
+  theme_void(base_size = 10)
+```
+
+```{r}
+#| eval: false
+# osmextract: the road network of a whole state, from the .pbf
+rede <- osmextract::oe_get(
+  place = "Ceará",
+  layer = "lines",
+  query = "SELECT osm_id, highway, name FROM lines WHERE highway IS NOT NULL",
+  download_directory = "dados/brutos/osm"
+)
+
+# only the .pbf file, which is what r5r consumes (module 4)
+osmextract::oe_download(
+  file_url = osmextract::oe_match("Ceará")$url,
+  download_directory = "dados/brutos/osm"
+)
+```
+
+::: {.callout-important}
+## OSM is excellent, with two caveats
+
+1. **It is collaborative.** The geometry is usually very good; the attributes (`maxspeed`, `lanes`,
+   `surface`) are incomplete and vary by region. For the official alignment of federal
+   highways, the source is **DNIT's SNV** (<http://servicos.dnit.gov.br/vgeo/>) or the
+   [Ministry of Transport's georeferenced database](https://www.gov.br/transportes/pt-br/assuntos/transporte-terrestre/base-de-dados-georreferenciada).
+2. **It changes every day.** Record the extraction date: `dados/brutos/br116_serra.gpkg` with the date
+   in the name is a practice that saves the report's reproducibility.
+:::
+
+## Other sources worth knowing
+
+| Source | How to access | Use |
+|:--|:--|:--|
+| SNV: federal highways | [VGeo/DNIT](http://servicos.dnit.gov.br/vgeo/), manual *download* | official alignment, segments, jurisdiction |
+| Ministry of Transport georeferenced database (BIT) | [Ministry portal](https://www.gov.br/transportes/pt-br/assuntos/dados-de-transportes/bit) | highways, railways, waterways, ports, airports |
+| PNCT: traffic counts | [PNCT data](http://servicos.dnit.gov.br/dadospnct) | AADT per station, on the federal network |
+| ANTAQ: Estatístico Aquaviário | [download](https://web3.antaq.gov.br/ea/sense/download.html) | cargo, berthing, facilities |
+| Access to Opportunities (Ipea) | `aopdata` | accessibility and opportunities in 20 cities |
+| Public transport GTFS | municipal portals, [Mobility Database](https://mobilitydatabase.org/feeds?q=brazil) | public transport network |
+| Address geocoding | `geocodebr` | address → coordinate (module 3) |
+
+In modules 3 and 4 we use `aopdata`, `geocodebr`, GTFS and the ANTAQ data; the first two
+items of the table come into the next case study, as an official alternative to OSM.

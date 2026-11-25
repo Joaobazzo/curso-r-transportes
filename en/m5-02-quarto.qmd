@@ -1,0 +1,248 @@
+# Reproducible reports with Quarto {#sec-m5-quarto}
+
+::: {.callout-warning}
+## This chapter is not reproducible as it stands
+
+It is a syntax reference, not an example to run from start to finish. The document snippets
+refer to objects that are not created here (`serie`, `mapa_fluxos`, `tku`), the example
+table has hand-typed numbers, and the files `modelo-mt.docx` and `referencias.bib` do not
+exist in the repository. Copying a snippet into a `.qmd` and rendering it will give an error.
+
+To see Quarto working from start to finish, use the course's complete reports: the
+Paranaguá one (@sec-relatorio-paranagua), the parameterised template (@sec-m5-parametrizados) and the
+final project (@sec-m5-projeto), which comes right after.
+:::
+
+A reproducible report is a document in which text, code and results live in the same
+file. When the data change, the whole document updates: tables, charts, maps and the
+numbers quoted in the middle of sentences.
+
+It is the difference between "redoing last year's report" (a week of work, with the risk of
+forgetting to update a number) and "running it again" (ten minutes). This site is itself a
+Quarto document.
+
+## Anatomy of a document
+
+A `.qmd` file has three ingredients:
+
+````
+---
+title: "Logistics profile of Paranaguá"
+author: "Undersecretariat for Development and Planning"
+date: today
+lang: en
+format:
+  html:
+    toc: true
+    code-fold: true
+  docx: default
+execute:
+  echo: false
+  warning: false
+---
+
+## Introduction
+
+The port handled **`r knitr::inline_expr("round(tku, 1)")` billion t·km** in 2025.
+
+```{{r}}
+#| label: fig-serie
+#| fig-cap: "TKU over time"
+ggplot(serie, aes(ano, tku)) + geom_line()
+```
+````
+
+1. **YAML header**, between `---`: title, authorship, output format and execution options.
+2. **Markdown text**, with inline code to quote numbers in the middle of a sentence.
+3. **Code blocks**, which run and insert the result.
+
+## Execution options
+
+The most useful ones, in the YAML (they apply to the whole document) or in the block (they apply only to it):
+
+| Option | Effect |
+|:--|:--|
+| `echo: false` | hides the code, shows the result: the default for institutional reports |
+| `eval: false` | shows the code without running it |
+| `include: false` | runs without showing anything (to prepare data) |
+| `warning: false`, `message: false` | hides package warnings and messages |
+| `code-fold: true` | shows the code folded, so the reader can open it |
+| `cache: true` | stores the result; does not rerun if the code has not changed |
+| `freeze: auto` | reruns only when the file changes (what this site uses) |
+
+```{r}
+#| eval: false
+# in the block, the syntax uses #| at the start of the line
+#| label: tbl-resumo
+#| tbl-cap: "Summary by cargo profile"
+#| echo: false
+```
+
+## Figures, tables and cross-references
+
+Quarto numbers and references automatically, as long as the label follows the convention:
+`fig-` for figures, `tbl-` for tables, `sec-` for sections, `eq-` for equations.
+
+````
+```{{r}}
+#| label: fig-fluxos
+#| fig-cap: "Coastal shipping flows in TKU"
+#| fig-width: 8
+#| fig-height: 5
+mapa_fluxos
+```
+
+As @fig-fluxos shows, the North–Southeast corridor concentrates...
+See also @tbl-corredores and @sec-m5-mapas.
+````
+
+The numbering adjusts itself when you insert a figure in the middle of the document. That
+eliminates the manual review of "Figure 7 (see Figure 12)" that every long report has.
+
+## Tables
+
+```{r}
+library(dplyr)
+
+resumo <- data.frame(
+  perfil = c("Granel Líquido e Gasoso", "Carga Conteinerizada",
+             "Granel Sólido", "Carga Geral"),
+  tku_bi = c(157.2, 76.0, 46.1, 7.7),
+  part = c(0.548, 0.265, 0.161, 0.027)
+)
+```
+
+```{r}
+#| label: tbl-knitr
+#| tbl-cap: "With knitr::kable, simple and enough in most cases"
+resumo |>
+  dplyr::mutate(part = scales::percent(part, accuracy = 0.1)) |>
+  knitr::kable(col.names = c("Profile", "TKU (billion t·km)", "Share"),
+               align = "lrr")
+```
+
+```{r}
+#| label: tbl-gt
+#| tbl-cap: "With gt, when the table is the product"
+resumo |>
+  gt::gt() |>
+  gt::fmt_number(columns = tku_bi, decimals = 1) |>
+  gt::fmt_percent(columns = part, decimals = 1) |>
+  gt::cols_label(perfil = "Cargo profile", tku_bi = "TKU (billion t·km)",
+                 part = "Share") |>
+  gt::tab_source_note("Source: ANTAQ, Estatístico Aquaviário (TB6.1), 2025.") |>
+  gt::tab_options(table.font.size = 12)
+```
+
+`kable` handles day-to-day needs; `gt` comes in when the table needs fine formatting: groups,
+footnotes, conditional highlighting, totals.
+
+## Numbers in the middle of the text
+
+This is the feature that prevents the most errors in institutional reports: instead of typing the number,
+you compute it.
+
+```{r}
+tku_total <- sum(resumo$tku_bi)
+maior <- resumo |> dplyr::slice_max(tku_bi, n = 1)
+```
+
+The text below is written like this, and if the data change, it changes with them:
+
+````
+Coastal shipping moved `r knitr::inline_expr("round(tku_total, 1)")` billion t·km in 2025,
+with `r knitr::inline_expr("maior$perfil")` as the dominant profile, at
+`r knitr::inline_expr('scales::percent(maior$part)')` of the total.
+````
+
+And it reads like this:
+
+> Coastal shipping moved `r round(tku_total, 1)` billion t·km in 2025, with
+> `r maior$perfil` as the dominant profile, at `r scales::percent(maior$part)` of the total.
+
+## Output formats
+
+```yaml
+format:
+  html:
+    toc: true
+    toc-title: "Contents"
+    code-fold: true
+    embed-resources: true      # a single file, to send by e-mail
+  docx:
+    reference-doc: modelo-mt.docx   # applies the organisation's visual identity
+  pdf:
+    documentclass: scrreprt
+    papersize: a4
+    geometry: margin=2.5cm
+    lang: en-GB
+```
+
+`reference-doc` deserves a mention in the Ministry's context: you format **once** a
+`.docx` file with the official styles (font, colours, header, numbering) and every
+report comes out with that identity, with no manual work.
+
+```{r}
+#| eval: false
+quarto::quarto_render("relatorio.qmd")                    # every format in the YAML
+quarto::quarto_render("relatorio.qmd", output_format = "docx")
+```
+
+## Structure of a report project
+
+```
+relatorio-paranagua/
+├── relatorio.qmd            # the document
+├── _quarto.yml              # shared options (if there are several)
+├── R/
+│   ├── funcoes.R            # functions, loaded with source()
+│   └── 01-preparar-dados.R  # the heavy processing, run beforehand
+├── dados/
+│   └── processado.rds       # the data ready for the report
+├── referencias.bib
+└── modelo-mt.docx
+```
+
+The separation matters: the report should **not** contain the heavy processing. It reads already
+processed data and focuses on presenting. That way the document renders in seconds, and the
+processing (which takes minutes) only runs when the source data change.
+
+## Citations and bibliography
+
+```yaml
+bibliography: referencias.bib
+csl: associacao-brasileira-de-normas-tecnicas.csl   # ABNT, the Brazilian standard
+```
+
+In the text, `[@antaq2025]` produces the citation and builds the reference list at the end,
+automatically, in the chosen style. The `.bib` file can be exported from Zotero or
+Mendeley.
+
+## Visual divisions
+
+::: {.callout-tip}
+## Highlight blocks
+
+The coloured blocks on this site are `callout`s: `note`, `tip`, `warning`, `important`,
+`caution`. In a technical report, they serve to separate assumptions, limitations and recommendations
+from the body of the text.
+:::
+
+````
+::: {.callout-warning}
+## Limitation
+The tonnage is estimated from the TKU and straight-line distances.
+:::
+````
+
+```{r}
+#| eval: false
+# panels side by side, useful for comparing scenarios
+#| layout-ncol: 2
+```
+
+## From document to website
+
+When the reports become a collection (one per quarter, one per corridor), the natural step
+is to publish them as a website, exactly like this material. `_quarto.yml` defines the navigation, and
+GitHub Pages hosts it free of charge. It is the same toolkit, at a different scale.

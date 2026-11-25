@@ -1,0 +1,344 @@
+# Language structure {#sec-m1-linguagem}
+
+This chapter covers the minimum of the language needed for the rest of the course. The idea is not
+to cover R exhaustively, but to recognise the objects we work with and know how to inspect them.
+
+## Objects and assignment
+
+```{r}
+tku <- 1250.75          # assignment
+uf  <- "PR"
+tku
+class(tku)
+class(uf)
+```
+
+Everything in R is an object, and every object has a **class**. When something goes wrong, the first
+question is always `class()`. Most of the time, the problem is that a number is
+stored as text.
+
+## Vectors
+
+The vector is the basic structure: a sequence of values **of the same type**.
+
+```{r}
+ufs  <- c("AM", "PR", "SP", "BA")
+tkus <- c(4213386.6, 8332538649.4, 1600854068.7, 1560549752.2)
+
+length(ufs)
+tkus[2]                 # indexing starts at 1
+tkus[c(1, 3)]
+tkus[tkus > 2e9]        # logical indexing: base R's filter
+ufs[tkus > 2e9]
+```
+
+The types you meet day to day (the names on the left are in Portuguese: numeric, integer,
+text, logical, date, factor):
+
+```{r}
+c(
+  numerico  = class(1.5),
+  inteiro   = class(1L),
+  texto     = class("PR"),
+  logico    = class(TRUE),
+  data      = class(as.Date("2026-09-28")),
+  fator     = class(factor("Conteinerizada"))
+)
+```
+
+**Silent coercion** is the main source of errors in real data: if a single value is
+text, the whole vector becomes text.
+
+```{r}
+#| error: true
+x <- c(1, 2, "3")
+class(x)
+x * 2                   # error: the vector became text
+as.numeric(x) * 2       # explicit fix
+```
+
+And the missing value, `NA`, propagates:
+
+```{r}
+y <- c(10, NA, 30)
+mean(y)
+mean(y, na.rm = TRUE)
+is.na(y)
+sum(is.na(y))
+```
+
+::: {.callout-note}
+`NA` is "I don't know the value"; `NULL` is "does not exist"; `NaN` is the invalid result of a calculation
+(`0/0`); and `Inf` is infinity (`1/0`). `is.na()` is the check you will use almost always.
+:::
+
+## Factors
+
+A factor is text with a fixed and **ordered** set of categories. It matters because the order
+of the levels sets the order of the bars in a chart and of the columns in a table. The
+categories below are the ANTAQ cargo profiles: container, dry bulk and liquid bulk.
+
+```{r}
+perfil <- factor(
+  c("Granel Sólido", "Conteinerizada", "Granel Líquido", "Conteinerizada"),
+  levels = c("Conteinerizada", "Granel Sólido", "Granel Líquido")
+)
+levels(perfil)
+table(perfil)
+as.integer(perfil)      # the internal code of each level
+```
+
+## Matrices
+
+A matrix is a vector with two dimensions. It is the natural structure for an **origin–destination matrix**.
+
+```{r}
+od <- matrix(
+  c(  0, 120, 340,
+     95,   0, 210,
+    310, 180,   0),
+  nrow = 3, byrow = TRUE,
+  dimnames = list(origem = c("AM", "PR", "SP"),
+                  destino = c("AM", "PR", "SP"))
+)
+od
+dim(od)
+od["AM", "SP"]          # flow AM -> SP
+rowSums(od)             # total produced by origin
+colSums(od)             # total attracted by destination
+t(od)                   # transpose
+```
+
+In module 3 we will swap `matrix` for **sparse** matrices (`Matrix::sparseMatrix`), which
+store only the pairs with flow. That is essential when there are thousands of zones.
+
+## Lists
+
+A list holds elements of different types, including other lists. It is what most
+models and routing functions return.
+
+```{r}
+cenario <- list(
+  nome     = "Cabotagem 2025",
+  ano      = 2025L,
+  ufs      = c("AM", "PR", "SP"),
+  matriz   = od
+)
+names(cenario)
+cenario$ufs
+cenario[["matriz"]]["PR", "SP"]
+str(cenario, max.level = 1)
+```
+
+## `data.frame`
+
+This is the table: a list of columns of the same length. Practically the whole course revolves
+around it. From here on, the examples use a real extract of ANTAQ's coastal shipping dataset
+that reappears in the rest of the module, instead of made-up numbers.
+
+```{r}
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx")
+
+fluxos <- data.frame(
+  origem  = bruto[["UF de Origem"]],
+  destino = bruto[["UF de Destino"]],
+  tku     = bruto[["TKU\n(t x km)"]]
+)
+
+# a real extract: one row from each of these origin states, plus one
+# small shipment, so that the three TKU bands appear in the example
+alvo <- c("AM", "PR", "SP", "BA", "SC", "RS")
+pequeno <- which(fluxos$tku >= 5e5 & fluxos$tku < 1e6)[1]
+
+fluxos <- fluxos[c(match(alvo, fluxos$origem), pequeno), ]
+rownames(fluxos) <- NULL
+
+fluxos
+dim(fluxos)
+names(fluxos)
+str(fluxos)
+```
+
+Quick inspection of any table: the four commands you **always** run when you open a
+new dataset:
+
+```{r}
+head(fluxos, 2)
+summary(fluxos)
+nrow(fluxos); ncol(fluxos)
+sapply(fluxos, class)
+```
+
+Accessing columns and rows in base R:
+
+```{r}
+fluxos$tku
+fluxos[["tku"]]
+fluxos[1, ]                       # first row
+fluxos[, c("origem", "tku")]      # two columns
+fluxos[fluxos$tku > 2e9, ]        # filter
+```
+
+## Operators and comparisons
+
+```{r}
+2 + 3; 10 / 4; 2^10; 7 %% 3; 7 %/% 3
+3 == 3; 3 != 4; 3 < 4
+TRUE & FALSE; TRUE | FALSE; !TRUE
+"PR" %in% c("PR", "SC", "RS")     # belongs to
+```
+
+`%in%` is base R's most useful operator for working with data: it selects everything that is in
+a list of codes.
+
+```{r}
+sul <- c("PR", "SC", "RS")
+fluxos[fluxos$destino %in% sul, ]
+```
+
+## Conditionals
+
+The function below classifies a TKU value as high (`"alto"`), medium (`"médio"`) or low
+(`"baixo"`).
+
+```{r}
+classificar <- function(tku) {
+  if (is.na(tku)) {
+    "sem informação"
+  } else if (tku >= 1e9) {
+    "alto"
+  } else if (tku >= 1e6) {
+    "médio"
+  } else {
+    "baixo"
+  }
+}
+classificar(fluxos$tku[3])   # SP -> AM, the largest shipment in the extract
+classificar(fluxos$tku[7])   # the small shipment we set aside
+```
+
+`if` works with **one** value. For vectors, use `ifelse()` or `dplyr::case_when()`:
+
+```{r}
+ifelse(fluxos$tku >= 1e9, "alto", "não alto")
+
+dplyr::case_when(
+  fluxos$tku >= 1e9 ~ "alto",
+  fluxos$tku >= 1e6 ~ "médio",
+  .default = "baixo"
+)
+```
+
+## Functions
+
+Writing functions is what saves you from copying and pasting the same snippet five times. And that is where errors
+pile up when you don't.
+
+```{r}
+#' Converts TKU to billions of TKU
+#' @param tku numeric vector in t x km
+#' @param digitos decimal places
+tku_bi <- function(tku, digitos = 2) {
+  if (!is.numeric(tku)) stop("`tku` precisa ser numérico.")
+  round(tku / 1e9, digitos)
+}
+
+tku_bi(fluxos$tku)
+tku_bi(fluxos$tku, digitos = 3)
+```
+
+Things to notice: arguments with a **default value** (`digitos = 2`), input
+**validation** (`stop()`) and the fact that the function returns the value of the last expression.
+
+## Iteration
+
+### `for`
+
+```{r}
+for (uf in c("AM", "PR", "SP")) {
+  total <- sum(fluxos$tku[fluxos$origem == uf])
+  cat(uf, ":", tku_bi(total), "bi TKU\n")
+}
+```
+
+### The `apply` family
+
+```{r}
+sapply(fluxos[, "tku", drop = FALSE], mean)      # returns a vector
+lapply(c(1e6, 1e9), function(x) sum(fluxos$tku > x))  # returns a list
+vapply(fluxos[, "tku", drop = FALSE], mean, numeric(1))  # with a guaranteed type
+```
+
+A very common pattern in practice: **read several files and stack them**.
+
+```{r}
+#| eval: false
+arquivos <- list.files("dados/brutos", pattern = "\\.csv$", full.names = TRUE)
+
+lista <- lapply(arquivos, readr::read_csv, show_col_types = FALSE)
+base  <- dplyr::bind_rows(lista, .id = "arquivo")
+```
+
+::: {.callout-tip}
+## Vectorise before iterating
+
+In R, vectorised operations are faster and more readable than loops. Instead of
+going through rows to add two columns, write `df$a + df$b`. Keep `for` for tasks
+that depend on a previous step (running a model per scenario, saving files, calling an
+API).
+:::
+
+## The `|>` *pipe*
+
+The *pipe* passes the result on the left as the first argument of the function on the right. It
+turns nested code into a sequence of steps readable from top to bottom.
+
+```{r}
+# without pipe
+round(mean(fluxos$tku, na.rm = TRUE) / 1e9, 2)
+
+# with pipe
+fluxos$tku |>
+  mean(na.rm = TRUE) |>
+  tku_bi()
+```
+
+You will also find `magrittr`'s *pipe*, `%>%`, in older material. For what
+we will do, the two are equivalent; we will use the native one, `|>`, which needs no package.
+
+## Scripts and algorithms
+
+A script is the recipe: the steps, in order, with comments that say **why** each one
+exists. The structure we recommend for any Ministry analysis:
+
+```{r}
+#| eval: false
+# ------------------------------------------------------------------
+# 01-leitura.R
+# Goal: read ANTAQ's coastal shipping dataset and standardise columns
+# Author: <name>            Last updated: 2026-09-28
+# Input:  dados/cabotagem_tku_2025.xlsx
+# Output: dados/cabotagem_limpa.rds
+# ------------------------------------------------------------------
+
+# 1. packages ----
+library(dplyr)
+library(readxl)
+
+# 2. reading ----
+bruto <- readxl::read_excel("dados/cabotagem_tku_2025.xlsx")
+
+# 3. standardisation ----
+base <- bruto |>
+  janitor::clean_names()
+
+# 4. checks ----
+stopifnot(nrow(base) > 0, !any(is.na(base$tku_t_x_km)))  # name produced by clean_names()
+
+# 5. writing ----
+saveRDS(base, "dados/cabotagem_limpa.rds")
+```
+
+`stopifnot()` in the middle of the script is a practice worth the effort: if an assumption stops
+holding when the dataset is updated, the script stops where the error is instead of silently producing a
+wrong number.

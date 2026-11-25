@@ -92,7 +92,11 @@ format:
   html:
     theme:
       light: [cosmo, styles.scss]
+      # modo escuro: o Quarto põe o botão de alternância na barra lateral
+      dark: [darkly, styles-dark.scss]
     css: styles.css
+    # botão de idioma (português / inglês); a versão em inglês está em en/
+    include-after-body: idioma.html
     toc: true
     toc-title: "Nesta página"
     toc-depth: 3
