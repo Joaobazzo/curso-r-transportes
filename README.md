@@ -105,7 +105,7 @@ mensagem de erro completa e a saída de `sessionInfo()`.
 
 Norma ABNT:
 
-> VIEIRA, João Pedro Bazzo. **Análise de dados com R aplicada ao planejamento de transportes**.
+> BAZZO, João Pedro. **Análise de dados com R aplicada ao planejamento de transportes**.
 > Brasília: Ministério dos Transportes, 2026. Material didático. Disponível em:
 > <https://joaobazzo.github.io/curso-r-transportes/>. Acesso em: 25 nov. 2026.
 
@@ -114,8 +114,8 @@ Troque a data de acesso pela data em que você consultou o material.
 BibTeX:
 
 ```bibtex
-@misc{vieira2026cursoR,
-  author       = {Vieira, Jo{\~a}o Pedro Bazzo},
+@misc{bazzo2026cursoR,
+  author       = {Bazzo, Jo{\~a}o Pedro},
   title        = {An{\'a}lise de Dados com {R} Aplicada ao Planejamento de Transportes},
   year         = {2026},
   publisher    = {Minist{\'e}rio dos Transportes},
@@ -127,7 +127,7 @@ BibTeX:
 
 Versão em inglês (APA):
 
-> Vieira, J. P. B. (2026). *Data analysis with R for transport planning* [Course material].
+> Bazzo, J. P. (2026). *Data analysis with R for transport planning* [Course material].
 > Ministry of Transport, Brazil. <https://joaobazzo.github.io/curso-r-transportes/en/>
 
 O arquivo [`CITATION.cff`](CITATION.cff) traz os mesmos dados. Com ele, o GitHub mostra o botão

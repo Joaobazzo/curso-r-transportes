@@ -12,13 +12,13 @@ Texto completo: <https://creativecommons.org/licenses/by-sa/4.0/deed.pt_BR>
 
 Crédito sugerido (norma ABNT; troque a data de acesso pela data da sua consulta):
 
-> VIEIRA, João Pedro Bazzo. **Análise de dados com R aplicada ao planejamento de transportes**.
+> BAZZO, João Pedro. **Análise de dados com R aplicada ao planejamento de transportes**.
 > Brasília: Ministério dos Transportes, 2026. Material didático. Disponível em:
 > <https://joaobazzo.github.io/curso-r-transportes/>. Acesso em: 25 nov. 2026.
 
 Em inglês (APA):
 
-> Vieira, J. P. B. (2026). *Data analysis with R for transport planning* [Course material].
+> Bazzo, J. P. (2026). *Data analysis with R for transport planning* [Course material].
 > Ministry of Transport, Brazil. <https://joaobazzo.github.io/curso-r-transportes/en/>
 
 A versão em BibTeX está no [`README.md`](README.md#como-citar) e no arquivo

@@ -4,8 +4,8 @@ type: software
 title: "Análise de Dados com R Aplicada ao Planejamento de Transportes"
 abstract: "Material didático do curso de análise de dados com R para o planejamento de transportes, ofertado ao Ministério dos Transportes. Versão em inglês: Data Analysis with R for Transport Planning."
 authors:
-  - family-names: "Vieira"
-    given-names: "João Pedro Bazzo"
+  - family-names: "Bazzo"
+    given-names: "João Pedro"
 date-released: 2026-11-25
 url: "https://joaobazzo.github.io/curso-r-transportes/"
 repository-code: "https://github.com/Joaobazzo/curso-r-transportes"
@@ -19,8 +19,8 @@ preferred-citation:
   type: generic
   title: "Análise de Dados com R Aplicada ao Planejamento de Transportes"
   authors:
-    - family-names: "Vieira"
-      given-names: "João Pedro Bazzo"
+    - family-names: "Bazzo"
+      given-names: "João Pedro"
   year: 2026
   publisher:
     name: "Ministério dos Transportes"

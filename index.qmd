@@ -108,15 +108,15 @@ Os dados mantêm os termos das suas fontes. Detalhes em [`LICENSE.md`](https://g
 Ao usar ou adaptar este material, cite-o assim (norma ABNT; troque a data de acesso pela data
 da sua consulta):
 
-> VIEIRA, João Pedro Bazzo. **Análise de dados com R aplicada ao planejamento de transportes**.
+> BAZZO, João Pedro. **Análise de dados com R aplicada ao planejamento de transportes**.
 > Brasília: Ministério dos Transportes, 2026. Material didático. Disponível em:
 > <https://joaobazzo.github.io/curso-r-transportes/>. Acesso em: 25 nov. 2026.
 
 Em BibTeX, para LaTeX, Zotero ou o próprio Quarto:
 
 ```bibtex
-@misc{vieira2026cursoR,
-  author       = {Vieira, Jo{\~a}o Pedro Bazzo},
+@misc{bazzo2026cursoR,
+  author       = {Bazzo, Jo{\~a}o Pedro},
   title        = {An{\'a}lise de Dados com {R} Aplicada ao Planejamento de Transportes},
   year         = {2026},
   publisher    = {Minist{\'e}rio dos Transportes},

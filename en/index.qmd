@@ -114,14 +114,14 @@ The data keep the terms of their sources. Details in [`LICENSE.md`](https://gith
 
 If you use or adapt this material, please cite it as follows (APA):
 
-> Vieira, J. P. B. (2026). *Data analysis with R for transport planning* [Course material].
+> Bazzo, J. P. (2026). *Data analysis with R for transport planning* [Course material].
 > Ministry of Transport, Brazil. <https://joaobazzo.github.io/curso-r-transportes/en/>
 
 In BibTeX, for LaTeX, Zotero or Quarto itself:
 
 ```bibtex
-@misc{vieira2026cursoR_en,
-  author       = {Vieira, Jo{\~a}o Pedro Bazzo},
+@misc{bazzo2026cursoR_en,
+  author       = {Bazzo, Jo{\~a}o Pedro},
   title        = {Data Analysis with {R} for Transport Planning},
   year         = {2026},
   publisher    = {Ministry of Transport, Brazil},
