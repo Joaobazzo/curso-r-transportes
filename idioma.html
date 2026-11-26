@@ -1,0 +1,71 @@
+<!--
+  Botão de idioma (português / inglês), incluído nos dois sites:
+  _quarto.yml (português) e en/_quarto.yml (inglês).
+  As páginas em inglês têm o mesmo nome de arquivo dentro de en/:
+    .../m1-01-ambiente.html  <->  .../en/m1-01-ambiente.html
+-->
+<style>
+  .lang-switch {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 0.85rem; text-decoration: none; color: inherit;
+    padding: 0.15rem 0.45rem; border: 1px solid rgba(128,128,128,0.35); border-radius: 4px;
+    background: transparent; white-space: nowrap;
+  }
+  .lang-switch:hover { background: rgba(128,128,128,0.12); text-decoration: none; }
+  .lang-switch svg { width: 1.35rem; height: auto; border-radius: 2px;
+                     box-shadow: 0 0 0 1px rgba(0,0,0,0.12); }
+  .lang-switch-wrap { margin: 0.4rem 0 0.2rem 0; }
+  .lang-switch-nav { margin-left: 0.5rem; }
+  .lang-switch-nav span { display: none; }  /* tela estreita: só a bandeira */
+</style>
+<script>
+(function () {
+  var emIngles = (document.documentElement.lang || "").toLowerCase().indexOf("en") === 0;
+
+  var bandeiraUK =
+    '<svg viewBox="0 0 60 30" aria-hidden="true"><clipPath id="ls-s"><path d="M0,0 v30 h60 v-30 z"/></clipPath>' +
+    '<clipPath id="ls-t"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>' +
+    '<g clip-path="url(#ls-s)"><path d="M0,0 v30 h60 v-30 z" fill="#012169"/>' +
+    '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>' +
+    '<path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#ls-t)" stroke="#C8102E" stroke-width="4"/>' +
+    '<path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>' +
+    '<path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/></g></svg>';
+  var bandeiraBR =
+    '<svg viewBox="0 0 20 14" aria-hidden="true"><rect width="20" height="14" fill="#009C3B"/>' +
+    '<path d="M10 1.6 L18.4 7 L10 12.4 L1.6 7 z" fill="#FFDF00"/>' +
+    '<circle cx="10" cy="7" r="3.4" fill="#002776"/></svg>';
+
+  // a página atual (o último trecho do endereço); a raiz vira index.html
+  var arquivo = window.location.pathname.split("/").pop() || "index.html";
+  // em português, a versão em inglês fica em en/; em inglês, a portuguesa fica um nível acima
+  var destino = emIngles ? "../" + arquivo : "en/" + arquivo;
+
+  function criarLink() {
+    var a = document.createElement("a");
+    a.className = "lang-switch";
+    a.href = destino;
+    a.hreflang = emIngles ? "pt-BR" : "en";
+    a.title = emIngles ? "Ler esta página em português" : "Read this page in English";
+    a.innerHTML = emIngles ? bandeiraBR + "<span>Português</span>" : bandeiraUK + "<span>English</span>";
+    return a;
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    // barra lateral (telas largas): logo abaixo do título do livro
+    var titulo = document.querySelector("#quarto-sidebar .sidebar-header");
+    if (titulo) {
+      var caixa = document.createElement("div");
+      caixa.className = "lang-switch-wrap";
+      caixa.appendChild(criarLink());
+      titulo.appendChild(caixa);
+    }
+    // barra superior (telas estreitas, quando a lateral fica recolhida)
+    var barra = document.querySelector(".quarto-secondary-nav .container-fluid");
+    if (barra) {
+      var link = criarLink();
+      link.classList.add("lang-switch-nav", "d-lg-none");
+      barra.appendChild(link);
+    }
+  });
+})();
+</script>

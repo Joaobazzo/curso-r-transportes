@@ -70,6 +70,8 @@ Thumbs.db
 
 # saidas do Quarto na raiz
 /*.html
+# exceto o botão de idioma, incluído nas páginas pelo _quarto.yml
+!/idioma.html
 
 # scripts de teste gerados por R/gerar_r_teste.R
 /R_teste/
