@@ -109,3 +109,24 @@ The text and figures of this material are under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/): they may be copied,
 adapted and redistributed, with credit and under the same licence. The code is under the MIT licence.
 The data keep the terms of their sources. Details in [`LICENSE.md`](https://github.com/Joaobazzo/curso-r-transportes/blob/main/LICENSE.md).
+
+## How to cite
+
+If you use or adapt this material, please cite it as follows (APA):
+
+> Vieira, J. P. B. (2026). *Data analysis with R for transport planning* [Course material].
+> Ministry of Transport, Brazil. <https://joaobazzo.github.io/curso-r-transportes/en/>
+
+In BibTeX, for LaTeX, Zotero or Quarto itself:
+
+```bibtex
+@misc{vieira2026cursoR_en,
+  author       = {Vieira, Jo{\~a}o Pedro Bazzo},
+  title        = {Data Analysis with {R} for Transport Planning},
+  year         = {2026},
+  publisher    = {Ministry of Transport, Brazil},
+  howpublished = {\url{https://joaobazzo.github.io/curso-r-transportes/en/}},
+  note         = {Course material. Portuguese original:
+                  An{\'a}lise de Dados com R Aplicada ao Planejamento de Transportes}
+}
+```

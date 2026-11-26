@@ -10,10 +10,19 @@ que dê o crédito apropriado e distribua as suas adaptações sob a mesma licen
 
 Texto completo: <https://creativecommons.org/licenses/by-sa/4.0/deed.pt_BR>
 
-Crédito sugerido:
+Crédito sugerido (norma ABNT; troque a data de acesso pela data da sua consulta):
 
-> Vieira, J. P. B. *Análise de Dados com R Aplicada ao Planejamento de Transportes*.
-> Ministério dos Transportes, 2026. <https://github.com/Joaobazzo/curso-r-transportes>
+> VIEIRA, João Pedro Bazzo. **Análise de dados com R aplicada ao planejamento de transportes**.
+> Brasília: Ministério dos Transportes, 2026. Material didático. Disponível em:
+> <https://joaobazzo.github.io/curso-r-transportes/>. Acesso em: 25 nov. 2026.
+
+Em inglês (APA):
+
+> Vieira, J. P. B. (2026). *Data analysis with R for transport planning* [Course material].
+> Ministry of Transport, Brazil. <https://joaobazzo.github.io/curso-r-transportes/en/>
+
+A versão em BibTeX está no [`README.md`](README.md#como-citar) e no arquivo
+[`CITATION.cff`](CITATION.cff).
 
 ## Código
 

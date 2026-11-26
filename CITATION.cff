@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "Ao usar ou adaptar este material, cite-o assim. / If you use or adapt this material, please cite it as below."
+type: software
+title: "Análise de Dados com R Aplicada ao Planejamento de Transportes"
+abstract: "Material didático do curso de análise de dados com R para o planejamento de transportes, ofertado ao Ministério dos Transportes. Versão em inglês: Data Analysis with R for Transport Planning."
+authors:
+  - family-names: "Vieira"
+    given-names: "João Pedro Bazzo"
+date-released: 2026-11-25
+url: "https://joaobazzo.github.io/curso-r-transportes/"
+repository-code: "https://github.com/Joaobazzo/curso-r-transportes"
+license: CC-BY-SA-4.0
+keywords:
+  - R
+  - planejamento de transportes
+  - transport planning
+  - dados espaciais
+preferred-citation:
+  type: generic
+  title: "Análise de Dados com R Aplicada ao Planejamento de Transportes"
+  authors:
+    - family-names: "Vieira"
+      given-names: "João Pedro Bazzo"
+  year: 2026
+  publisher:
+    name: "Ministério dos Transportes"
+    city: "Brasília"
+  url: "https://joaobazzo.github.io/curso-r-transportes/"
+  notes: "Material didático"

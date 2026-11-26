@@ -102,3 +102,26 @@ O texto e as figuras deste material estão sob
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/deed.pt_BR): pode ser copiado,
 adaptado e redistribuído, com crédito e sob a mesma licença. O código está sob licença MIT.
 Os dados mantêm os termos das suas fontes. Detalhes em [`LICENSE.md`](https://github.com/Joaobazzo/curso-r-transportes/blob/main/LICENSE.md).
+
+## Como citar
+
+Ao usar ou adaptar este material, cite-o assim (norma ABNT; troque a data de acesso pela data
+da sua consulta):
+
+> VIEIRA, João Pedro Bazzo. **Análise de dados com R aplicada ao planejamento de transportes**.
+> Brasília: Ministério dos Transportes, 2026. Material didático. Disponível em:
+> <https://joaobazzo.github.io/curso-r-transportes/>. Acesso em: 25 nov. 2026.
+
+Em BibTeX, para LaTeX, Zotero ou o próprio Quarto:
+
+```bibtex
+@misc{vieira2026cursoR,
+  author       = {Vieira, Jo{\~a}o Pedro Bazzo},
+  title        = {An{\'a}lise de Dados com {R} Aplicada ao Planejamento de Transportes},
+  year         = {2026},
+  publisher    = {Minist{\'e}rio dos Transportes},
+  address      = {Bras{\'i}lia},
+  howpublished = {\url{https://joaobazzo.github.io/curso-r-transportes/}},
+  note         = {Material did{\'a}tico}
+}
+```

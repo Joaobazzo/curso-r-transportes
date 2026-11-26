@@ -101,8 +101,41 @@ Source: GitHub Actions**.
 Abra uma [issue](https://github.com/Joaobazzo/curso-r-transportes/issues) com o código, a
 mensagem de erro completa e a saída de `sessionInfo()`.
 
+## Como citar
+
+Norma ABNT:
+
+> VIEIRA, João Pedro Bazzo. **Análise de dados com R aplicada ao planejamento de transportes**.
+> Brasília: Ministério dos Transportes, 2026. Material didático. Disponível em:
+> <https://joaobazzo.github.io/curso-r-transportes/>. Acesso em: 25 nov. 2026.
+
+Troque a data de acesso pela data em que você consultou o material.
+
+BibTeX:
+
+```bibtex
+@misc{vieira2026cursoR,
+  author       = {Vieira, Jo{\~a}o Pedro Bazzo},
+  title        = {An{\'a}lise de Dados com {R} Aplicada ao Planejamento de Transportes},
+  year         = {2026},
+  publisher    = {Minist{\'e}rio dos Transportes},
+  address      = {Bras{\'i}lia},
+  howpublished = {\url{https://joaobazzo.github.io/curso-r-transportes/}},
+  note         = {Material did{\'a}tico}
+}
+```
+
+Versão em inglês (APA):
+
+> Vieira, J. P. B. (2026). *Data analysis with R for transport planning* [Course material].
+> Ministry of Transport, Brazil. <https://joaobazzo.github.io/curso-r-transportes/en/>
+
+O arquivo [`CITATION.cff`](CITATION.cff) traz os mesmos dados. Com ele, o GitHub mostra o botão
+**Cite this repository** na página do repositório.
+
 ## Licença
 
-Material didático: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.pt-br).
-Código: MIT. Os dados redistribuídos em `dados/` são públicos e pertencem às respectivas
-fontes (ANTAQ, IBGE, MDIC).
+Texto, figuras e slides: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/deed.pt_BR).
+Código: MIT. Os dados mantêm os termos das respectivas fontes (ANTAQ, IBGE, MDIC, OSM).
+Detalhes em [`LICENSE.md`](LICENSE.md). Para dar o crédito pedido pela licença, use a
+citação acima.
